@@ -15,7 +15,8 @@ namespace InterchangeMod.Generation
             new SinglePointTemplate(),
             new TrumpetTemplate(),
             new CloverleafTemplate(),
-            // TODO: PartialCloverleaf, Roundabout, Turbine, Stack
+            new PartialCloverleafTemplate(),
+            // TODO: Roundabout, Turbine, Stack
         };
 
         public static IReadOnlyList<IInterchangeTemplate> All => Templates;

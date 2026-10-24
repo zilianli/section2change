@@ -99,6 +99,9 @@ namespace InterchangeMod.Generation
         /// <summary>苜蓿叶：被交道路两幅外侧也加集散车道（两条路都是快速路时用）。</summary>
         public bool CrossCollectorDistributor { get; set; }
 
+        /// <summary>部分苜蓿叶：环道用于驶出主线（B2，默认），否则用于驶入主线（A2）。</summary>
+        public bool ParcloLoopsForExit { get; set; } = true;
+
         public string? SharedRampPrefab { get; set; }
 
         public float SharedRampWidth { get; set; }

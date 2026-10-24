@@ -57,6 +57,7 @@ namespace InterchangeMod.Systems
         private readonly IInterchangeTemplate m_SinglePoint = new SinglePointTemplate();
         private readonly IInterchangeTemplate m_Trumpet = new TrumpetTemplate();
         private readonly IInterchangeTemplate m_Cloverleaf = new CloverleafTemplate();
+        private readonly IInterchangeTemplate m_Parclo = new PartialCloverleafTemplate();
 
         /// <summary>面板选的立交类型。</summary>
         /// <summary>中式快速路节点（十字或 T 型）：有地面辅路。</summary>
@@ -65,12 +66,13 @@ namespace InterchangeMod.Systems
         private bool IsSinglePoint => setting?.InterchangeType == "SinglePoint";
         private bool IsTrumpet => setting?.InterchangeType == "Trumpet";
         private bool IsCloverleaf => setting?.InterchangeType == "Cloverleaf";
+        private bool IsParclo => setting?.InterchangeType == "PartialCloverleaf";
         /// <summary>有环道的类型（喇叭形、苜蓿叶）：环道半径可自动；双向被交道路在立交内拆成双幅。</summary>
-        private bool HasLoops => IsTrumpet || IsCloverleaf;
-        private IInterchangeTemplate CurrentTemplate => IsCloverleaf ? m_Cloverleaf : IsTrumpet ? m_Trumpet : IsExpresswayT ? m_ExpresswayT : IsExpressway ? m_Expressway : IsSinglePoint ? m_SinglePoint : m_Diamond;
+        private bool HasLoops => IsTrumpet || IsCloverleaf || IsParclo;
+        private IInterchangeTemplate CurrentTemplate => IsParclo ? m_Parclo : IsCloverleaf ? m_Cloverleaf : IsTrumpet ? m_Trumpet : IsExpresswayT ? m_ExpresswayT : IsExpressway ? m_Expressway : IsSinglePoint ? m_SinglePoint : m_Diamond;
 
         /// <summary>主线是否在上层：中式快速路节点和单点立交的主线总是高架。</summary>
-        private bool MainOnTop => IsCloverleaf ? !setting.CloverleafCrossOnTop : !IsTrumpet && (IsExpressway || IsSinglePoint || setting.MainOnTop);
+        private bool MainOnTop => IsCloverleaf || IsParclo ? !setting.CloverleafCrossOnTop : !IsTrumpet && (IsExpressway || IsSinglePoint || setting.MainOnTop);
 
         private RoadPrefab m_SelectedRoad;
         private ProxyAction m_RotateLeftAction;
@@ -631,6 +633,8 @@ namespace InterchangeMod.Systems
                     snapshot.LoopRadius = TrumpetTemplate.ResolveLoopRadius(p);
                 else if (IsCloverleaf && errors.Count == 0)
                     snapshot.LoopRadius = CloverleafTemplate.ResolveLoopRadius(p);
+                else if (IsParclo && errors.Count == 0)
+                    snapshot.LoopRadius = PartialCloverleafTemplate.ResolveLoopRadius(p);
             }
             snapshot.RampLength = p.RampLength;
 
@@ -794,7 +798,7 @@ namespace InterchangeMod.Systems
 
             // 外部主线是双向道路、但立交主线不在地面（或是苜蓿叶，匝道都接在两幅上）：匝道无法从双向道路中心分出，
             // 立交内部改用双幅（每方向车道相同的单行道路），臂端过渡回外部的双向道路；苜蓿叶时两幅外缘对齐双向道路的边缘
-            if (mainForm == RoadForm.TwoWay && (IsCloverleaf || (matched && LevelPlanner.BandOf(p.Levels[0].Elevation) != ElevationBand.Ground))
+            if (mainForm == RoadForm.TwoWay && (IsCloverleaf || IsParclo || (matched && LevelPlanner.BandOf(p.Levels[0].Elevation) != ElevationBand.Ground))
                 && m_RoadsByName.TryGetValue(mainName, out RoadInfo external))
             {
                 RoadInfo oneWay = (IsCloverleaf ? RampMatcher.PickSplitOneWay(m_RoadCatalog, external) : null)
@@ -830,9 +834,11 @@ namespace InterchangeMod.Systems
             {
                 p.LoopRadius = System.Math.Max(0f, setting.LoopRadius);   // 0 = 自动，模板取能放下的最小半径
                 p.TrumpetLoopForExit = setting.TrumpetLoopForExit;
+                p.ParcloLoopsForExit = setting.ParcloLoopsForExit;
                 p.DirectRampRadius = setting.TrumpetNearRampRadius;
                 // 喇叭形的支路、苜蓿叶的被交道路两幅分开接匝道，是双向道路时立交内部改用双幅，外端过渡回双向
-                if (crossForm == RoadForm.TwoWay && m_RoadsByName.TryGetValue(crossName, out RoadInfo branch))
+                // 部分苜蓿叶的被交道路保持双向（匝道在它上面接平交路口）
+                if (!IsParclo && crossForm == RoadForm.TwoWay && m_RoadsByName.TryGetValue(crossName, out RoadInfo branch))
                 {
                     // 优先选两幅并排正好放得进双向道路宽度的单行道路（街道单行道带人行道较宽，放不下时用同车道数的公路单行道）
                     RoadInfo oneWay = RampMatcher.PickSplitOneWay(m_RoadCatalog, branch)
@@ -873,6 +879,8 @@ namespace InterchangeMod.Systems
             }
             ChooseRamp(p, mainName, errors, snapshot);
             if (IsCloverleaf && setting.CloverleafHugLoop)
+                ChooseSharedRamp(p, errors);
+            if (IsParclo)
                 ChooseSharedRamp(p, errors);
             // 苜蓿叶集散车道：用匝道道路，主线在集散车道驶出与汇入之间少掉匝道的车道数（车道平衡沿用匝道车道数）
             // 模式：none 主线交织；auto 按道路类型（是公路的路加，两条都是公路就都加）；main 仅主线；both 两条路都加
@@ -967,7 +975,7 @@ namespace InterchangeMod.Systems
         }
 
         /// <summary>
-        /// 苜蓿叶右转匝道贴环道时，与环道合成的那段双向匝道：每方向车道数与匝道相同、与匝道同类（公路/街道）的双向道路。
+        /// 苜蓿叶右转匝道贴环道时与环道合成的那段双向匝道、部分苜蓿叶的匝道主干：每方向车道数与匝道相同、与匝道同类（公路/街道）的双向道路。
         /// </summary>
         private void ChooseSharedRamp(InterchangeParams p, List<string> errors)
         {
@@ -975,10 +983,11 @@ namespace InterchangeMod.Systems
             RoadInfo shared = RampMatcher.PickClosest(m_RoadCatalog, ramp?.IsHighway ?? true, ramp?.LanesPerDirection ?? 1, oneWay: false);
             if (shared == null || !m_PrefabResolver.TryResolve(shared.Name, m_SelectedRoad, out NetPrefab prefab))
             {
-                errors.Add("找不到与匝道车道数相同的双向道路，无法让右转匝道贴环道：请改回外侧大弧线");
+                errors.Add(IsParclo ? "找不到与匝道车道数相同的双向道路作部分苜蓿叶的匝道主干"
+                    : "找不到与匝道车道数相同的双向道路，无法让右转匝道贴环道：请改回外侧大弧线");
                 return;
             }
-            p.OuterHugsLoop = true;
+            p.OuterHugsLoop = IsCloverleaf;
             p.SharedRampPrefab = shared.Name;
             p.SharedRampWidth = m_PrefabResolver.GetWidth(prefab);
         }

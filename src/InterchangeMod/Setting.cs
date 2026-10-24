@@ -89,6 +89,9 @@ namespace InterchangeMod
         /// <summary>苜蓿叶：右转匝道贴着环道外侧走，相邻那段与环道合成一条双向匝道（默认 false = 外侧大弧线）。</summary>
         [SettingsUIHidden] public bool CloverleafHugLoop { get; set; }
 
+        /// <summary>部分苜蓿叶：环道用于驶出主线（B2，默认），否则用于驶入主线（A2）。</summary>
+        [SettingsUIHidden] public bool ParcloLoopsForExit { get; set; }
+
         /// <summary>
         /// 苜蓿叶集散车道：none = 直接在主线上交织（默认）；auto = 按道路类型，是公路的路加集散车道（两条都是公路时两条都加）；
         /// main = 仅主线；both = 两条路都加。
@@ -168,6 +171,7 @@ namespace InterchangeMod
             TrumpetLoopForExit = true;
             LoopRadius = 0f;
             CloverleafCollectorMode = "none";
+            ParcloLoopsForExit = true;
             MaxGradePercent = 8f;
             BaseElevation = 0f;
             LevelGap = 0f;
@@ -200,6 +204,7 @@ namespace InterchangeMod
                 case nameof(MainOnTop): MainOnTop = value == "true"; return true;
                 case nameof(CloverleafCrossOnTop): CloverleafCrossOnTop = value == "true"; return true;
                 case nameof(CloverleafHugLoop): CloverleafHugLoop = value == "true"; return true;
+                case nameof(ParcloLoopsForExit): ParcloLoopsForExit = value == "true"; return true;
                 case nameof(CloverleafCollectorMode):
                     CloverleafCollectorMode = value == "auto" || value == "main" || value == "both" ? value : "none";
                     return true;
@@ -215,7 +220,7 @@ namespace InterchangeMod
                 case nameof(CrossRoadPrefab): CrossRoadPrefab = value ?? ""; return true;
                 case nameof(RampPrefab): RampPrefab = value ?? ""; return true;
                 case nameof(InterchangeType):
-                    InterchangeType = value == "ExpresswayNode" || value == "ExpresswayT" || value == "SinglePoint" || value == "Trumpet" || value == "Cloverleaf" ? value : "Diamond";
+                    InterchangeType = value == "ExpresswayNode" || value == "ExpresswayT" || value == "SinglePoint" || value == "Trumpet" || value == "Cloverleaf" || value == "PartialCloverleaf" ? value : "Diamond";
                     return true;
                 case nameof(FrontageRoadPrefab): FrontageRoadPrefab = value ?? ""; return true;
                 case nameof(LaneBalance): LaneBalance = value == "true"; return true;

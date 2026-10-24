@@ -34,17 +34,18 @@ export const InterchangePanel = () => {
   const singlePoint = s.InterchangeType === "SinglePoint";
   const trumpet = s.InterchangeType === "Trumpet";
   const cloverleaf = s.InterchangeType === "Cloverleaf";
+  const parclo = s.InterchangeType === "PartialCloverleaf";
   // 有环道的类型：环道半径可自动
-  const loops = trumpet || cloverleaf;
+  const loops = trumpet || cloverleaf || parclo;
   const tee = expresswayT || trumpet;
   // 支路与主线的实际夹角（0~180°）：对准路口时取匹配的，否则取面板的
   const crossing = ((matched ? match!.angle : s.CrossingAngle) % 180 + 180) % 180;
   // 斜交提示的阈值：苜蓿叶偏离 90° 超过 30°（交角小于 60°），喇叭形超过 45°
-  const skewLimit = cloverleaf ? 30 : 45;
+  const skewLimit = cloverleaf || parclo ? 30 : 45;
   const steepSkew = Math.abs(crossing - 90) > skewLimit;
   // 中式快速路节点和单点立交的主线固定在上层
   const mainForcedTop = expressway || singlePoint;
-  const typeName = cloverleaf ? t.typeCloverleaf : trumpet ? t.typeTrumpet : expresswayT ? t.typeExpresswayT : expressway ? t.typeExpressway : singlePoint ? t.typeSinglePoint : t.typeDiamond;
+  const typeName = parclo ? t.typeParclo : cloverleaf ? t.typeCloverleaf : trumpet ? t.typeTrumpet : expresswayT ? t.typeExpresswayT : expressway ? t.typeExpressway : singlePoint ? t.typeSinglePoint : t.typeDiamond;
   // T 型的被交道路叫“支路”
   const crossTitle = tee ? t.branchRoad : t.crossRoad;
 
@@ -73,7 +74,7 @@ export const InterchangePanel = () => {
         <Scrollable className={styles.content} vertical trackVisibility="scrollable">
           <Section title={t.interchangeType}>
             <Choice label={t.fourWay} value={s.InterchangeType}
-              options={[{ value: "Diamond", text: t.typeDiamond }, { value: "ExpresswayNode", text: t.typeExpressway }, { value: "SinglePoint", text: t.typeSinglePoint }, { value: "Cloverleaf", text: t.typeCloverleaf }]}
+              options={[{ value: "Diamond", text: t.typeDiamond }, { value: "ExpresswayNode", text: t.typeExpressway }, { value: "SinglePoint", text: t.typeSinglePoint }, { value: "Cloverleaf", text: t.typeCloverleaf }, { value: "PartialCloverleaf", text: t.typeParclo }]}
               onChange={(v) => setValue("InterchangeType", v)} />
             <Choice label={t.threeWay} value={s.InterchangeType}
               options={[{ value: "ExpresswayT", text: t.typeExpresswayT }, { value: "Trumpet", text: t.typeTrumpet }]}
@@ -90,6 +91,13 @@ export const InterchangePanel = () => {
             {singlePoint && <div className={styles.note}>{t.singlePointNote}</div>}
             {trumpet && <div className={styles.note}>{t.trumpetNote}</div>}
             {cloverleaf && <div className={styles.note}>{t.cloverleafNote}</div>}
+            {parclo && <div className={styles.note}>{t.parcloNote}</div>}
+            {/* 部分苜蓿叶：环道用于驶出主线（B2）还是驶入主线（A2） */}
+            {parclo && (
+              <Choice label={t.loopUse} value={s.ParcloLoopsForExit ? "exit" : "entry"}
+                options={[{ value: "exit", text: t.parcloLoopExit }, { value: "entry", text: t.parcloLoopEntry }]}
+                onChange={(v) => setValue("ParcloLoopsForExit", v === "exit")} />
+            )}
             {/* 苜蓿叶右转匝道：外侧大弧线（默认），或贴环道外侧、相邻段与环道合成一条双向匝道（占地更小） */}
             {cloverleaf && (
               <Choice label={t.rightTurnRamp} value={s.CloverleafHugLoop ? "hug" : "outer"}
@@ -177,18 +185,18 @@ export const InterchangePanel = () => {
               <Stepper label="" value={s.LevelGap} step={0.5} min={1} max={30} unit=" m"
                 onChange={(v) => setValue("LevelGap", v)} />
             )}
-            {!mainForcedTop && !trumpet && !cloverleaf && (
+            {!mainForcedTop && !trumpet && !cloverleaf && !parclo && (
             <Choice label={t.topRoad} value={s.MainOnTop ? "main" : "cross"}
               options={[{ value: "cross", text: t.crossRoad }, { value: "main", text: t.mainRoad }]}
               onChange={(v) => setValue("MainOnTop", v === "main")} />
             )}
-            {/* 苜蓿叶：默认主线在上层 */}
-            {cloverleaf && (
+            {/* 苜蓿叶、部分苜蓿叶：默认主线在上层 */}
+            {(cloverleaf || parclo) && (
             <Choice label={t.topRoad} value={s.CloverleafCrossOnTop ? "cross" : "main"}
               options={[{ value: "main", text: t.mainRoad }, { value: "cross", text: t.crossRoad }]}
               onChange={(v) => setValue("CloverleafCrossOnTop", v === "cross")} />
             )}
-            {r && <div className={styles.resolved}>{levelLine(t, r, cloverleaf ? !s.CloverleafCrossOnTop : !trumpet && (s.MainOnTop || mainForcedTop))}</div>}
+            {r && <div className={styles.resolved}>{levelLine(t, r, cloverleaf || parclo ? !s.CloverleafCrossOnTop : !trumpet && (s.MainOnTop || mainForcedTop))}</div>}
             <Stepper label={t.crossingAngle} value={s.CrossingAngle} step={5} min={45} max={135} unit="°"
               onChange={(v) => setValue("CrossingAngle", v)} />
             <div className={styles.note}>{t.elevationGuide}</div>
