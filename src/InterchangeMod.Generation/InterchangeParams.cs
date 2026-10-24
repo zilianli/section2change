@@ -70,7 +70,7 @@ namespace InterchangeMod.Generation
         /// <summary>匝道在分流/合流节点处与主线的夹角（度）。</summary>
         public float RampDivergeAngle { get; set; } = 15f;
 
-        /// <summary>环形匝道半径（苜蓿叶等类型使用）。</summary>
+        /// <summary>环形匝道半径（喇叭形、苜蓿叶等类型使用）；0 = 自动，由模板取能放下的最小半径（见 RadiusSearch）。</summary>
         public float LoopRadius { get; set; } = 40f;
 
         /// <summary>喇叭形的环道用于驶出主线（主线左转进支路）；false 时用于驶入主线（支路左转进主线）。</summary>

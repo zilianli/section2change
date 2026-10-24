@@ -90,9 +90,18 @@ export const InterchangePanel = () => {
                 options={[{ value: "exit", text: t.loopExit }, { value: "entry", text: t.loopEntry }]}
                 onChange={(v) => setValue("TrumpetLoopForExit", v === "exit")} />
             )}
+            {/* 环道半径：自动 = 能放下的最小半径（随交角、坡度上限变化）；手动可以调大 */}
             {trumpet && (
-              <Stepper label={t.loopRadius} value={s.LoopRadius} step={5} min={30} max={250} unit=" m"
+              <Choice label={t.loopRadius} value={s.LoopRadius > 0 ? "manual" : "auto"}
+                options={[{ value: "auto", text: t.gapAuto }, { value: "manual", text: t.gapManual }]}
+                onChange={(v) => setValue("LoopRadius", v === "auto" ? 0 : Math.max(30, Math.round((r?.loopRadius ?? 40) / 5) * 5))} />
+            )}
+            {trumpet && s.LoopRadius > 0 && (
+              <Stepper label="" value={s.LoopRadius} step={5} min={30} max={250} unit=" m"
                 onChange={(v) => setValue("LoopRadius", v)} />
+            )}
+            {trumpet && s.LoopRadius <= 0 && r && r.loopRadius > 0 && (
+              <div className={styles.resolved}>{`${t.actual}：${Math.round(r.loopRadius)} m`}</div>
             )}
             {/* 近侧两条直连匝道的半径：自动 = 满足支路下桥坡长的最小值；手动不能小于它（面板会报错并给出下限） */}
             {trumpet && (

@@ -34,6 +34,8 @@ namespace InterchangeMod.Generation.Templates
         /// 正好在重叠结束处分段时这段路几乎只剩节点区，剩下的几厘米会被判成“坡度过陡”/“形状无效”。
         /// </summary>
         private const float kFlatMargin = 15f;
+        /// <summary>环道半径下限（米）。</summary>
+        private const float kMinLoopRadius = 30f;
         /// <summary>面板允许的最大环道半径（米）。</summary>
         private const float kMaxLoopRadius = 250f;
         private const float kOppositeTolerance = 1f;
@@ -82,10 +84,14 @@ namespace InterchangeMod.Generation.Templates
                 errors.Add($"{(branchUpper ? "跨线桥" : "主线高架")}离地 {upper:F1} 米会建成路堤（挡土墙），下层道路无法从下面穿过：需要至少 {HeightRange.BridgeThreshold:F1} 米");
             if (p.RampWidth > legs[0].RoadWidth)
                 errors.Add($"匝道宽 {p.RampWidth:F0} 米，比主线（{legs[0].RoadWidth:F0} 米）还宽：请减少匝道车道数");
-            if (p.LoopRadius < 30f)
-                errors.Add("环道半径至少 30 米");
             if (errors.Count > 0)
                 return errors;
+            if (p.LoopRadius > 0f && p.LoopRadius < kMinLoopRadius)
+                return new[] { $"环道半径至少 {kMinLoopRadius:F0} 米" };
+            bool auto = p.LoopRadius <= 0f;
+            p = WithLoopRadius(p);
+            if (auto && !LoopFits(new Plan(p), p))
+                return new[] { "这个交角下环道放不下：请把交角调得更接近 90° 或加大最大坡度" };
 
             var plan = new Plan(p);
             errors.AddRange(plan.Errors);
@@ -117,8 +123,31 @@ namespace InterchangeMod.Generation.Templates
             return !plan.LoopTooSmall && rise <= p.MaxGrade * plan.LoopClimbLength && rise <= p.MaxGrade * plan.SemiDirectClimbLength;
         }
 
+        /// <summary>环道半径：手动（LoopRadius &gt; 0）时就是它；自动（0）时取能放下的最小半径（5 米一档，放不下时取上限）。</summary>
+        public static float ResolveLoopRadius(InterchangeParams p)
+        {
+            if (p.LoopRadius > 0f)
+                return p.LoopRadius;
+            var trial = p.Clone();
+            return RadiusSearch.Smallest(r =>
+            {
+                trial.LoopRadius = r;
+                return LoopFits(new Plan(trial), trial);
+            }, kMinLoopRadius, kMaxLoopRadius) ?? kMaxLoopRadius;
+        }
+
+        private static InterchangeParams WithLoopRadius(InterchangeParams p)
+        {
+            if (p.LoopRadius > 0f)
+                return p;
+            var resolved = p.Clone();
+            resolved.LoopRadius = ResolveLoopRadius(p);
+            return resolved;
+        }
+
         public IReadOnlyList<RoadSegmentSpec> Generate(InterchangeParams p)
         {
+            p = WithLoopRadius(p);
             var plan = new Plan(p);
             var segments = new List<RoadSegmentSpec>();
             plan.Build(segments);
@@ -303,14 +332,17 @@ namespace InterchangeMod.Generation.Templates
             private (float Radius, Path Path, float T, float FlatMain, float FlatBranch) SolveRamp(bool outbound, float rMin, float grade)
             {
                 float drop = h0 - hLow;
+                bool mainElevated = LevelPlanner.BandOf(h0) == ElevationBand.Elevated;
+                bool branchElevated = LevelPlanner.BandOf(hLow) == ElevationBand.Elevated;
                 Vec3 mainNear = Point(0f, -om - d, 0f);
                 float lateral = outbound ? ob : -ob;
                 float foot = -(outbound ? spanOut : spanIn).Lo + climb;
                 (bool Ok, Path Path, float T, float FlatMain, float FlatBranch) Try(float r)
                 {
-                    // 主线在上层时离开主线那头用小半径圆弧，尽快离开高架主线；接支路那头用大半径（小半径会让接入点离桥更近，反而要更大的半径）
-                    float rMain = drop > 0.1f ? Math.Min(r, kDivergeRadius) : r;
-                    float rBranch = r;
+                    // 接高架道路的一头用小半径圆弧：并行重叠段要短于游戏切分高架路段的长度，否则切分点的立柱落在所接道路上
+                    //（主线在上层、或基层本身是高架时）。接地面道路的一头用大半径（小半径会让接入点离桥更近，反而要更大的半径）
+                    float rMain = drop > 0.1f || mainElevated ? Math.Min(r, kDivergeRadius) : r;
+                    float rBranch = branchElevated ? Math.Min(r, kDivergeRadius) : r;
                     // 进向：从主线反向倒推，再整体反过来
                     var path = Path.Fillet(mainNear, outbound ? X : -X, B(0f, lateral), -f, rMain, r, rBranch, SepFromMainLine, sepBranch,
                         out _, out float t, out float flatMain, out float flatBranch);
@@ -632,10 +664,13 @@ namespace InterchangeMod.Generation.Templates
                 // 必须的断点：两端和升降段的起止；圆弧分段（每段不超过约 90°）的断点离它们或彼此不到 kMinSegment 时省掉，
                 // 避免很短的路段。与所接道路并行重叠的两头之内也不分段：那里的节点会让一段独立的路和所接道路重叠
                 var required = new List<float> { 0f, total };
-                if (Math.Abs(y1 - y0) > 0.05f)
+                // 与所接道路并行重叠的两头总是单独成段（高架时这段要短于游戏切分长度，节点区也不会吞掉整段）
+                if (Math.Abs(y1 - y0) > 0.05f || flatStart > 0f || flatEnd > 0f)
                 {
-                    required.Add(rampFrom);
-                    required.Add(rampTo);
+                    if (flatStart > 0f || Math.Abs(y1 - y0) > 0.05f)
+                        required.Add(rampFrom);
+                    if (flatEnd > 0f || Math.Abs(y1 - y0) > 0.05f)
+                        required.Add(rampTo);
                 }
                 var optional = new List<float>();
                 float offset = 0f;

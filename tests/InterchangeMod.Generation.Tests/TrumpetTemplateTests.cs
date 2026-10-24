@@ -248,6 +248,56 @@ namespace InterchangeMod.Generation.Tests
             }
         }
 
+        [Theory]
+        [InlineData(90f, 0.08f)]
+        [InlineData(120f, 0.08f)]
+        [InlineData(145f, 0.08f)]
+        [InlineData(60f, 0.15f)]
+        public void AutoLoopRadius_IsTheSmallestThatFits(float branchAngle, float grade)
+        {
+            // 自动（0）= 手动逐档加大时第一个不报“环道半径至少”的半径
+            var p = Make(branchAngle);
+            p.MaxGrade = grade;
+            p.LoopRadius = 0f;
+            Assert.Empty(_template.ValidateParams(p));
+            float auto = TrumpetTemplate.ResolveLoopRadius(p);
+            var manual = Make(branchAngle);
+            manual.MaxGrade = grade;
+            manual.LoopRadius = 30f;
+            while (_template.ValidateParams(manual).Any(e => e.Contains("环道半径至少")))
+                manual.LoopRadius += 5f;
+            Assert.Equal(manual.LoopRadius, auto);
+            var segments = _template.Generate(p);
+            Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
+            TestHelpers.AssertRampsConnected(segments);
+        }
+
+        [Theory]
+        [InlineData(90f, false)]
+        [InlineData(90f, true)]
+        [InlineData(120f, false)]
+        [InlineData(60f, true)]
+        public void ElevatedBaseLevel_RampOverlapsWithElevatedRoadsStayShort(float branchAngle, bool branchUnder)
+        {
+            // 基层本身是高架（下层 10 米、上层 20 米）：匝道与高架道路并行重叠、保持同高的那段要短于游戏切分高架路段的长度
+            var p = Make(branchAngle, branchUnder: branchUnder);
+            p.Levels[0].Elevation += 10f;
+            p.Levels[1].Elevation += 10f;
+            while (p.LoopRadius < 250f && _template.ValidateParams(p).Any(e => e.Contains("环道半径至少")))
+                p.LoopRadius += 5f;
+            Assert.Empty(_template.ValidateParams(p));
+            var segments = _template.Generate(p);
+            Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
+            TestHelpers.AssertRampsConnected(segments);
+            var roadNodes = segments.Where(s => s.Role != RoadRole.Ramp).SelectMany(s => new[] { s.StartNode, s.EndNode }).ToList();
+            foreach (var name in new[] { "NearToBranch", "BranchToNear" })
+            {
+                var pieces = Pieces(segments, name);
+                foreach (var end in new[] { pieces[0], pieces[pieces.Count - 1] })
+                    Assert.True(end.Curve.Length() < p.Legs[0].MaxElevatedEdgeLength, $"{end.Name} {end.Curve.Length():F0} m");
+            }
+        }
+
         [Fact]
         public void LeftHandTraffic_IsRejected()
         {

@@ -125,7 +125,7 @@ namespace InterchangeMod.UI
                     .Field("mainRoad", snap.MainRoad).Field("mainForm", snap.MainForm).Field("mainLanes", snap.MainLanes)
                     .Field("crossRoad", snap.CrossRoad).Field("crossForm", snap.CrossForm).Field("crossLanes", snap.CrossLanes)
                     .Field("rampRoad", snap.RampRoad).Field("rampLanes", snap.RampLanes).Field("rampTarget", snap.RampTarget)
-                    .Field("rampAuto", snap.RampAuto).Field("rampLength", snap.RampLength)
+                    .Field("rampAuto", snap.RampAuto).Field("rampLength", snap.RampLength).Field("loopRadius", snap.LoopRadius)
                     .Field("frontageRoad", snap.FrontageRoad).Field("frontageLanes", snap.FrontageLanes)
                     .Field("mainReducedRoad", snap.MainReducedRoad).Field("mainReducedLanes", snap.MainReducedLanes)
                     .Field("frontageWidenedRoad", snap.FrontageWidenedRoad).Field("frontageWidenedLanes", snap.FrontageWidenedLanes)

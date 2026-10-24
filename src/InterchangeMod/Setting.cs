@@ -65,7 +65,7 @@ namespace InterchangeMod
         /// <summary>喇叭形的环道用于驶出主线（true，默认）或驶入主线。</summary>
         [SettingsUIHidden] public bool TrumpetLoopForExit { get; set; }
 
-        /// <summary>喇叭形环道半径（米）。</summary>
+        /// <summary>环道半径（米）；0 = 自动（能放下的最小半径）。</summary>
         [SettingsUIHidden] public float LoopRadius { get; set; }
 
         /// <summary>喇叭形近侧直连匝道半径（米）；0 = 自动（满足坡长约束的最小值）。</summary>
@@ -154,7 +154,7 @@ namespace InterchangeMod
             BaseFollowsMatch = true;
             BranchOnLeft = false;
             TrumpetLoopForExit = true;
-            LoopRadius = 40f;
+            LoopRadius = 0f;
             MaxGradePercent = 8f;
             BaseElevation = 0f;
             LevelGap = 0f;
@@ -206,7 +206,7 @@ namespace InterchangeMod
                 case nameof(BaseFollowsMatch): BaseFollowsMatch = value == "true"; return true;
                 case nameof(BranchOnLeft): BranchOnLeft = value == "true"; return true;
                 case nameof(TrumpetLoopForExit): TrumpetLoopForExit = value == "true"; return true;
-                case nameof(LoopRadius): LoopRadius = Clamp(number, 30f, 250f); return true;
+                case nameof(LoopRadius): LoopRadius = number <= 0f ? 0f : Clamp(number, 30f, 250f); return true;
                 case nameof(TrumpetNearRampRadius): TrumpetNearRampRadius = number <= 0f ? 0f : Clamp(number, 30f, 1000f); return true;
                 case nameof(MaxGradePercent): MaxGradePercent = Clamp(number, 3f, 25f); return true;
                 default: return false;

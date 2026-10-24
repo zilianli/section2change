@@ -103,6 +103,7 @@ export interface Resolved {
   rampTarget: number;
   rampAuto: boolean;
   rampLength: number;
+  loopRadius: number;
   /** 生成前检查出的问题（参数、坡度、预制体）。 */
   errors: string[];
   /** 游戏对预览报的问题：type 是游戏 ErrorType 名，elevation 是该处离地高度。 */

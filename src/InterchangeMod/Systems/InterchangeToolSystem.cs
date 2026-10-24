@@ -601,6 +601,9 @@ namespace InterchangeMod.Systems
                     Mod.log.Info($"Ramp length extended from {setting.RampLength:F0} m to {p.RampLength:F0} m to meet the grade limit");
                 m_LastFittedRampLength = p.RampLength;
                 errors.AddRange(CurrentTemplate.ValidateParams(p));
+                // 面板显示实际用的环道半径（自动时是求出来的最小半径）
+                if (IsTrumpet && errors.Count == 0)
+                    snapshot.LoopRadius = TrumpetTemplate.ResolveLoopRadius(p);
             }
             snapshot.RampLength = p.RampLength;
 
@@ -785,7 +788,7 @@ namespace InterchangeMod.Systems
 
             if (IsTrumpet)
             {
-                p.LoopRadius = setting.LoopRadius > 0f ? setting.LoopRadius : 60f;
+                p.LoopRadius = System.Math.Max(0f, setting.LoopRadius);   // 0 = 自动，模板取能放下的最小半径
                 p.TrumpetLoopForExit = setting.TrumpetLoopForExit;
                 p.TrumpetNearRampRadius = setting.TrumpetNearRampRadius;
                 // 喇叭形的支路两幅分开（出向一幅接环道、进向一幅接半定向匝道），支路是双向道路时立交内部改用双幅，外端过渡回双向
@@ -1088,5 +1091,7 @@ namespace InterchangeMod.Systems
         public List<GameError> GameErrors = new List<GameError>();
         /// <summary>三向立交对准了十字路口：去掉鼠标对面那条臂。</summary>
         public bool MatchDropsLeg;
+        /// <summary>实际用的环道半径（米）；不用环道时为 0。</summary>
+        public float LoopRadius;
     }
 }
