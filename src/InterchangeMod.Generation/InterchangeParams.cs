@@ -106,6 +106,14 @@ namespace InterchangeMod.Generation
 
         public float SharedRampWidth { get; set; }
 
+        /// <summary>环岛式：环岛用的单行道路（宽 RingWidth）；环岛半径用 LoopRadius（0 = 自动）。</summary>
+        public string? RingPrefab { get; set; }
+
+        public float RingWidth { get; set; }
+
+        /// <summary>环岛式：环岛沿主线拉长成跑道形（两头半圆、中间直线），否则是圆形。</summary>
+        public bool RoundaboutRacetrack { get; set; }
+
         /// <summary>允许的最大纵坡，0.08 = 8%。</summary>
         public float MaxGrade { get; set; } = 0.08f;
 

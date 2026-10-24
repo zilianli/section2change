@@ -5,7 +5,7 @@ const GROUP = "interchangeMod";
 
 export type RoadForm = "Auto" | "TwoWay" | "Dual";
 
-export type InterchangeType = "Diamond" | "ExpresswayNode" | "ExpresswayT" | "SinglePoint" | "Trumpet" | "Cloverleaf" | "PartialCloverleaf";
+export type InterchangeType = "Diamond" | "ExpresswayNode" | "ExpresswayT" | "SinglePoint" | "Trumpet" | "Cloverleaf" | "PartialCloverleaf" | "Roundabout";
 
 export interface PanelSettings {
   /** 基层（下层）离地高度。 */
@@ -45,6 +45,7 @@ export interface PanelSettings {
   CloverleafCrossOnTop: boolean;
   CloverleafHugLoop: boolean;
   ParcloLoopsForExit: boolean;
+  RoundaboutRacetrack: boolean;
   CloverleafCollectorMode: "none" | "auto" | "main" | "both";
   MaxGradePercent: number;
   TrumpetNearRampRadius: number;
@@ -83,6 +84,8 @@ export interface Resolved {
   /** 中式快速路节点实际用的辅路；菱形时为空。 */
   frontageRoad: string;
   frontageLanes: number;
+  /** 部分苜蓿叶的匝道主干、环岛式的环岛实际用的道路；其他类型为空。 */
+  extraRoad: string;
   /** 车道平衡实际用的道路；为空表示没有变化。 */
   mainReducedRoad: string;
   mainReducedLanes: number;

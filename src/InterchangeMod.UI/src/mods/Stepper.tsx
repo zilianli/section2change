@@ -69,17 +69,19 @@ export function Choice<T extends string | number>({ label, value, options, onCha
   return (
     <div className={styles.row}>
       <div className={styles.label}>{label}</div>
-      {options.map((option) => (
-        <Button
-          key={option.value}
-          variant="flat"
-          selected={option.value === value}
-          className={option.value === value ? styles.choiceSelected : styles.choice}
-          onSelect={() => option.value !== value && onChange(option.value)}
-        >
-          {option.text}
-        </Button>
-      ))}
+      <div className={styles.options}>
+        {options.map((option) => (
+          <Button
+            key={option.value}
+            variant="flat"
+            selected={option.value === value}
+            className={option.value === value ? styles.choiceSelected : styles.choice}
+            onSelect={() => option.value !== value && onChange(option.value)}
+          >
+            {option.text}
+          </Button>
+        ))}
+      </div>
     </div>
   );
 }

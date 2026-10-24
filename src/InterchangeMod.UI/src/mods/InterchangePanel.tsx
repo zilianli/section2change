@@ -35,17 +35,26 @@ export const InterchangePanel = () => {
   const trumpet = s.InterchangeType === "Trumpet";
   const cloverleaf = s.InterchangeType === "Cloverleaf";
   const parclo = s.InterchangeType === "PartialCloverleaf";
+  const roundabout = s.InterchangeType === "Roundabout";
   // 有环道的类型：环道半径可自动
-  const loops = trumpet || cloverleaf || parclo;
+  const loops = trumpet || cloverleaf || parclo || roundabout;
+  // 直匝道的类型：匝道长度、分流角度只对它们起作用
+  const straightRamps = s.InterchangeType === "Diamond" || expressway || singlePoint;
+  // 立交内主线总是双幅（双向主线自动拆成双幅、两端过渡）
+  const mainAlwaysDual = cloverleaf || parclo || roundabout;
+  // 车道平衡：部分苜蓿叶、环岛式没有用到
+  const laneBalanceUsed = !parclo && !roundabout;
+  // 相交角度可调范围
+  const [angleMin, angleMax] = cloverleaf ? [35, 145] : parclo || roundabout ? [60, 120] : [45, 135];
   const tee = expresswayT || trumpet;
   // 支路与主线的实际夹角（0~180°）：对准路口时取匹配的，否则取面板的
   const crossing = ((matched ? match!.angle : s.CrossingAngle) % 180 + 180) % 180;
   // 斜交提示的阈值：苜蓿叶偏离 90° 超过 30°（交角小于 60°），喇叭形超过 45°
-  const skewLimit = cloverleaf || parclo ? 30 : 45;
+  const skewLimit = cloverleaf || parclo || roundabout ? 30 : 45;
   const steepSkew = Math.abs(crossing - 90) > skewLimit;
   // 中式快速路节点和单点立交的主线固定在上层
   const mainForcedTop = expressway || singlePoint;
-  const typeName = parclo ? t.typeParclo : cloverleaf ? t.typeCloverleaf : trumpet ? t.typeTrumpet : expresswayT ? t.typeExpresswayT : expressway ? t.typeExpressway : singlePoint ? t.typeSinglePoint : t.typeDiamond;
+  const typeName = roundabout ? t.typeRoundabout : parclo ? t.typeParclo : cloverleaf ? t.typeCloverleaf : trumpet ? t.typeTrumpet : expresswayT ? t.typeExpresswayT : expressway ? t.typeExpressway : singlePoint ? t.typeSinglePoint : t.typeDiamond;
   // T 型的被交道路叫“支路”
   const crossTitle = tee ? t.branchRoad : t.crossRoad;
 
@@ -64,8 +73,7 @@ export const InterchangePanel = () => {
   const rampLine = r
     ? `${t.actual}：${r.rampRoad} · ${r.rampLanes} ${t.lanes}` +
       (r.rampAuto ? `（${t.target} ${r.rampTarget}，${t.mainRoad} ${r.mainLanes} ${t.lanesPerDirection}）` : "") +
-      ` · ${Math.round(r.rampLength)} m` +
-      (r.rampLength > s.RampLength ? `（${t.extended}）` : "")
+      (straightRamps ? ` · ${Math.round(r.rampLength)} m` + (r.rampLength > s.RampLength ? `（${t.extended}）` : "") : "")
     : "";
 
   return (
@@ -74,7 +82,7 @@ export const InterchangePanel = () => {
         <Scrollable className={styles.content} vertical trackVisibility="scrollable">
           <Section title={t.interchangeType}>
             <Choice label={t.fourWay} value={s.InterchangeType}
-              options={[{ value: "Diamond", text: t.typeDiamond }, { value: "ExpresswayNode", text: t.typeExpressway }, { value: "SinglePoint", text: t.typeSinglePoint }, { value: "Cloverleaf", text: t.typeCloverleaf }, { value: "PartialCloverleaf", text: t.typeParclo }]}
+              options={[{ value: "Diamond", text: t.typeDiamond }, { value: "ExpresswayNode", text: t.typeExpressway }, { value: "SinglePoint", text: t.typeSinglePoint }, { value: "Cloverleaf", text: t.typeCloverleaf }, { value: "PartialCloverleaf", text: t.typeParclo }, { value: "Roundabout", text: t.typeRoundabout }]}
               onChange={(v) => setValue("InterchangeType", v)} />
             <Choice label={t.threeWay} value={s.InterchangeType}
               options={[{ value: "ExpresswayT", text: t.typeExpresswayT }, { value: "Trumpet", text: t.typeTrumpet }]}
@@ -92,6 +100,13 @@ export const InterchangePanel = () => {
             {trumpet && <div className={styles.note}>{t.trumpetNote}</div>}
             {cloverleaf && <div className={styles.note}>{t.cloverleafNote}</div>}
             {parclo && <div className={styles.note}>{t.parcloNote}</div>}
+            {roundabout && <div className={styles.note}>{t.roundaboutNote}</div>}
+            {/* 环岛式：圆形（默认）或沿主线拉长的跑道形 */}
+            {roundabout && (
+              <Choice label={t.ringShape} value={s.RoundaboutRacetrack ? "racetrack" : "circle"}
+                options={[{ value: "circle", text: t.ringCircle }, { value: "racetrack", text: t.ringRacetrack }]}
+                onChange={(v) => setValue("RoundaboutRacetrack", v === "racetrack")} />
+            )}
             {/* 部分苜蓿叶：环道用于驶出主线（B2）还是驶入主线（A2） */}
             {parclo && (
               <Choice label={t.loopUse} value={s.ParcloLoopsForExit ? "exit" : "entry"}
@@ -123,12 +138,12 @@ export const InterchangePanel = () => {
             )}
             {/* 环道半径：自动 = 能放下的最小半径（随交角、坡度上限变化）；手动可以调大 */}
             {loops && (
-              <Choice label={t.loopRadius} value={s.LoopRadius > 0 ? "manual" : "auto"}
+              <Choice label={roundabout ? t.ringRadius : t.loopRadius} value={s.LoopRadius > 0 ? "manual" : "auto"}
                 options={[{ value: "auto", text: t.gapAuto }, { value: "manual", text: t.gapManual }]}
-                onChange={(v) => setValue("LoopRadius", v === "auto" ? 0 : Math.max(30, Math.round((r?.loopRadius ?? 40) / 5) * 5))} />
+                onChange={(v) => setValue("LoopRadius", v === "auto" ? 0 : Math.max(roundabout ? 40 : 30, Math.round((r?.loopRadius ?? 40) / 5) * 5))} />
             )}
             {loops && s.LoopRadius > 0 && (
-              <Stepper label="" value={s.LoopRadius} step={5} min={30} max={250} unit=" m"
+              <Stepper label="" value={s.LoopRadius} step={5} min={roundabout ? 40 : 30} max={roundabout ? 300 : 250} unit=" m"
                 onChange={(v) => setValue("LoopRadius", v)} />
             )}
             {loops && s.LoopRadius <= 0 && r && r.loopRadius > 0 && (
@@ -185,20 +200,23 @@ export const InterchangePanel = () => {
               <Stepper label="" value={s.LevelGap} step={0.5} min={1} max={30} unit=" m"
                 onChange={(v) => setValue("LevelGap", v)} />
             )}
-            {!mainForcedTop && !trumpet && !cloverleaf && !parclo && (
+            {!mainForcedTop && !trumpet && !cloverleaf && !parclo && !roundabout && (
             <Choice label={t.topRoad} value={s.MainOnTop ? "main" : "cross"}
               options={[{ value: "cross", text: t.crossRoad }, { value: "main", text: t.mainRoad }]}
               onChange={(v) => setValue("MainOnTop", v === "main")} />
             )}
             {/* 苜蓿叶、部分苜蓿叶：默认主线在上层 */}
-            {(cloverleaf || parclo) && (
+            {(cloverleaf || parclo || roundabout) && (
             <Choice label={t.topRoad} value={s.CloverleafCrossOnTop ? "cross" : "main"}
               options={[{ value: "main", text: t.mainRoad }, { value: "cross", text: t.crossRoad }]}
               onChange={(v) => setValue("CloverleafCrossOnTop", v === "cross")} />
             )}
-            {r && <div className={styles.resolved}>{levelLine(t, r, cloverleaf || parclo ? !s.CloverleafCrossOnTop : !trumpet && (s.MainOnTop || mainForcedTop))}</div>}
-            <Stepper label={t.crossingAngle} value={s.CrossingAngle} step={5} min={45} max={135} unit="°"
-              onChange={(v) => setValue("CrossingAngle", v)} />
+            {r && <div className={styles.resolved}>{levelLine(t, r, cloverleaf || parclo || roundabout ? !s.CloverleafCrossOnTop : !trumpet && (s.MainOnTop || mainForcedTop))}</div>}
+            {/* 对准已有路口时交角取路口的实际角度（见路口匹配），面板的值不起作用 */}
+            {!matched && (
+              <Stepper label={t.crossingAngle} value={s.CrossingAngle} step={5} min={angleMin} max={angleMax} unit="°"
+                onChange={(v) => setValue("CrossingAngle", v)} />
+            )}
             <div className={styles.note}>{t.elevationGuide}</div>
           </Section>
 
@@ -209,7 +227,11 @@ export const InterchangePanel = () => {
               <RoadPicker roads={roads} selected={s.MainRoadPrefab} defaultText={defaultMain}
                 strings={t} onPick={pick("MainRoadPrefab")} />
             )}
-            <Choice label={t.form} value={s.MainRoadForm} options={formOptions} onChange={(v) => setValue("MainRoadForm", v)} />
+            {mainAlwaysDual ? (
+              <div className={styles.note}>{t.mainAlwaysDual}</div>
+            ) : (
+              <Choice label={t.form} value={s.MainRoadForm} options={formOptions} onChange={(v) => setValue("MainRoadForm", v)} />
+            )}
             {r && <ResolvedLine strings={t} road={r.mainRoad} form={r.mainForm} lanes={r.mainLanes} />}
             {(matched || roadAligned) && <div className={styles.note}>{t.decidedByMatch}</div>}
           </Section>
@@ -221,7 +243,11 @@ export const InterchangePanel = () => {
               <RoadPicker roads={roads} selected={s.CrossRoadPrefab} defaultText={t.defaultCrossRoad}
                 strings={t} onPick={pick("CrossRoadPrefab")} />
             )}
-            <Choice label={t.form} value={s.CrossRoadForm} options={formOptions} onChange={(v) => setValue("CrossRoadForm", v)} />
+            {parclo ? (
+              <div className={styles.note}>{t.crossNeedsTwoWay}</div>
+            ) : (
+              <Choice label={t.form} value={s.CrossRoadForm} options={formOptions} onChange={(v) => setValue("CrossRoadForm", v)} />
+            )}
             {r && <ResolvedLine strings={t} road={r.crossRoad} form={r.crossForm} lanes={r.crossLanes} />}
             {matched && <div className={styles.note}>{t.decidedByMatch}</div>}
             {(r?.mainForm === "Dual" || r?.crossForm === "Dual") && (
@@ -253,11 +279,17 @@ export const InterchangePanel = () => {
                 strings={t} onPick={pick("RampPrefab")} />
             )}
             {r && <div className={styles.resolved}>{rampLine}</div>}
-            <Choice label={t.laneBalance} value={s.LaneBalance ? "on" : "off"}
-              options={[{ value: "on", text: t.on }, { value: "off", text: t.off }]}
-              onChange={(v) => setValue("LaneBalance", v === "on")} />
-            {s.LaneBalance && r && <div className={styles.resolved}>{laneBalanceLine(t, r, expressway)}</div>}
-            {s.LaneBalance && <div className={styles.note}>{t.laneBalanceNote}</div>}
+            {/* 自动选的配套道路：部分苜蓿叶的双向匝道主干、环岛式的环岛 */}
+            {r && r.extraRoad && (parclo || roundabout) && (
+              <div className={styles.resolved}>{`${parclo ? t.stemRoad : t.ringRoad}：${r.extraRoad}`}</div>
+            )}
+            {laneBalanceUsed && (
+              <Choice label={t.laneBalance} value={s.LaneBalance ? "on" : "off"}
+                options={[{ value: "on", text: t.on }, { value: "off", text: t.off }]}
+                onChange={(v) => setValue("LaneBalance", v === "on")} />
+            )}
+            {laneBalanceUsed && s.LaneBalance && r && <div className={styles.resolved}>{laneBalanceLine(t, r, expressway)}</div>}
+            {laneBalanceUsed && s.LaneBalance && <div className={styles.note}>{t.laneBalanceNote}</div>}
           </Section>
 
           <div className={styles.row}>
@@ -273,11 +305,16 @@ export const InterchangePanel = () => {
               <Choice label={t.spacingUnit} value={s.SpacingInCells ? "cell" : "m"}
                 options={[{ value: "m", text: t.meters }, { value: "cell", text: t.cells }]}
                 onChange={(v) => setValue("SpacingInCells", v === "cell")} />
-              <Stepper label={t.rampLength} value={s.RampLength} step={10} min={60} max={500} unit=" m"
-                onChange={(v) => setValue("RampLength", v)} />
+              {/* 匝道长度、分流角度只对直匝道的类型起作用（环道类的匝道按圆弧和坡度自动求出） */}
+              {straightRamps && (
+                <Stepper label={t.rampLength} value={s.RampLength} step={10} min={60} max={500} unit=" m"
+                  onChange={(v) => setValue("RampLength", v)} />
+              )}
               {/* 分流段长度由分流角度和道路宽度算出：角度越小，分流段越长 */}
-              <Stepper label={t.divergeAngle} value={s.RampDivergeAngle} step={1} min={5} max={45} unit="°"
-                onChange={(v) => setValue("RampDivergeAngle", v)} />
+              {straightRamps && (
+                <Stepper label={t.divergeAngle} value={s.RampDivergeAngle} step={1} min={5} max={45} unit="°"
+                  onChange={(v) => setValue("RampDivergeAngle", v)} />
+              )}
               {/* 坡道越陡占地越小；实际坡度还不超过所用道路自身允许的坡度 */}
               <Stepper label={t.maxGrade} value={s.MaxGradePercent} step={1} min={3} max={25} unit="%"
                 onChange={(v) => setValue("MaxGradePercent", v)} />

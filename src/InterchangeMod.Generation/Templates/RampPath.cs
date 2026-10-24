@@ -93,6 +93,33 @@ namespace InterchangeMod.Generation.Templates
             return new RampPath(new List<RampArc> { new RampArc(start, aDir, radius, arc.Angle) });
         }
 
+        /// <summary>沿路径弧长 s 处的点（俯视）。</summary>
+        public Vec3 PointAt(float s)
+        {
+            foreach (var arc in Arcs)
+            {
+                if (s <= arc.Length)
+                    return arc.PointAt(Math.Max(0f, s));
+                s -= arc.Length;
+            }
+            return End;
+        }
+
+        /// <summary>弧长 s0 到 s1 之间的一段。</summary>
+        public RampPath Slice(float s0, float s1)
+        {
+            var arcs = new List<RampArc>();
+            float offset = 0f;
+            foreach (var arc in Arcs)
+            {
+                float a = Math.Max(s0, offset), b = Math.Min(s1, offset + arc.Length);
+                if (b - a > 1e-4f)
+                    arcs.Add(new RampArc(arc.PointAt(a - offset), arc.HeadingAt(a - offset), arc.Radius, Math.Sign(arc.Angle) * (b - a) / arc.Radius));
+                offset += arc.Length;
+            }
+            return new RampPath(arcs);
+        }
+
         /// <summary>反向行驶的同一条路径。</summary>
         public RampPath Reversed() =>
             new RampPath(Enumerable.Reverse(Arcs).Select(a => new RampArc(a.End, -a.EndHeading, a.Radius, -a.Angle)).ToList());

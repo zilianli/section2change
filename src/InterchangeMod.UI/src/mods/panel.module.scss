@@ -70,10 +70,20 @@
   margin: 0 2rem;
 }
 
+// 选项按钮放不下一行时自动换行（类型按钮越来越多）
+.options {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .choice,
 .choiceSelected {
   padding: 2rem 10rem;
-  margin-right: 4rem;
+  margin: 1rem 4rem 1rem 0;
   height: 24rem;
   font-size: 12rem;
 }

@@ -108,6 +108,7 @@ namespace InterchangeMod.UI
                 .Field(nameof(s.CloverleafCrossOnTop), s.CloverleafCrossOnTop)
                 .Field(nameof(s.CloverleafHugLoop), s.CloverleafHugLoop)
                 .Field(nameof(s.ParcloLoopsForExit), s.ParcloLoopsForExit)
+                .Field(nameof(s.RoundaboutRacetrack), s.RoundaboutRacetrack)
                 .Field(nameof(s.CloverleafCollectorMode), s.CloverleafCollectorMode ?? "none")
                 .Field(nameof(s.MaxGradePercent), s.MaxGradePercent)
                 .Field(nameof(s.TrumpetNearRampRadius), s.TrumpetNearRampRadius)
@@ -130,7 +131,7 @@ namespace InterchangeMod.UI
                     .Field("crossRoad", snap.CrossRoad).Field("crossForm", snap.CrossForm).Field("crossLanes", snap.CrossLanes)
                     .Field("rampRoad", snap.RampRoad).Field("rampLanes", snap.RampLanes).Field("rampTarget", snap.RampTarget)
                     .Field("rampAuto", snap.RampAuto).Field("rampLength", snap.RampLength).Field("loopRadius", snap.LoopRadius)
-                    .Field("frontageRoad", snap.FrontageRoad).Field("frontageLanes", snap.FrontageLanes)
+                    .Field("frontageRoad", snap.FrontageRoad).Field("frontageLanes", snap.FrontageLanes).Field("extraRoad", snap.ExtraRoad)
                     .Field("mainReducedRoad", snap.MainReducedRoad).Field("mainReducedLanes", snap.MainReducedLanes)
                     .Field("frontageWidenedRoad", snap.FrontageWidenedRoad).Field("frontageWidenedLanes", snap.FrontageWidenedLanes)
                     .BeginArray("errors");

@@ -58,6 +58,7 @@ namespace InterchangeMod.Systems
         private readonly IInterchangeTemplate m_Trumpet = new TrumpetTemplate();
         private readonly IInterchangeTemplate m_Cloverleaf = new CloverleafTemplate();
         private readonly IInterchangeTemplate m_Parclo = new PartialCloverleafTemplate();
+        private readonly IInterchangeTemplate m_Roundabout = new RoundaboutTemplate();
 
         /// <summary>面板选的立交类型。</summary>
         /// <summary>中式快速路节点（十字或 T 型）：有地面辅路。</summary>
@@ -67,12 +68,13 @@ namespace InterchangeMod.Systems
         private bool IsTrumpet => setting?.InterchangeType == "Trumpet";
         private bool IsCloverleaf => setting?.InterchangeType == "Cloverleaf";
         private bool IsParclo => setting?.InterchangeType == "PartialCloverleaf";
+        private bool IsRoundabout => setting?.InterchangeType == "Roundabout";
         /// <summary>有环道的类型（喇叭形、苜蓿叶）：环道半径可自动；双向被交道路在立交内拆成双幅。</summary>
-        private bool HasLoops => IsTrumpet || IsCloverleaf || IsParclo;
-        private IInterchangeTemplate CurrentTemplate => IsParclo ? m_Parclo : IsCloverleaf ? m_Cloverleaf : IsTrumpet ? m_Trumpet : IsExpresswayT ? m_ExpresswayT : IsExpressway ? m_Expressway : IsSinglePoint ? m_SinglePoint : m_Diamond;
+        private bool HasLoops => IsTrumpet || IsCloverleaf || IsParclo || IsRoundabout;
+        private IInterchangeTemplate CurrentTemplate => IsRoundabout ? m_Roundabout : IsParclo ? m_Parclo : IsCloverleaf ? m_Cloverleaf : IsTrumpet ? m_Trumpet : IsExpresswayT ? m_ExpresswayT : IsExpressway ? m_Expressway : IsSinglePoint ? m_SinglePoint : m_Diamond;
 
         /// <summary>主线是否在上层：中式快速路节点和单点立交的主线总是高架。</summary>
-        private bool MainOnTop => IsCloverleaf || IsParclo ? !setting.CloverleafCrossOnTop : !IsTrumpet && (IsExpressway || IsSinglePoint || setting.MainOnTop);
+        private bool MainOnTop => IsCloverleaf || IsParclo || IsRoundabout ? !setting.CloverleafCrossOnTop : !IsTrumpet && (IsExpressway || IsSinglePoint || setting.MainOnTop);
 
         private RoadPrefab m_SelectedRoad;
         private ProxyAction m_RotateLeftAction;
@@ -635,6 +637,8 @@ namespace InterchangeMod.Systems
                     snapshot.LoopRadius = CloverleafTemplate.ResolveLoopRadius(p);
                 else if (IsParclo && errors.Count == 0)
                     snapshot.LoopRadius = PartialCloverleafTemplate.ResolveLoopRadius(p);
+                else if (IsRoundabout && errors.Count == 0)
+                    snapshot.LoopRadius = RoundaboutTemplate.ResolveRadius(p);
             }
             snapshot.RampLength = p.RampLength;
 
@@ -798,7 +802,7 @@ namespace InterchangeMod.Systems
 
             // 外部主线是双向道路、但立交主线不在地面（或是苜蓿叶，匝道都接在两幅上）：匝道无法从双向道路中心分出，
             // 立交内部改用双幅（每方向车道相同的单行道路），臂端过渡回外部的双向道路；苜蓿叶时两幅外缘对齐双向道路的边缘
-            if (mainForm == RoadForm.TwoWay && (IsCloverleaf || IsParclo || (matched && LevelPlanner.BandOf(p.Levels[0].Elevation) != ElevationBand.Ground))
+            if (mainForm == RoadForm.TwoWay && (IsCloverleaf || IsParclo || IsRoundabout || (matched && LevelPlanner.BandOf(p.Levels[0].Elevation) != ElevationBand.Ground))
                 && m_RoadsByName.TryGetValue(mainName, out RoadInfo external))
             {
                 RoadInfo oneWay = (IsCloverleaf ? RampMatcher.PickSplitOneWay(m_RoadCatalog, external) : null)
@@ -838,7 +842,8 @@ namespace InterchangeMod.Systems
                 p.DirectRampRadius = setting.TrumpetNearRampRadius;
                 // 喇叭形的支路、苜蓿叶的被交道路两幅分开接匝道，是双向道路时立交内部改用双幅，外端过渡回双向
                 // 部分苜蓿叶的被交道路保持双向（匝道在它上面接平交路口）
-                if (!IsParclo && crossForm == RoadForm.TwoWay && m_RoadsByName.TryGetValue(crossName, out RoadInfo branch))
+                // 环岛式的被交道路也保持双向（直接接环岛）
+                if (!IsParclo && !IsRoundabout && crossForm == RoadForm.TwoWay && m_RoadsByName.TryGetValue(crossName, out RoadInfo branch))
                 {
                     // 优先选两幅并排正好放得进双向道路宽度的单行道路（街道单行道带人行道较宽，放不下时用同车道数的公路单行道）
                     RoadInfo oneWay = RampMatcher.PickSplitOneWay(m_RoadCatalog, branch)
@@ -882,6 +887,12 @@ namespace InterchangeMod.Systems
                 ChooseSharedRamp(p, errors);
             if (IsParclo)
                 ChooseSharedRamp(p, errors);
+            if (IsRoundabout)
+            {
+                p.RoundaboutRacetrack = setting.RoundaboutRacetrack;
+                ChooseRingRoad(p, crossName, errors);
+            }
+            snapshot.ExtraRoad = IsParclo ? p.SharedRampPrefab ?? "" : IsRoundabout ? p.RingPrefab ?? "" : "";
             // 苜蓿叶集散车道：用匝道道路，主线在集散车道驶出与汇入之间少掉匝道的车道数（车道平衡沿用匝道车道数）
             // 模式：none 主线交织；auto 按道路类型（是公路的路加，两条都是公路就都加）；main 仅主线；both 两条路都加
             if (IsCloverleaf)
@@ -972,6 +983,23 @@ namespace InterchangeMod.Systems
             snapshot.RampLanes = LanesOf(p.RampPrefab);
             snapshot.RampTarget = target;
             snapshot.RampAuto = auto;
+        }
+
+        /// <summary>
+        /// 环岛式立交的环岛：与被交道路同类（公路/街道）的单行道路，车道数取被交道路每方向车道数（至少 2）。
+        /// </summary>
+        private void ChooseRingRoad(InterchangeParams p, string crossName, List<string> errors)
+        {
+            m_RoadsByName.TryGetValue(crossName ?? "", out RoadInfo cross);
+            int lanes = System.Math.Max(2, cross?.LanesPerDirection ?? 2);
+            RoadInfo ring = RampMatcher.PickClosest(m_RoadCatalog, cross?.IsHighway ?? false, lanes, oneWay: true);
+            if (ring == null || !m_PrefabResolver.TryResolve(ring.Name, m_SelectedRoad, out NetPrefab prefab))
+            {
+                errors.Add("找不到可以作环岛的单行道路");
+                return;
+            }
+            p.RingPrefab = ring.Name;
+            p.RingWidth = m_PrefabResolver.GetWidth(prefab);
         }
 
         /// <summary>
@@ -1141,6 +1169,8 @@ namespace InterchangeMod.Systems
         /// <summary>中式快速路节点实际用的辅路；菱形时为空。</summary>
         public string FrontageRoad = "";
         public int FrontageLanes;
+        /// <summary>部分苜蓿叶的匝道主干、环岛式的环岛实际用的道路；其他类型为空。</summary>
+        public string ExtraRoad = "";
         /// <summary>车道平衡：主线中段和辅路加宽段实际用的道路；未启用或找不到合适道路时为空。</summary>
         public string MainReducedRoad = "";
         public int MainReducedLanes;
