@@ -32,10 +32,14 @@ export const InterchangePanel = () => {
   const expresswayT = s.InterchangeType === "ExpresswayT";
   const expressway = s.InterchangeType === "ExpresswayNode" || expresswayT;
   const singlePoint = s.InterchangeType === "SinglePoint";
-  const tee = expresswayT;
+  const trumpet = s.InterchangeType === "Trumpet";
+  const tee = expresswayT || trumpet;
+  // 支路与主线的实际夹角（0~180°）：对准路口时取匹配的，否则取面板的
+  const crossing = ((matched ? match!.angle : s.CrossingAngle) % 180 + 180) % 180;
+  const steepSkew = Math.abs(crossing - 90) > 45;
   // 中式快速路节点和单点立交的主线固定在上层
   const mainForcedTop = expressway || singlePoint;
-  const typeName = expresswayT ? t.typeExpresswayT : expressway ? t.typeExpressway : singlePoint ? t.typeSinglePoint : t.typeDiamond;
+  const typeName = trumpet ? t.typeTrumpet : expresswayT ? t.typeExpresswayT : expressway ? t.typeExpressway : singlePoint ? t.typeSinglePoint : t.typeDiamond;
   // T 型的被交道路叫“支路”
   const crossTitle = tee ? t.branchRoad : t.crossRoad;
 
@@ -67,7 +71,7 @@ export const InterchangePanel = () => {
               options={[{ value: "Diamond", text: t.typeDiamond }, { value: "ExpresswayNode", text: t.typeExpressway }, { value: "SinglePoint", text: t.typeSinglePoint }]}
               onChange={(v) => setValue("InterchangeType", v)} />
             <Choice label={t.threeWay} value={s.InterchangeType}
-              options={[{ value: "ExpresswayT", text: t.typeExpresswayT }]}
+              options={[{ value: "ExpresswayT", text: t.typeExpresswayT }, { value: "Trumpet", text: t.typeTrumpet }]}
               onChange={(v) => setValue("InterchangeType", v)} />
             {expressway && !expresswayT && <div className={styles.note}>{t.expresswayNote}</div>}
             {expresswayT && <div className={styles.note}>{t.expresswayTNote}</div>}
@@ -79,6 +83,27 @@ export const InterchangePanel = () => {
             )}
             {tee && roadAligned && <div className={styles.note}>{t.branchSideByCursor}</div>}
             {singlePoint && <div className={styles.note}>{t.singlePointNote}</div>}
+            {trumpet && <div className={styles.note}>{t.trumpetNote}</div>}
+            {/* 喇叭形：环道给驶出主线还是驶入主线的车流用，另一方向走半定向匝道 */}
+            {trumpet && (
+              <Choice label={t.loopUse} value={s.TrumpetLoopForExit ? "exit" : "entry"}
+                options={[{ value: "exit", text: t.loopExit }, { value: "entry", text: t.loopEntry }]}
+                onChange={(v) => setValue("TrumpetLoopForExit", v === "exit")} />
+            )}
+            {trumpet && (
+              <Stepper label={t.loopRadius} value={s.LoopRadius} step={5} min={30} max={250} unit=" m"
+                onChange={(v) => setValue("LoopRadius", v)} />
+            )}
+            {/* 近侧两条直连匝道的半径：自动 = 满足支路下桥坡长的最小值；手动不能小于它（面板会报错并给出下限） */}
+            {trumpet && (
+              <Choice label={t.nearRampRadius} value={s.TrumpetNearRampRadius > 0 ? "manual" : "auto"}
+                options={[{ value: "auto", text: t.gapAuto }, { value: "manual", text: t.gapManual }]}
+                onChange={(v) => setValue("TrumpetNearRampRadius", v === "auto" ? 0 : 200)} />
+            )}
+            {trumpet && s.TrumpetNearRampRadius > 0 && (
+              <Stepper label="" value={s.TrumpetNearRampRadius} step={10} min={30} max={1000} unit=" m"
+                onChange={(v) => setValue("TrumpetNearRampRadius", v)} />
+            )}
             {/* 装了 Anarchy 才显示：开关就是 Anarchy 自己的开关，和它的工具栏按钮同步 */}
             {state.anarchy && (
               <div className={styles.row}>
@@ -120,12 +145,12 @@ export const InterchangePanel = () => {
               <Stepper label="" value={s.LevelGap} step={0.5} min={1} max={30} unit=" m"
                 onChange={(v) => setValue("LevelGap", v)} />
             )}
-            {!mainForcedTop && (
+            {!mainForcedTop && !trumpet && (
             <Choice label={t.topRoad} value={s.MainOnTop ? "main" : "cross"}
               options={[{ value: "cross", text: t.crossRoad }, { value: "main", text: t.mainRoad }]}
               onChange={(v) => setValue("MainOnTop", v === "main")} />
             )}
-            {r && <div className={styles.resolved}>{levelLine(t, r, s.MainOnTop || mainForcedTop)}</div>}
+            {r && <div className={styles.resolved}>{levelLine(t, r, !trumpet && (s.MainOnTop || mainForcedTop))}</div>}
             <Stepper label={t.crossingAngle} value={s.CrossingAngle} step={5} min={45} max={135} unit="°"
               onChange={(v) => setValue("CrossingAngle", v)} />
             <div className={styles.note}>{t.elevationGuide}</div>
@@ -207,8 +232,12 @@ export const InterchangePanel = () => {
               {/* 分流段长度由分流角度和道路宽度算出：角度越小，分流段越长 */}
               <Stepper label={t.divergeAngle} value={s.RampDivergeAngle} step={1} min={5} max={45} unit="°"
                 onChange={(v) => setValue("RampDivergeAngle", v)} />
+              {/* 坡道越陡占地越小；实际坡度还不超过所用道路自身允许的坡度 */}
+              <Stepper label={t.maxGrade} value={s.MaxGradePercent} step={1} min={3} max={25} unit="%"
+                onChange={(v) => setValue("MaxGradePercent", v)} />
+              <div className={styles.note}>{t.maxGradeNote}</div>
               {/* 中式快速路节点、单点立交：匝道与主线（和辅路）的间距，越小占地越窄 */}
-              {mainForcedTop && (
+              {(mainForcedTop || trumpet) && (
                 <SpacingStepper label={t.rampGap} meters={s.RampGap} stepMeters={0.5} minMeters={0.5} maxMeters={16}
                   inCells={s.SpacingInCells} cellUnit={t.cellUnit} onChange={(v) => setValue("RampGap", v)} />
               )}
@@ -219,6 +248,10 @@ export const InterchangePanel = () => {
         {/* 错误和警告放在滚动区外面单独一块，滚动或调参数时始终看得到 */}
         <Scrollable className={styles.status} vertical trackVisibility="scrollable">
           {state.anarchy && anarchyOn && <div className={styles.errors}>{t.anarchyWarning}</div>}
+          {/* 喇叭形交角很斜（偏离 90° 超过 45°）时，节点和立柱容易压到被拆道路的切断端或新路：提示开启无碰撞放置 */}
+          {trumpet && steepSkew && !anarchyOn && (
+            <div className={styles.warnings}>{state.anarchy ? t.steepSkewAnarchy : t.steepSkewNoAnarchy}</div>
+          )}
           {!r && <div className={styles.hint}>{t.noPreview}</div>}
           {r && r.errors.length > 0 && (
             <div className={styles.errors}>
@@ -298,6 +331,7 @@ const MatchDetails = ({ strings: t, match }: { strings: Strings; match?: MatchIn
       <div className={styles.resolved}>{`${t.crossRoad}：${describeRoad(t, match.cross)}`}</div>
       {match.mainTransition && <div className={styles.note}>{t.matchTransition}</div>}
       {match.crossing && <div className={styles.infoBox}>{t.matchCrossing}</div>}
+      {match.dropsLeg && <div className={styles.infoBox}>{t.matchDropsLeg}</div>}
       <LevelNote strings={t} match={match} />
     </>
   );

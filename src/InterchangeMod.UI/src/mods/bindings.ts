@@ -5,7 +5,7 @@ const GROUP = "interchangeMod";
 
 export type RoadForm = "Auto" | "TwoWay" | "Dual";
 
-export type InterchangeType = "Diamond" | "ExpresswayNode" | "ExpresswayT" | "SinglePoint";
+export type InterchangeType = "Diamond" | "ExpresswayNode" | "ExpresswayT" | "SinglePoint" | "Trumpet";
 
 export interface PanelSettings {
   /** 基层（下层）离地高度。 */
@@ -40,6 +40,10 @@ export interface PanelSettings {
   BaseFollowsMatch: boolean;
   /** T 型空地放置时支路在左侧。 */
   BranchOnLeft: boolean;
+  TrumpetLoopForExit: boolean;
+  LoopRadius: number;
+  MaxGradePercent: number;
+  TrumpetNearRampRadius: number;
 }
 
 /** 路口匹配结果。main/cross 为“预制体|形式|分隔带”。 */
@@ -58,6 +62,7 @@ export interface MatchInfo {
   stacked: boolean;
   /** 立体交叉（两条道路没有共用节点，按俯视交点匹配）。 */
   crossing: boolean;
+  dropsLeg: boolean;
   /** 原路口改造时要拆除的原有路段数。 */
   removed: number;
   /** 接回立交的臂端数。 */

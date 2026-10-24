@@ -6,6 +6,7 @@ using Game.Prefabs;
 using Game.Tools;
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Mathematics;
 
 namespace InterchangeMod.Placement
 {
@@ -17,6 +18,8 @@ namespace InterchangeMod.Placement
         public float Elevation;
         /// <summary>true = 错误（阻止放置）；false = 警告（不阻止，如可被覆盖的物体）。</summary>
         public bool Blocking;
+        /// <summary>同类错误各个图标的位置（世界坐标）。</summary>
+        public List<float3> Positions;
 
         public override string ToString() => $"{(Blocking ? "error" : "warning")} {Type}: {Road} (elevation {Elevation:F1} m)";
     }
@@ -54,9 +57,11 @@ namespace InterchangeMod.Placement
                 }
 
                 // 图标优先级：Error(200) 阻止放置；Warning(100) 只是提醒（游戏会把可覆盖物体的重叠降为警告）
-                bool blocking = entityManager.GetComponentData<Icon>(icon).m_Priority >= IconPriority.Error;
+                var iconData = entityManager.GetComponentData<Icon>(icon);
+                bool blocking = iconData.m_Priority >= IconPriority.Error;
                 if (seen.Add($"{type}|{road}|{blocking}"))
-                    errors.Add(new GameError { Type = type, Road = road, Elevation = elevation, Blocking = blocking });
+                    errors.Add(new GameError { Type = type, Road = road, Elevation = elevation, Blocking = blocking, Positions = new List<float3>() });
+                errors.Find(e => e.Type == type && e.Road == road && e.Blocking == blocking).Positions.Add(iconData.m_Location);
             }
             return errors;
         }

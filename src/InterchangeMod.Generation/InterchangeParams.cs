@@ -71,7 +71,13 @@ namespace InterchangeMod.Generation
         public float RampDivergeAngle { get; set; } = 15f;
 
         /// <summary>环形匝道半径（苜蓿叶等类型使用）。</summary>
-        public float LoopRadius { get; set; } = 60f;
+        public float LoopRadius { get; set; } = 40f;
+
+        /// <summary>喇叭形的环道用于驶出主线（主线左转进支路）；false 时用于驶入主线（支路左转进主线）。</summary>
+        public bool TrumpetLoopForExit { get; set; } = true;
+
+        /// <summary>喇叭形近侧直连匝道的半径（米）；0 = 自动（满足坡长约束的最小值）。</summary>
+        public float TrumpetNearRampRadius { get; set; }
 
         /// <summary>允许的最大纵坡，0.08 = 8%。</summary>
         public float MaxGrade { get; set; } = 0.08f;

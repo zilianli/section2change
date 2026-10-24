@@ -55,16 +55,18 @@ namespace InterchangeMod.Systems
         private readonly IInterchangeTemplate m_Expressway = new ExpresswayNodeTemplate();
         private readonly IInterchangeTemplate m_ExpresswayT = new ExpresswayNodeTemplate(tee: true);
         private readonly IInterchangeTemplate m_SinglePoint = new SinglePointTemplate();
+        private readonly IInterchangeTemplate m_Trumpet = new TrumpetTemplate();
 
         /// <summary>面板选的立交类型。</summary>
         /// <summary>中式快速路节点（十字或 T 型）：有地面辅路。</summary>
         private bool IsExpressway => setting?.InterchangeType == "ExpresswayNode" || setting?.InterchangeType == "ExpresswayT";
         private bool IsExpresswayT => setting?.InterchangeType == "ExpresswayT";
         private bool IsSinglePoint => setting?.InterchangeType == "SinglePoint";
-        private IInterchangeTemplate CurrentTemplate => IsExpresswayT ? m_ExpresswayT : IsExpressway ? m_Expressway : IsSinglePoint ? m_SinglePoint : m_Diamond;
+        private bool IsTrumpet => setting?.InterchangeType == "Trumpet";
+        private IInterchangeTemplate CurrentTemplate => IsTrumpet ? m_Trumpet : IsExpresswayT ? m_ExpresswayT : IsExpressway ? m_Expressway : IsSinglePoint ? m_SinglePoint : m_Diamond;
 
         /// <summary>主线是否在上层：中式快速路节点和单点立交的主线总是高架。</summary>
-        private bool MainOnTop => IsExpressway || IsSinglePoint || setting.MainOnTop;
+        private bool MainOnTop => !IsTrumpet && (IsExpressway || IsSinglePoint || setting.MainOnTop);
 
         private RoadPrefab m_SelectedRoad;
         private ProxyAction m_RotateLeftAction;
@@ -87,6 +89,8 @@ namespace InterchangeMod.Systems
         private int m_RandomSeed;
         private Random m_Random;
         private float m_LastYaw;
+        /// <summary>当前预览的生成结果（局部坐标），调试时用来把错误位置对应到路段名。</summary>
+        private IReadOnlyList<RoadSegmentSpec> m_LastSegments;
         /// <summary>当前路口匹配：鼠标指着已有道路时的路口及匹配结果。</summary>
         private Entity m_MatchSeed;
         private List<ExternalEdge> m_MatchEdges;
@@ -99,6 +103,8 @@ namespace InterchangeMod.Systems
         private float? m_PartnerMedian;
         /// <summary>最近一次鼠标位置（只对齐一条道路时，T 型支路放在鼠标所在的一侧）。</summary>
         private Vec3 m_Cursor;
+        /// <summary>十字路口当 T 型用时支路在主线哪一侧（true = 右侧）；不是这种情况时为 null。</summary>
+        private bool? m_TeeSide;
         /// <summary>原路口改造时当前预览的立交范围（局部坐标，相对 m_LastOrigin / m_LastYaw）；不拆除时为 null。</summary>
         private Footprint m_RemovalFootprint;
         /// <summary>立交范围比生成路段中心线的凸包向外多出的距离：原有道路在这之外的部分保留。</summary>
@@ -329,6 +335,8 @@ namespace InterchangeMod.Systems
                     RefreshGameErrors();
                     string details = snapshot == null ? "" : string.Join("; ", snapshot.GameErrors);
                     Mod.log.Info($"Placement blocked by the game: {details}");
+                    if (setting.DebugLogging && snapshot != null)
+                        LogErrorLocations(snapshot.GameErrors);
                 }
             }
 
@@ -353,6 +361,29 @@ namespace InterchangeMod.Systems
         /// 鼠标指着的实体换了路口时重新读路口、重新匹配。不是道路（或关了匹配）时清除匹配。
         /// </summary>
         private void UpdateJunctionMatch(Entity hitEntity, float3 hitPosition)
+        {
+            m_Cursor = new Vec3(hitPosition.x, 0f, hitPosition.z);
+            UpdateJunctionMatchCore(hitEntity, hitPosition);
+            // 十字路口当 T 型用时，支路取鼠标所在一侧：鼠标移到主线另一侧就重建预览
+            bool? side = TeeFromCross ? CursorRightOfMain() : (bool?)null;
+            if (side != m_TeeSide)
+            {
+                m_TeeSide = side;
+                m_SettingsVersion++;
+            }
+        }
+
+        /// <summary>
+        /// 三向立交对准十字路口：当作 T 型，支路取鼠标所在一侧的那条臂，另一侧那条臂在立交范围内拆掉
+        /// （拆除照常按立交范围进行；范围外保留的部分没有臂端可接，自由结束）。
+        /// </summary>
+        private bool TeeFromCross => m_Match != null && m_Match.Error == null && !m_Match.RoadOnly
+            && m_Match.LegCount == 4 && CurrentTemplate.LegCount == 3;
+
+        private bool CursorRightOfMain() =>
+            Directions.Dot(m_Cursor - m_Match.Center, Directions.RightOf(Directions.FromAngle(m_Match.MainAngle))) > 0f;
+
+        private void UpdateJunctionMatchCore(Entity hitEntity, float3 hitPosition)
         {
             // 指着的是本工具自己的预览（新建的临时道路，没有对应的原有道路）：保持当前匹配，否则预览会来回跳
             if (hitEntity != Entity.Null && EntityManager.Exists(hitEntity) && EntityManager.HasComponent<Temp>(hitEntity)
@@ -478,7 +509,8 @@ namespace InterchangeMod.Systems
                 return;
             }
             snapshot.MatchState = m_Match.RoadOnly ? "road" : "matched";
-            snapshot.MatchAngle = m_Match.CrossingAngle;
+            snapshot.MatchAngle = TeeFromCross ? BranchAngle(true) : m_Match.CrossingAngle;
+            snapshot.MatchDropsLeg = TeeFromCross;
             snapshot.MatchCrossing = m_Match.Crossing;
             snapshot.MatchMain = Describe(m_Match.Main);
             snapshot.MatchCross = m_Match.RoadOnly ? "" : Describe(m_Match.Cross);
@@ -486,6 +518,38 @@ namespace InterchangeMod.Systems
 
         private static string Describe(MatchedRoad road) =>
             road.Form == RoadForm.Dual ? $"{road.Prefab}|Dual|{road.MedianWidth:F0}" : $"{road.Prefab}|TwoWay|0";
+
+        /// <summary>
+        /// 调试：每个错误图标的位置（立交局部坐标）和离它最近的生成路段名，方便对照模板查是哪段路出的问题。
+        /// </summary>
+        private void LogErrorLocations(List<GameError> errors)
+        {
+            if (m_LastSegments == null)
+                return;
+            foreach (var error in errors)
+            {
+                foreach (float3 world in error.Positions)
+                {
+                    var local = new Vec3(world.x - m_LastOrigin.x, world.y, world.z - m_LastOrigin.z).RotateY(-m_LastYaw);
+                    string nearest = "?";
+                    float best = float.MaxValue;
+                    foreach (var segment in m_LastSegments)
+                    {
+                        for (int i = 0; i <= 16; i++)
+                        {
+                            Vec3 q = segment.Curve.Evaluate(i / 16f);
+                            float d = (q.X - local.X) * (q.X - local.X) + (q.Z - local.Z) * (q.Z - local.Z);
+                            if (d < best)
+                            {
+                                best = d;
+                                nearest = segment.Name;
+                            }
+                        }
+                    }
+                    Mod.log.Info($"[debug]   {error.Type} {error.Road} at local ({local.X:F1}, {local.Z:F1}), height {world.y:F1}: nearest segment {nearest} ({System.Math.Sqrt(best):F1} m)");
+                }
+            }
+        }
 
         /// <summary>读出游戏对当前预览报的错误（重叠、高度不足、净空不足等），存进面板快照。</summary>
         private void RefreshGameErrors()
@@ -499,7 +563,20 @@ namespace InterchangeMod.Systems
                 return;
             }
             snapshot.GameErrors = PlacementErrorReader.Read(EntityManager, m_PrefabSystem, m_IconQuery);
+            // 调试：错误变化时记下每个错误的位置和最近的路段，不用点击放置也能查
+            string summary = string.Join("; ", snapshot.GameErrors);
+            if (setting.DebugLogging && summary != m_LastLoggedGameErrors)
+            {
+                m_LastLoggedGameErrors = summary;
+                if (snapshot.GameErrors.Count > 0)
+                {
+                    Mod.log.Info($"[debug] game errors: {summary}");
+                    LogErrorLocations(snapshot.GameErrors);
+                }
+            }
         }
+
+        private string m_LastLoggedGameErrors;
 
         private JobHandle UpdatePreview(JobHandle inputDeps, float3 origin, float yaw)
         {
@@ -511,9 +588,9 @@ namespace InterchangeMod.Systems
             FillMatchState(snapshot);
             if (m_Match != null && m_Match.Error != null)
                 errors.Add($"无法匹配路口：{m_Match.Error}（把鼠标移到空地上可自由放置）");
-            else if (m_Match != null && !m_Match.RoadOnly && m_Match.LegCount != CurrentTemplate.LegCount)
+            else if (m_Match != null && !m_Match.RoadOnly && m_Match.LegCount != CurrentTemplate.LegCount && !TeeFromCross)
                 errors.Add(m_Match.LegCount == 3
-                    ? "这是三向（T 型）路口：当前立交类型需要四向路口，请选择“快速路 T 型”（喇叭形正在开发）"
+                    ? "这是三向（T 型）路口：当前立交类型需要四向路口，请选择“快速路 T 型”或“喇叭形”"
                     : $"这是 {m_Match.LegCount} 向路口，当前立交类型需要 {CurrentTemplate.LegCount} 向");
             InterchangeParams p = BuildParams(errors, snapshot);
             if (errors.Count == 0)
@@ -528,9 +605,11 @@ namespace InterchangeMod.Systems
             snapshot.RampLength = p.RampLength;
 
             IReadOnlyList<RoadSegmentSpec> segments = null;
+            m_LastSegments = null;
             if (errors.Count == 0)
             {
                 segments = CurrentTemplate.Generate(p);
+                m_LastSegments = segments;
                 errors.AddRange(InterchangeLayout.ValidateGeometry(segments, p));
             }
 
@@ -620,6 +699,9 @@ namespace InterchangeMod.Systems
         {
             if (matched && !m_Match.RoadOnly && m_Match.LegCount == 3)
                 return m_Match.CrossingAngle;
+            // 十字路口当 T 型：被交道路右侧那条臂在 CrossingAngle（0~180°），左侧那条在对面
+            if (matched && TeeFromCross)
+                return CursorRightOfMain() ? m_Match.CrossingAngle : m_Match.CrossingAngle + 180f;
             bool left = setting.BranchOnLeft;
             if (matched && m_Match.RoadOnly)
             {
@@ -701,6 +783,35 @@ namespace InterchangeMod.Systems
             if (IsExpressway)
                 SetFrontage(p, errors, snapshot);
 
+            if (IsTrumpet)
+            {
+                p.LoopRadius = setting.LoopRadius > 0f ? setting.LoopRadius : 60f;
+                p.TrumpetLoopForExit = setting.TrumpetLoopForExit;
+                p.TrumpetNearRampRadius = setting.TrumpetNearRampRadius;
+                // 喇叭形的支路两幅分开（出向一幅接环道、进向一幅接半定向匝道），支路是双向道路时立交内部改用双幅，外端过渡回双向
+                if (crossForm == RoadForm.TwoWay && m_RoadsByName.TryGetValue(crossName, out RoadInfo branch))
+                {
+                    // 优先选两幅并排正好放得进双向道路宽度的单行道路（街道单行道带人行道较宽，放不下时用同车道数的公路单行道）
+                    RoadInfo oneWay = RampMatcher.PickSplitOneWay(m_RoadCatalog, branch)
+                        ?? RampMatcher.PickClosest(m_RoadCatalog, branch.IsHighway, branch.LanesPerDirection, oneWay: true);
+                    if (oneWay != null && m_PrefabResolver.TryResolve(crossName, m_SelectedRoad, out NetPrefab twoWayPrefab)
+                        && m_PrefabResolver.TryResolve(oneWay.Name, m_SelectedRoad, out NetPrefab oneWayPrefab))
+                    {
+                        // 两幅外缘对齐双向道路的两侧边缘（分隔带 = 双向宽 − 2 × 单幅宽），外端两幅平行接入同一个节点；
+                        // 单行道路比双向道路的一半还宽时放不下，改用斜向汇合的过渡段
+                        float twoWayWidth = m_PrefabResolver.GetWidth(twoWayPrefab);
+                        float aligned = twoWayWidth - 2f * m_PrefabResolver.GetWidth(oneWayPrefab);
+                        SetRoad(p, 1, 1, RoadForm.Dual, oneWay.Name, aligned >= 0f ? System.Math.Max(aligned, TrumpetTemplate.kMinSplitMedian) : setting.MedianWidth, errors);
+                        p.Legs[1].ExternalForm = RoadForm.TwoWay;
+                        p.Legs[1].ExternalPrefab = crossName;
+                        p.Legs[1].ExternalWidth = twoWayWidth;
+                        crossName = oneWay.Name;
+                        crossForm = RoadForm.Dual;
+                        PlanLevels(p, snapshot);
+                    }
+                }
+            }
+
             // 原路口改造：已匹配的臂接回原有道路，不在原有道路高度的那层（如高架的上层）在臂端加坡道升降过去
             if (matched && !StackedOverMatch)
             {
@@ -717,7 +828,7 @@ namespace InterchangeMod.Systems
             ChooseRamp(p, mainName, errors, snapshot);
             if (setting.LaneBalance)
                 ApplyLaneBalance(p, mainName, snapshot);
-            if (IsExpressway || IsSinglePoint)
+            if (IsExpressway || IsSinglePoint || IsTrumpet)
                 p.RampSideGap = setting.RampGap > 0f ? setting.RampGap : 1f;
 
             snapshot.MainRoad = mainName;
@@ -782,9 +893,11 @@ namespace InterchangeMod.Systems
             if (m_PrefabResolver.TryResolve(p.RampPrefab, m_SelectedRoad, out NetPrefab rampPrefab))
             {
                 p.RampWidth = m_PrefabResolver.GetWidth(rampPrefab);
-                // 匝道要爬坡：取 8% 与这种道路自身允许坡度中较严的那个
-                if (m_RoadsByName.TryGetValue(p.RampPrefab, out RoadInfo rampInfo) && rampInfo.MaxSlope > 0f)
-                    p.MaxGrade = System.Math.Min(p.MaxGrade, rampInfo.MaxSlope);
+                // 坡度上限：面板值（默认 8%），且不超过匝道和要升降的主线 / 被交道路自身允许的坡度
+                p.MaxGrade = (setting.MaxGradePercent > 0f ? setting.MaxGradePercent : 8f) / 100f;
+                foreach (string road in new[] { p.RampPrefab, p.Legs[0].RoadPrefab, p.Legs[1].RoadPrefab })
+                    if (road != null && m_RoadsByName.TryGetValue(road, out RoadInfo info) && info.MaxSlope > 0f)
+                        p.MaxGrade = System.Math.Min(p.MaxGrade, info.MaxSlope);
             }
             else
                 errors.Add($"ramp prefab '{p.RampPrefab}' not found");
@@ -973,5 +1086,7 @@ namespace InterchangeMod.Systems
         public List<string> Errors = new List<string>();
         /// <summary>游戏对预览报的问题（重叠、高度不足等），由工具定期读取。</summary>
         public List<GameError> GameErrors = new List<GameError>();
+        /// <summary>三向立交对准了十字路口：去掉鼠标对面那条臂。</summary>
+        public bool MatchDropsLeg;
     }
 }

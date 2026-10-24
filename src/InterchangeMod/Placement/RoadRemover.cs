@@ -34,8 +34,8 @@ namespace InterchangeMod.Placement
         // 原有高架沿线高度会随地形略有起伏（游戏内实测交叉处 11.1 米、两端 12.1 米），容差放宽到 3 米；接上后端点高度取臂端的
         private const float kConnectElevation = 3f;
         /// <summary>臂端离原有道路中心线的最大距离（米）。</summary>
-        private const float kConnectLateral = 4f;
-        /// <summary>接不上臂端的切断端再往外退的距离（米）。</summary>
+        private const float kConnectLateral = 6f;
+        /// <summary>接不上臂端的切断端再往外退的距离（米），另加这条路的半宽：宽路斜着穿出范围时，端头两角不伸进立交。</summary>
         private const float kUnconnectedGap = 10f;
 
         /// <summary>
@@ -95,6 +95,7 @@ namespace InterchangeMod.Placement
                 Edge edge = entityManager.GetComponentData<Edge>(entity);
                 Bezier4x3 curve = entityManager.GetComponentData<Curve>(entity).m_Bezier;
                 Entity prefab = entityManager.GetComponentData<PrefabRef>(entity).m_Prefab;
+                float halfWidth = entityManager.TryGetComponent(prefab, out NetGeometryData prefabGeometry) ? prefabGeometry.m_DefaultWidth / 2f : 0f;
 
                 CreateDelete(commandBuffer, entity, edge, curve);
 
@@ -111,9 +112,9 @@ namespace InterchangeMod.Placement
                     if (endTarget >= 0)
                         used[endTarget] = true;
                     if (start > 0f && startTarget < 0)
-                        start += kUnconnectedGap / edgeLength;
+                        start += (kUnconnectedGap + halfWidth) / edgeLength;
                     if (end < 1f && endTarget < 0)
-                        end -= kUnconnectedGap / edgeLength;
+                        end -= (kUnconnectedGap + halfWidth) / edgeLength;
 
                     Bezier4x3 part = MathUtils.Cut(curve, new float2(start, end));
                     if (end <= start || MathUtils.Length(part) < kMinRemainderLength)

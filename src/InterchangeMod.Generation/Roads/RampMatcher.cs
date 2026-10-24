@@ -47,6 +47,21 @@ namespace InterchangeMod.Generation.Roads
                 ?? Best(candidates, lanesPerDirection);
         }
 
+        /// <summary>
+        /// 把双向道路拆成双幅时用的单行道路：每方向车道数相同、两幅并排不超过双向道路的宽度（好让两幅外缘对齐它的两侧边缘），
+        /// 同类（公路/街道）优先，再取最宽的（分隔带最窄）。没有放得下的返回 null。
+        /// </summary>
+        public static RoadInfo? PickSplitOneWay(IEnumerable<RoadInfo> roads, RoadInfo twoWay)
+        {
+            var fits = roads.Where(r => r.IsOneWay && IsOrdinaryRoad(r) && r.LanesPerDirection == twoWay.LanesPerDirection
+                && 2f * r.Width <= twoWay.Width + 0.01f).ToList();
+            return fits.OrderBy(r => r.IsHighway == twoWay.IsHighway ? 0 : 1)
+                .ThenByDescending(r => r.Width)
+                .ThenBy(r => r.Name.Length)
+                .ThenBy(r => r.Name, StringComparer.Ordinal)
+                .FirstOrDefault();
+        }
+
         private static bool IsSymmetric(RoadInfo road) => road.ForwardLanes == road.BackwardLanes;
 
         private static RoadInfo? Best(IEnumerable<RoadInfo> roads, int targetLanes) =>

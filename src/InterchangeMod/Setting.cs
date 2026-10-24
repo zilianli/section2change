@@ -41,7 +41,7 @@ namespace InterchangeMod
 
         // —— 立交参数（工具面板修改）——
 
-        /// <summary>立交类型：Diamond 菱形 / ExpresswayNode 中式快速路节点 / ExpresswayT 快速路 T 型 / SinglePoint 单点立交。</summary>
+        /// <summary>立交类型：Diamond 菱形 / ExpresswayNode 中式快速路节点 / ExpresswayT 快速路 T 型 / SinglePoint 单点立交 / Trumpet 喇叭形。</summary>
         [SettingsUIHidden] public string InterchangeType { get; set; }
 
         /// <summary>中式快速路节点的地面辅路（单行道路）预制体名。空 = Medium Road Oneway。</summary>
@@ -61,6 +61,18 @@ namespace InterchangeMod
 
         /// <summary>T 型立交空地放置时支路在主线方向的左侧（false = 右侧）。对准已有 T 型路口时由路口决定。</summary>
         [SettingsUIHidden] public bool BranchOnLeft { get; set; }
+
+        /// <summary>喇叭形的环道用于驶出主线（true，默认）或驶入主线。</summary>
+        [SettingsUIHidden] public bool TrumpetLoopForExit { get; set; }
+
+        /// <summary>喇叭形环道半径（米）。</summary>
+        [SettingsUIHidden] public float LoopRadius { get; set; }
+
+        /// <summary>喇叭形近侧直连匝道半径（米）；0 = 自动（满足坡长约束的最小值）。</summary>
+        [SettingsUIHidden] public float TrumpetNearRampRadius { get; set; }
+
+        /// <summary>坡道最大坡度（%）。实际还不超过所用道路自身允许的坡度；越陡占地越小。</summary>
+        [SettingsUIHidden] public float MaxGradePercent { get; set; }
 
         /// <summary>基层（下层）的离地高度。负数为下沉/隧道。改它会让整座立交一起升降。</summary>
         [SettingsUIHidden] public float BaseElevation { get; set; }
@@ -141,6 +153,9 @@ namespace InterchangeMod
             SpacingInCells = false;
             BaseFollowsMatch = true;
             BranchOnLeft = false;
+            TrumpetLoopForExit = true;
+            LoopRadius = 40f;
+            MaxGradePercent = 8f;
             BaseElevation = 0f;
             LevelGap = 0f;
             MainOnTop = false;
@@ -182,7 +197,7 @@ namespace InterchangeMod
                 case nameof(CrossRoadPrefab): CrossRoadPrefab = value ?? ""; return true;
                 case nameof(RampPrefab): RampPrefab = value ?? ""; return true;
                 case nameof(InterchangeType):
-                    InterchangeType = value == "ExpresswayNode" || value == "ExpresswayT" || value == "SinglePoint" ? value : "Diamond";
+                    InterchangeType = value == "ExpresswayNode" || value == "ExpresswayT" || value == "SinglePoint" || value == "Trumpet" ? value : "Diamond";
                     return true;
                 case nameof(FrontageRoadPrefab): FrontageRoadPrefab = value ?? ""; return true;
                 case nameof(LaneBalance): LaneBalance = value == "true"; return true;
@@ -190,6 +205,10 @@ namespace InterchangeMod
                 case nameof(SpacingInCells): SpacingInCells = value == "true"; return true;
                 case nameof(BaseFollowsMatch): BaseFollowsMatch = value == "true"; return true;
                 case nameof(BranchOnLeft): BranchOnLeft = value == "true"; return true;
+                case nameof(TrumpetLoopForExit): TrumpetLoopForExit = value == "true"; return true;
+                case nameof(LoopRadius): LoopRadius = Clamp(number, 30f, 250f); return true;
+                case nameof(TrumpetNearRampRadius): TrumpetNearRampRadius = number <= 0f ? 0f : Clamp(number, 30f, 1000f); return true;
+                case nameof(MaxGradePercent): MaxGradePercent = Clamp(number, 3f, 25f); return true;
                 default: return false;
             }
         }

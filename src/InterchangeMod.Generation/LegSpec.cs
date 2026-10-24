@@ -69,6 +69,12 @@ namespace InterchangeMod.Generation
         public string? ExternalPrefab { get; set; }
 
         /// <summary>
+        /// 外部双向道路的宽度（米），0 = 未知。双幅外缘正好对齐它的两侧边缘时（2·幅偏移 + 单幅宽 = 外部宽度），
+        /// 臂端用“边缘对齐”接入：两幅平行直接接到外部道路端点的同一个节点，不再斜向汇合（见 TrumpetTemplate）。
+        /// </summary>
+        public float ExternalWidth { get; set; }
+
+        /// <summary>
         /// 臂端外部道路的离地高度；null 表示不接外部道路。与这条臂所在层的高度不同时，
         /// 臂端再延伸一段坡道升降到这个高度（见 InterchangeLayout.AddApproachSlopes），好接回原有道路。
         /// </summary>

@@ -115,6 +115,23 @@ namespace InterchangeMod.Generation.Tests
             Assert.Equal(2, new RoadInfo("Large Road Asymmetric - 2+4 lanes", false, 4, 2, 32f).LanesPerDirection);
             Assert.False(new RoadInfo("Medium Road", false, 2, 2, 24f).IsOneWay);
         }
+
+        [Fact]
+        public void PickSplitOneWay_TwoCarriagewaysFitInsideTheTwoWayRoad()
+        {
+            // XL Road Divided（4+4 车道，40 米）：街道单行 4 车道带人行道 24 米，两幅 48 米放不下 → 用 20 米的公路单行 4 车道
+            var roads = new List<RoadInfo>
+            {
+                new RoadInfo("Medium Road Oneway", false, 4, 0, 24f),
+                new RoadInfo("Highway Oneway - 4 lanes", true, 4, 0, 20f),
+                new RoadInfo("Highway Oneway - 3 lanes", true, 3, 0, 16f),
+                new RoadInfo("Small Road Oneway", false, 2, 0, 16f),
+            };
+            Assert.Equal("Highway Oneway - 4 lanes", RampMatcher.PickSplitOneWay(roads, new RoadInfo("XL Road Divided", false, 4, 4, 40f))?.Name);
+            // 同类放得下时优先同类
+            Assert.Equal("Small Road Oneway", RampMatcher.PickSplitOneWay(roads, new RoadInfo("Medium Road", false, 2, 2, 32f))?.Name);
+            Assert.Null(RampMatcher.PickSplitOneWay(roads, new RoadInfo("Narrow", false, 4, 4, 30f)));
+        }
     }
 
     public class RecentListTests
