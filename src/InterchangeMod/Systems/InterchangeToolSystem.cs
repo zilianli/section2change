@@ -431,8 +431,20 @@ namespace InterchangeMod.Systems
             return true;
         }
 
-        /// <summary>基层高度：立体交叉时取两条已有道路中较低的那条，否则是面板设定。</summary>
-        private float BaseElevation => m_Match != null && m_Match.Error == null && m_Match.Crossing ? m_Match.LowestElevation : setting.BaseElevation;
+        /// <summary>
+        /// 基层跟随已有道路：对准已有路口/道路时（面板默认“跟随”），基层取已有道路的实际离地高度
+        /// （路堤、下沉、高架都可能，不一定是地面）；立体交叉时总是跟随。空地放置或面板选“手动”时用面板的基层。
+        /// </summary>
+        private bool BaseFollowsMatch => m_Match != null && m_Match.Error == null && (m_Match.Crossing || setting.BaseFollowsMatch);
+
+        /// <summary>基层高度：跟随已有道路时取较低那条已有道路的高度，否则是面板设定。</summary>
+        private float BaseElevation => BaseFollowsMatch ? m_Match.LowestElevation : setting.BaseElevation;
+
+        /// <summary>
+        /// 叠建：手动把基层放在高架或隧道那一段时，在原有道路上方/下方另建一座，不拆原有道路。
+        /// 跟随已有道路时总是原路口改造（新立交替换原有道路）。
+        /// </summary>
+        private bool StackedOverMatch => !BaseFollowsMatch && LevelPlanner.BandOf(setting.BaseElevation) is ElevationBand.Elevated or ElevationBand.Tunnel;
 
         private JunctionMatch MatchEdges(Vec3 cursor) =>
             JunctionMatcher.Match(m_MatchEdges, m_Yaw / Directions.DegToRad, cursor, setting.MedianWidth, !m_CityConfigurationSystem.leftHandTraffic);
@@ -486,6 +498,10 @@ namespace InterchangeMod.Systems
             FillMatchState(snapshot);
             if (m_Match != null && m_Match.Error != null)
                 errors.Add($"无法匹配路口：{m_Match.Error}（把鼠标移到空地上可自由放置）");
+            else if (m_Match != null && !m_Match.RoadOnly && m_Match.LegCount != CurrentTemplate.LegCount)
+                errors.Add(m_Match.LegCount == 3
+                    ? "这是三向（T 型）路口：当前立交类型需要四向路口；T 型立交（快速路 T 型、喇叭形）正在开发"
+                    : $"这是 {m_Match.LegCount} 向路口，当前立交类型需要 {CurrentTemplate.LegCount} 向");
             InterchangeParams p = BuildParams(errors, snapshot);
             if (errors.Count == 0)
             {
@@ -509,7 +525,7 @@ namespace InterchangeMod.Systems
             bool retrofit = false;
             if (m_Match != null && m_Match.Error == null)
             {
-                snapshot.MatchStacked = LevelPlanner.BandOf(BaseElevation) is ElevationBand.Elevated or ElevationBand.Tunnel;
+                snapshot.MatchStacked = StackedOverMatch;
                 retrofit = !snapshot.MatchStacked;
             }
 
@@ -550,9 +566,12 @@ namespace InterchangeMod.Systems
         {
             LegSpec lower = MainOnTop ? p.Legs[1] : p.Legs[0];
             LegSpec upper = MainOnTop ? p.Legs[0] : p.Legs[1];
-            float gap = LevelPlanner.ResolveGap(lower, upper, setting.BaseElevation, setting.LevelGap);
-            float mainElevation = MainOnTop ? setting.BaseElevation + gap : setting.BaseElevation;
-            float crossElevation = MainOnTop ? setting.BaseElevation : setting.BaseElevation + gap;
+            float baseElevation = BaseElevation;
+            float gap = LevelPlanner.ResolveGap(lower, upper, baseElevation, setting.LevelGap);
+            float mainElevation = MainOnTop ? baseElevation + gap : baseElevation;
+            float crossElevation = MainOnTop ? baseElevation : baseElevation + gap;
+            snapshot.BaseFollows = BaseFollowsMatch;
+            snapshot.BaseElevation = baseElevation;
             if (m_Match != null && m_Match.Error == null && m_Match.Crossing)
             {
                 // 立体交叉：两条道路保持原来的高度，好在两端接回原有道路
@@ -636,7 +655,7 @@ namespace InterchangeMod.Systems
                 SetFrontage(p, errors, snapshot);
 
             // 原路口改造：已匹配的臂接回原有道路，不在原有道路高度的那层（如高架的上层）在臂端加坡道升降过去
-            if (matched && LevelPlanner.BandOf(BaseElevation) is not (ElevationBand.Elevated or ElevationBand.Tunnel))
+            if (matched && !StackedOverMatch)
             {
                 foreach (int index in m_Match.RoadOnly ? new[] { 0, 2 } : new[] { 0, 1, 2, 3 })
                 {
@@ -871,6 +890,10 @@ namespace InterchangeMod.Systems
         public int RemovedRoads;
         /// <summary>保留的原有道路接回立交的臂端数。</summary>
         public int ConnectedEnds;
+        /// <summary>基层跟随已有道路（而不是面板设定）。</summary>
+        public bool BaseFollows;
+        /// <summary>实际用的基层高度。</summary>
+        public float BaseElevation;
         /// <summary>中式快速路节点实际用的辅路；菱形时为空。</summary>
         public string FrontageRoad = "";
         public int FrontageLanes;

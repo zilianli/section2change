@@ -56,6 +56,9 @@ namespace InterchangeMod
         /// <summary>面板里的间距（分隔带、匝道间距）按游戏网格的格数显示（1 格 = 8 米），存储仍是米。</summary>
         [SettingsUIHidden] public bool SpacingInCells { get; set; }
 
+        /// <summary>对准已有路口/道路时基层跟随已有道路的实际高度（默认）；false 时按面板的基层。</summary>
+        [SettingsUIHidden] public bool BaseFollowsMatch { get; set; }
+
         /// <summary>基层（下层）的离地高度。负数为下沉/隧道。改它会让整座立交一起升降。</summary>
         [SettingsUIHidden] public float BaseElevation { get; set; }
 
@@ -133,6 +136,7 @@ namespace InterchangeMod
             LaneBalance = true;
             RampGap = 1f;
             SpacingInCells = false;
+            BaseFollowsMatch = true;
             BaseElevation = 0f;
             LevelGap = 0f;
             MainOnTop = false;
@@ -178,6 +182,7 @@ namespace InterchangeMod
                 case nameof(LaneBalance): LaneBalance = value == "true"; return true;
                 case nameof(RampGap): RampGap = Clamp(number, 0.5f, 16f); return true;
                 case nameof(SpacingInCells): SpacingInCells = value == "true"; return true;
+                case nameof(BaseFollowsMatch): BaseFollowsMatch = value == "true"; return true;
                 default: return false;
             }
         }

@@ -92,6 +92,17 @@ namespace InterchangeMod.Generation
             new LegSpec(crossingAngle + 180f, crossLevel),
         };
 
+        /// <summary>
+        /// T 型三向臂：主线沿 0°/180°（臂 0 / 臂 2），支路沿 branchAngle（臂 1，从主线臂 0 顺时针量，0~360°）。
+        /// branchAngle 小于 180° 时支路在主线臂 0 方向的右侧（从上往下看顺时针），大于 180° 时在左侧。
+        /// </summary>
+        public static List<LegSpec> TLegs(float branchAngle, int mainLevel, int branchLevel) => new List<LegSpec>
+        {
+            new LegSpec(0f, mainLevel),
+            new LegSpec(branchAngle, branchLevel),
+            new LegSpec(180f, mainLevel),
+        };
+
         /// <summary>把同一条道路的两端（如主线臂 0/2）设成相同的形式、宽度和预制体。</summary>
         public void SetRoad(int legA, int legB, RoadForm form, float roadWidth, float medianWidth, string? prefab)
         {

@@ -101,6 +101,7 @@ namespace InterchangeMod.UI
                 .Field(nameof(s.LaneBalance), s.LaneBalance)
                 .Field(nameof(s.RampGap), s.RampGap)
                 .Field(nameof(s.SpacingInCells), s.SpacingInCells)
+                .Field(nameof(s.BaseFollowsMatch), s.BaseFollowsMatch)
                 .EndObject();
 
             PanelSnapshot snap = m_ToolSystem.snapshot;
@@ -109,7 +110,7 @@ namespace InterchangeMod.UI
                 json.BeginObject("match")
                     .Field("state", snap.MatchState).Field("error", snap.MatchError).Field("legs", snap.MatchLegs)
                     .Field("angle", snap.MatchAngle).Field("main", snap.MatchMain).Field("cross", snap.MatchCross)
-                    .Field("stacked", snap.MatchStacked).Field("crossing", snap.MatchCrossing).Field("removed", snap.RemovedRoads).Field("connected", snap.ConnectedEnds).Field("mainTransition", snap.MainTransition)
+                    .Field("stacked", snap.MatchStacked).Field("crossing", snap.MatchCrossing).Field("removed", snap.RemovedRoads).Field("connected", snap.ConnectedEnds).Field("baseFollows", snap.BaseFollows).Field("baseElevation", snap.BaseElevation).Field("mainTransition", snap.MainTransition)
                     .EndObject();
                 json.BeginObject("resolved")
                     .Field("mainElevation", snap.MainElevation).Field("crossElevation", snap.CrossElevation)

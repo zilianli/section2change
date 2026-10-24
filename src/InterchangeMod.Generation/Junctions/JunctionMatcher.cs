@@ -102,7 +102,7 @@ namespace InterchangeMod.Generation.Junctions
             if (legs.Count == 2 && Directions.AngleBetween(legs[0].Angle, legs[1].Angle) >= 180f - kOppositeTolerance)
                 return MatchRoad(result, legs, preferredAngle, cursor, dualMedian, rightHandTraffic);
             if (legs.Count == 3)
-                return Fail(result, "这是三向（T 型）路口：菱形立交需要四向路口，三向立交（喇叭形等）尚未实现");
+                return MatchT(result, legs, preferredAngle);
             if (legs.Count != 4)
                 return Fail(result, $"路口有 {legs.Count} 个方向，只能匹配四向十字路口");
 
@@ -188,6 +188,37 @@ namespace InterchangeMod.Generation.Junctions
             Vec3 d = leg.Direction;
             float t = Directions.Dot(new Vec3(cursor.X - linePoint.X, 0f, cursor.Z - linePoint.Z), d);
             result.Center = new Vec3(linePoint.X + d.X * t, 0f, linePoint.Z + d.Z * t);
+            return result;
+        }
+
+        /// <summary>
+        /// T 型（三向）路口：方向最接近相反的两条臂配成直行的主线（不论车道多少），剩下那条是支路。
+        /// CrossingAngle 是支路相对主线臂（离当前朝向近的那条）顺时针的角度，0~360°：小于 180° 时支路在右侧。
+        /// </summary>
+        private static JunctionMatch MatchT(JunctionMatch result, List<Leg> legs, float preferredAngle)
+        {
+            foreach (var leg in legs)
+            {
+                string? error = DescribeLeg(leg);
+                if (error != null)
+                    return Fail(result, error);
+            }
+
+            var pairs = new[] { (0, 1, 2), (0, 2, 1), (1, 2, 0) }
+                .Select(t => (a: legs[t.Item1], b: legs[t.Item2], branch: legs[t.Item3]))
+                .OrderByDescending(t => Directions.AngleBetween(t.a.Angle, t.b.Angle))
+                .ToList();
+            var (mainA, mainB, branch) = pairs[0];
+            float straightness = Directions.AngleBetween(mainA.Angle, mainB.Angle);
+            if (straightness < 180f - kOppositeTolerance)
+                return Fail(result, $"T 型路口里没有一条直行的道路（最直的两条臂夹角 {straightness:F0}°），无法匹配");
+
+            Leg mainLeg = Directions.AngleBetween(preferredAngle, mainA.Angle) <= Directions.AngleBetween(preferredAngle, mainB.Angle) ? mainA : mainB;
+            result.MainAngle = mainLeg.Angle;
+            result.CrossingAngle = Normalize(branch.Angle - mainLeg.Angle);
+            result.Main = mainLeg.Road;
+            result.Cross = branch.Road;
+            result.Center = Intersect(Midpoint(mainA, mainB), mainLeg.Direction, branch.CenterPoint, branch.Direction);
             return result;
         }
 

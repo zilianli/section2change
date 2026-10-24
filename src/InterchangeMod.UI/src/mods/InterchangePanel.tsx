@@ -85,8 +85,18 @@ export const InterchangePanel = () => {
 
           <Section title={t.levels}>
             {/* 只设基层高度，上层 = 基层 + 层间高差；改基层整座立交一起升降 */}
-            <Stepper label={t.baseElevation} value={s.BaseElevation} step={0.5} min={-30} max={30} unit=" m"
-              onChange={(v) => setValue("BaseElevation", v)} />
+            {/* 对准已有道路时基层默认跟随它的实际高度（不一定是地面）；立体交叉总是跟随 */}
+            {(matched || roadAligned) && !match?.crossing && (
+              <Choice label={t.baseElevation} value={s.BaseFollowsMatch ? "follow" : "manual"}
+                options={[{ value: "follow", text: t.baseFollow }, { value: "manual", text: t.baseManual }]}
+                onChange={(v) => setValue("BaseFollowsMatch", v === "follow")} />
+            )}
+            {match?.baseFollows ? (
+              <div className={styles.resolved}>{`${t.baseElevation}：${formatMeters(match.baseElevation)}（${t.baseFollowNote}）`}</div>
+            ) : (
+              <Stepper label={(matched || roadAligned) && !match?.crossing ? "" : t.baseElevation} value={s.BaseElevation}
+                step={0.5} min={-30} max={30} unit=" m" onChange={(v) => setValue("BaseElevation", v)} />
+            )}
             <Choice label={t.levelGap} value={s.LevelGap > 0 ? "manual" : "auto"}
               options={[{ value: "auto", text: t.gapAuto }, { value: "manual", text: t.gapManual }]}
               onChange={(v) => setValue("LevelGap", v === "auto" ? 0 : Math.ceil((r?.minimumGap ?? 7.5) * 2) / 2)} />

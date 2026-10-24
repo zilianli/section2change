@@ -36,11 +36,17 @@ export interface PanelSettings {
   RampGap: number;
   /** 间距按游戏网格的格数显示（1 格 = 8 米）。 */
   SpacingInCells: boolean;
+  /** 对准已有道路时基层跟随已有道路的高度。 */
+  BaseFollowsMatch: boolean;
 }
 
 /** 路口匹配结果。main/cross 为“预制体|形式|分隔带”。 */
 export interface MatchInfo {
   state: "none" | "matched" | "road" | "error";
+  /** 基层跟随已有道路（不是面板设定）。 */
+  baseFollows: boolean;
+  /** 实际用的基层高度。 */
+  baseElevation: number;
   error: string;
   legs: number;
   angle: number;

@@ -112,14 +112,62 @@ namespace InterchangeMod.Generation.Tests
             Assert.True(Vec3.Distance(m.Center, center) < 0.5f, $"center {m.Center}");
         }
 
-        [Fact]
-        public void TJunction_IsReportedAsUnsupported()
+        /// <summary>只保留沿 angle 方向离开路口的那一半（T 型路口的支路只有一个方向）。</summary>
+        private static IEnumerable<ExternalEdge> OneSide(IEnumerable<ExternalEdge> road, float angle)
         {
-            var edges = new List<ExternalEdge>(TwoWayRoad(Vec3.Zero, 0f, "Large Road", 3));
-            edges.Add(new ExternalEdge { Anchor = Vec3.Zero, Direction = Directions.FromAngle(90f), Road = "Medium Road", Width = 24f, LanesPerDirection = 2 });
+            foreach (var e in road)
+                if (Directions.AngleBetween(JunctionMatcher.AngleOf(e.Direction), angle) < 1f)
+                    yield return e;
+        }
+
+        [Theory]
+        [InlineData(90f)]    // 支路在右侧
+        [InlineData(270f)]   // 支路在左侧
+        [InlineData(60f)]
+        public void TJunction_StraightRoadIsMainAndStemIsBranch(float branchAngle)
+        {
+            // 支路车道比主线多，也仍然是直行的那条做主线
+            var edges = Edges(TwoWayRoad(Vec3.Zero, 0f, "Medium Road", 2), OneSide(TwoWayRoad(Vec3.Zero, branchAngle, "Large Road", 3), branchAngle));
+            var m = JunctionMatcher.Match(edges, preferredAngle: 0f);
+            Assert.Null(m.Error);
+            Assert.Equal(3, m.LegCount);
+            Assert.Equal("Medium Road", m.Main!.Prefab);
+            Assert.Equal("Large Road", m.Cross!.Prefab);
+            Assert.Equal(0f, m.MainAngle, 1);
+            Assert.Equal(branchAngle, m.CrossingAngle, 1);
+        }
+
+        [Fact]
+        public void TJunction_WithDualRoads_FindsCenterAndMedians()
+        {
+            var center = new Vec3(200f, 0f, 100f);
+            var edges = Edges(
+                DualRoad(center, 0f, "Highway Oneway - 3 lanes", 3, 16f, 10f),
+                OneSide(DualRoad(center, 90f, "Highway Oneway - 2 lanes", 2, 12f, 6f), 90f));
+            var m = JunctionMatcher.Match(edges, preferredAngle: 180f);
+            Assert.Null(m.Error);
+            Assert.Equal(3, m.LegCount);
+            Assert.Equal(RoadForm.Dual, m.Main!.Form);
+            Assert.Equal(10f, m.Main.MedianWidth, 1);
+            Assert.Equal(RoadForm.Dual, m.Cross!.Form);
+            Assert.Equal(6f, m.Cross.MedianWidth, 1);
+            // 朝向 180° 时主线臂取 180°，支路在它顺时针 270° 处（即左侧）
+            Assert.Equal(180f, m.MainAngle, 1);
+            Assert.Equal(270f, m.CrossingAngle, 1);
+            Assert.True(Vec3.Distance(m.Center, center) < 0.5f, $"center {m.Center}");
+        }
+
+        [Fact]
+        public void TJunction_WithoutStraightRoad_IsRejected()
+        {
+            // 三条臂互成 120°：没有直行的道路
+            var edges = Edges(
+                OneSide(TwoWayRoad(Vec3.Zero, 0f, "A", 2), 0f),
+                OneSide(TwoWayRoad(Vec3.Zero, 120f, "B", 2), 120f),
+                OneSide(TwoWayRoad(Vec3.Zero, 240f, "C", 2), 240f));
             var m = JunctionMatcher.Match(edges, 0f);
             Assert.Equal(3, m.LegCount);
-            Assert.Contains("三向", m.Error);
+            Assert.Contains("直行", m.Error);
         }
 
         [Fact]
