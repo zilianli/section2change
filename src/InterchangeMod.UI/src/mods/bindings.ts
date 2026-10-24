@@ -5,7 +5,7 @@ const GROUP = "interchangeMod";
 
 export type RoadForm = "Auto" | "TwoWay" | "Dual";
 
-export type InterchangeType = "Diamond" | "ExpresswayNode" | "ExpresswayT" | "SinglePoint" | "Trumpet";
+export type InterchangeType = "Diamond" | "ExpresswayNode" | "ExpresswayT" | "SinglePoint" | "Trumpet" | "Cloverleaf";
 
 export interface PanelSettings {
   /** 基层（下层）离地高度。 */
@@ -42,6 +42,9 @@ export interface PanelSettings {
   BranchOnLeft: boolean;
   TrumpetLoopForExit: boolean;
   LoopRadius: number;
+  CloverleafCrossOnTop: boolean;
+  CloverleafHugLoop: boolean;
+  CloverleafCollector: boolean;
   MaxGradePercent: number;
   TrumpetNearRampRadius: number;
 }

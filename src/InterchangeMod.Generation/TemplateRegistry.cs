@@ -14,8 +14,8 @@ namespace InterchangeMod.Generation
             new ExpresswayNodeTemplate(tee: true),
             new SinglePointTemplate(),
             new TrumpetTemplate(),
-            // TODO 阶段 3: Cloverleaf, PartialCloverleaf, Trumpet
-            // TODO 阶段 5: Turbine, Stack, SinglePoint, Roundabout
+            new CloverleafTemplate(),
+            // TODO: PartialCloverleaf, Roundabout, Turbine, Stack
         };
 
         public static IReadOnlyList<IInterchangeTemplate> All => Templates;

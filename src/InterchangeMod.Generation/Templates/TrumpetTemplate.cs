@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using InterchangeMod.Generation.Geometry;
+using static InterchangeMod.Generation.Templates.Planar;
 
 namespace InterchangeMod.Generation.Templates
 {
@@ -111,7 +112,7 @@ namespace InterchangeMod.Generation.Templates
                     ? $"这个交角下环道半径至少 {radius:F0} 米（环道要接到跨线桥之外，升降坡度不超过上限；加大最大坡度可以更小）"
                     : "这个交角下环道放不下：请把交角调得更接近 90° 或加大最大坡度");
             }
-            if (p.TrumpetNearRampRadius > 0f && p.TrumpetNearRampRadius < plan.MinNearRadius - 0.5f)
+            if (p.DirectRampRadius > 0f && p.DirectRampRadius < plan.MinNearRadius - 0.5f)
                 errors.Add($"直连匝道半径至少 {MathF.Ceiling(plan.MinNearRadius):F0} 米（受支路下桥的坡长限制；加大最大坡度可以更小）");
             return errors;
         }
@@ -190,7 +191,7 @@ namespace InterchangeMod.Generation.Templates
             private readonly float d;
             /// <summary>匝道离开 / 接入主线时，还需要横移多少才与主线不再重叠。</summary>
             private float SepFromMainLine => Math.Max(1f, sepMain - d);
-            private readonly Path nearOut, nearIn;
+            private readonly RampPath nearOut, nearIn;
             private readonly float tOut, tIn, radiusOut, radiusIn;
             /// <summary>近侧直连匝道两头与主线 / 支路并行重叠（保持所接道路高度）的长度。</summary>
             private readonly float outFlatMain, outFlatBranch, inFlatMain, inFlatBranch;
@@ -199,7 +200,7 @@ namespace InterchangeMod.Generation.Templates
             /// <summary>环道半径太小，环道终点或半定向匝道起点落在跨线桥范围内。</summary>
             public readonly bool LoopTooSmall;
 
-            private readonly Path loop, semi;
+            private readonly RampPath loop, semi;
             private readonly float xLoop, xMerge, uLoopEnd, uSemiStart, loopFlat, semiFlat;
             /// <summary>环道升降段长度（去掉与主线并行重叠的那段）。</summary>
             public readonly float LoopClimbLength;
@@ -251,14 +252,14 @@ namespace InterchangeMod.Generation.Templates
 
                 // —— 近侧直连匝道：与主线、支路都相切的圆弧（主线在上层时先用较小半径的圆弧尽快离开高架主线，再接大圆弧）——
                 // 两条匝道转角不同（斜交时一条小于 90°、一条大于 90°），各自求半径；手动半径不小于各自的下限
-                float manual = Math.Max(30f, p.TrumpetNearRampRadius);
+                float manual = Math.Max(30f, p.DirectRampRadius);
                 (radiusOut, nearOut, tOut, outFlatMain, outFlatBranch) = SolveRamp(true, manual, grade);
                 (radiusIn, nearIn, tIn, inFlatMain, inFlatBranch) = SolveRamp(false, manual, grade);
                 MinNearRadius = Math.Max(SolveRamp(true, 30f, grade).Radius, SolveRamp(false, 30f, grade).Radius);
 
                 // —— 远侧：环道与远侧主线外切驶出，右转升降，最后与出向一幅相切（正交时转 270°）——
                 float rightTurn = DiamondTemplate.Cross2(-X, Y) >= 0f ? 1f : -1f;
-                loop = Path.Turn(Point(0f, om + d, 0f), -X, B(0f, ob), -f, rightTurn, R, out float aLoop, out float bLoop);
+                loop = RampPath.Turn(Point(0f, om + d, 0f), -X, B(0f, ob), -f, rightTurn, R, out float aLoop, out float bLoop);
                 xLoop = -aLoop;
                 uLoopEnd = -bLoop;
                 loopFlat = R * (float)Math.Acos(Math.Max(-1f, 1f - SepFromMainLine / R)) + kFlatMargin;
@@ -281,10 +282,10 @@ namespace InterchangeMod.Generation.Templates
                 xMerge = Directions.Dot(c3, X);
                 Vec3 tangent = c2 + (c3 - c2) * (r2 / (r2 + R));
                 float leftTurn = DiamondTemplate.Cross2(f, n) >= 0f ? 1f : -1f;
-                var around = new Arc(t0, f, r2, leftTurn * RotAngle(t0 - c2, tangent - c2, leftTurn));
+                var around = new RampArc(t0, f, r2, leftTurn * RotAngle(t0 - c2, tangent - c2, leftTurn));
                 Vec3 mergePoint = Point(xMerge, om + d, 0f);
-                var into = new Arc(around.End, around.EndHeading, R, -leftTurn * RotAngle(around.End - c3, mergePoint - c3, -leftTurn));
-                semi = Path.FromArcs(around, into);
+                var into = new RampArc(around.End, around.EndHeading, R, -leftTurn * RotAngle(around.End - c3, mergePoint - c3, -leftTurn));
+                semi = RampPath.FromArcs(around, into);
                 semiFlat = into.Length;
                 SemiDirectClimbLength = around.Length;
                 if (reach <= 0f || xMerge > xLoop - kMinSegment)
@@ -329,7 +330,7 @@ namespace InterchangeMod.Generation.Templates
             /// 一条近侧直连匝道（outbound = 主线 → 支路出向一幅）：从 rMin 起找满足约束的最小半径。约束：支路在接入点之前与匝道并行重叠的一段
             /// 必须已经下到地面（再留 kTransitionGap）；主线在上层时匝道自己升降，去掉两端水平段后坡长要够。两者都随半径单调变松，先倍增再二分。
             /// </summary>
-            private (float Radius, Path Path, float T, float FlatMain, float FlatBranch) SolveRamp(bool outbound, float rMin, float grade)
+            private (float Radius, RampPath RampPath, float T, float FlatMain, float FlatBranch) SolveRamp(bool outbound, float rMin, float grade)
             {
                 float drop = h0 - hLow;
                 bool mainElevated = LevelPlanner.BandOf(h0) == ElevationBand.Elevated;
@@ -337,14 +338,14 @@ namespace InterchangeMod.Generation.Templates
                 Vec3 mainNear = Point(0f, -om - d, 0f);
                 float lateral = outbound ? ob : -ob;
                 float foot = -(outbound ? spanOut : spanIn).Lo + climb;
-                (bool Ok, Path Path, float T, float FlatMain, float FlatBranch) Try(float r)
+                (bool Ok, RampPath RampPath, float T, float FlatMain, float FlatBranch) Try(float r)
                 {
                     // 接高架道路的一头用小半径圆弧：并行重叠段要短于游戏切分高架路段的长度，否则切分点的立柱落在所接道路上
                     //（主线在上层、或基层本身是高架时）。接地面道路的一头用大半径（小半径会让接入点离桥更近，反而要更大的半径）
                     float rMain = drop > 0.1f || mainElevated ? Math.Min(r, kDivergeRadius) : r;
                     float rBranch = branchElevated ? Math.Min(r, kDivergeRadius) : r;
                     // 进向：从主线反向倒推，再整体反过来
-                    var path = Path.Fillet(mainNear, outbound ? X : -X, B(0f, lateral), -f, rMain, r, rBranch, SepFromMainLine, sepBranch,
+                    var path = RampPath.Fillet(mainNear, outbound ? X : -X, B(0f, lateral), -f, rMain, r, rBranch, SepFromMainLine, sepBranch,
                         out _, out float t, out float flatMain, out float flatBranch);
                     flatMain += kFlatMargin;
                     flatBranch += kFlatMargin;
@@ -357,7 +358,7 @@ namespace InterchangeMod.Generation.Templates
                 }
                 var first = Try(rMin);
                 if (first.Ok)
-                    return (rMin, first.Path, first.T, first.FlatMain, first.FlatBranch);
+                    return (rMin, first.RampPath, first.T, first.FlatMain, first.FlatBranch);
                 float lo = rMin, hi = rMin;
                 for (int i = 0; i < 20; i++)
                 {
@@ -375,7 +376,7 @@ namespace InterchangeMod.Generation.Templates
                         lo = mid;
                 }
                 var result = Try(hi);
-                return (hi, result.Path, result.T, result.FlatMain, result.FlatBranch);
+                return (hi, result.RampPath, result.T, result.FlatMain, result.FlatBranch);
             }
 
             public void Build(List<RoadSegmentSpec> segments)
@@ -502,246 +503,5 @@ namespace InterchangeMod.Generation.Templates
                 }
             }
         }
-
-        /// <summary>从 v0 转到 v1 的角度（0 ~ 2π），sign &gt; 0 时朝 Perp 一侧转，否则反向。</summary>
-        private static float RotAngle(Vec3 v0, Vec3 v1, float sign)
-        {
-            float angle = (float)Math.Atan2(DiamondTemplate.Cross2(v0, v1), Directions.Dot(Flat0(v0), Flat0(v1))) * sign;
-            return angle < 0f ? angle + 2f * MathF.PI : angle;
-        }
-
-        private static Vec3 Flat(Vec3 v) => Vec3.Normalize(new Vec3(v.X, 0f, v.Z));
-
-        /// <summary>水平面内把 v 转 90°，转向 Cross2 为正的一侧。</summary>
-        private static Vec3 Perp(Vec3 v) => new Vec3(-v.Z, 0f, v.X);
-
-        /// <summary>水平面内旋转：sign·angle &gt; 0 时转向 Perp 一侧。</summary>
-        private static Vec3 Rot(Vec3 v, float angle) => v * MathF.Cos(angle) + Perp(v) * MathF.Sin(angle);
-
-        /// <summary>一段圆弧：起点、起点方向、半径、转角（带符号：正 = 转向 Perp 一侧）。</summary>
-        private readonly struct Arc
-        {
-            public Arc(Vec3 from, Vec3 heading, float radius, float angle)
-            {
-                From = from;
-                Heading = heading;
-                Radius = radius;
-                Angle = angle;
-            }
-
-            public Vec3 From { get; }
-            public Vec3 Heading { get; }
-            public float Radius { get; }
-            public float Angle { get; }
-            public float Length => Radius * Math.Abs(Angle);
-            private float Sign => Math.Sign(Angle);
-            public Vec3 Center => From + Perp(Heading) * (Sign * Radius);
-
-            public Vec3 PointAt(float s) => Center + Rot(From - Center, Sign * s / Radius);
-            public Vec3 HeadingAt(float s) => Rot(Heading, Sign * s / Radius);
-            public Vec3 End => PointAt(Length);
-            public Vec3 EndHeading => HeadingAt(Length);
-        }
-
-        /// <summary>首尾相接、切线连续的一串圆弧（俯视，高度另给）。</summary>
-        private readonly struct Path
-        {
-            private Path(List<Arc> arcs) { Arcs = arcs; }
-
-            public List<Arc> Arcs { get; }
-            public Vec3 Start => Arcs[0].From;
-            public Vec3 End => Arcs[Arcs.Count - 1].End;
-            public float Length => Arcs.Sum(a => a.Length);
-
-            /// <summary>从 from 沿 heading 出发，朝 turnToward 一侧转 angle（弧度，正值）。</summary>
-            public static Path Arcs1(Vec3 from, Vec3 heading, Vec3 turnToward, float radius, float angle)
-            {
-                float sign = DiamondTemplate.Cross2(heading, turnToward) >= 0f ? 1f : -1f;
-                return new Path(new List<Arc> { new Arc(Flat0(from), Flat(heading), radius, sign * angle) });
-            }
-
-            public static Path FromArcs(params Arc[] arcs) => new Path(arcs.ToList());
-
-            /// <summary>
-            /// 与两条直线都相切的单段圆弧：从直线 a（沿 aDir 行驶）按 sign 方向转到 bDir（转角 0 ~ 360°，可以超过 180°，如 270° 的环道）。
-            /// 返回起点在 a 上的位置 aAt、终点在 b 上的位置 bAt。
-            /// </summary>
-            public static Path Turn(Vec3 aOrigin, Vec3 aDir, Vec3 bOrigin, Vec3 bDir, float sign, float radius, out float aAt, out float bAt)
-            {
-                aDir = Flat(aDir);
-                bDir = Flat(bDir);
-                var arc = new Arc(Vec3.Zero, aDir, radius, sign * RotAngle(aDir, bDir, sign));
-                Vec3 w = Flat0(bOrigin) - Flat0(aOrigin) - arc.End;
-                float cross = DiamondTemplate.Cross2(aDir, bDir);
-                aAt = DiamondTemplate.Cross2(w, bDir) / cross;
-                bAt = DiamondTemplate.Cross2(w, aDir) / cross;
-                Vec3 start = Flat0(aOrigin) + aDir * aAt;
-                return new Path(new List<Arc> { new Arc(start, aDir, radius, arc.Angle) });
-            }
-
-            /// <summary>反向行驶的同一条路径。</summary>
-            public Path Reversed() =>
-                new Path(Enumerable.Reverse(Arcs).Select(a => new Arc(a.End, -a.EndHeading, a.Radius, -a.Angle)).ToList());
-
-            /// <summary>接着朝 turnToward 一侧再转 angle。</summary>
-            public Path Then(Vec3 turnToward, float radius, float angle)
-            {
-                var last = Arcs[Arcs.Count - 1];
-                float sign = DiamondTemplate.Cross2(last.EndHeading, turnToward) >= 0f ? 1f : -1f;
-                var arcs = new List<Arc>(Arcs) { new Arc(last.End, last.EndHeading, radius, sign * angle) };
-                return new Path(arcs);
-            }
-
-            /// <summary>
-            /// 与两条直线都相切的复合圆弧：从直线 a（沿 aDir 行驶）出发，转到 b 的方向 bDir 并落在直线 b 上。
-            /// 两头可以各有一段较小半径的圆弧（rStart / rEnd 小于 r 时），转到与所接直线横向相距 sepStart / sepEnd（两路不再重叠）为止，
-            /// 中间用半径 r：这样与两头道路并行重叠的长度短，大半径部分负责升降。两头小圆弧合计不超过总转角的 90%。
-            /// overlapStart / overlapEnd：两头与所接道路并行重叠（横向不足 sep）的长度（沿路径）。
-            /// 返回起点在 a 上的位置 aAt、终点在 b 上的位置 bAt。
-            /// </summary>
-            public static Path Fillet(Vec3 aOrigin, Vec3 aDir, Vec3 bOrigin, Vec3 bDir, float rStart, float r, float rEnd,
-                float sepStart, float sepEnd, out float aAt, out float bAt, out float overlapStart, out float overlapEnd)
-            {
-                aDir = Flat(aDir);
-                bDir = Flat(bDir);
-                float cross = DiamondTemplate.Cross2(aDir, bDir);
-                float sign = cross >= 0f ? 1f : -1f;
-                float theta = (float)Math.Acos(Math.Max(-1f, Math.Min(1f, Directions.Dot(aDir, bDir))));
-                float Clear(float radius, float sep) => (float)Math.Acos(Math.Max(-1f, 1f - sep / radius));
-                float a0 = rStart < r - 0.5f ? Clear(rStart, sepStart) : 0f;
-                float a1 = rEnd < r - 0.5f ? Clear(rEnd, sepEnd) : 0f;
-                if (a0 + a1 > theta * 0.9f)
-                {
-                    float scale = theta * 0.9f / (a0 + a1);
-                    a0 *= scale;
-                    a1 *= scale;
-                }
-                var arcs = new List<Arc>();
-                Vec3 at = Vec3.Zero, heading = aDir;
-                foreach (var (radius, angle) in new[] { (rStart, a0), (r, theta - a0 - a1), (rEnd, a1) })
-                {
-                    if (angle <= 1e-4f)
-                        continue;
-                    var arc = new Arc(at, heading, radius, sign * angle);
-                    arcs.Add(arc);
-                    at = arc.End;
-                    heading = arc.EndHeading;
-                }
-                // aOrigin + aDir·aAt + d = bOrigin + bDir·bAt
-                Vec3 w = Flat0(bOrigin) - Flat0(aOrigin) - at;
-                aAt = DiamondTemplate.Cross2(w, bDir) / cross;
-                bAt = DiamondTemplate.Cross2(w, aDir) / cross;
-                Vec3 start = Flat0(aOrigin) + aDir * aAt;
-
-                // 并行重叠长度：小圆弧内横向偏移到 sep 为止；没到（被截短）时剩下的按小圆弧末端的方向角估算
-                float Overlap(float radius, float angle, float sep, bool tight)
-                {
-                    if (!tight)
-                        return MathF.Sqrt(2f * r * sep);
-                    float offset = radius * (1f - MathF.Cos(angle));
-                    float rest = sep - offset;
-                    return radius * angle + (rest > 0.01f ? rest / Math.Max(MathF.Sin(angle), 0.05f) : 0f);
-                }
-                overlapStart = Overlap(rStart, a0, sepStart, a0 > 0f);
-                overlapEnd = Overlap(rEnd, a1, sepEnd, a1 > 0f);
-                return new Path(arcs.Select(a => new Arc(a.From + start, a.Heading, a.Radius, a.Angle)).ToList());
-            }
-
-            /// <summary>
-            /// 输出成路段：每段不超过约 90°，在圆弧交接处和水平段边界处分段。高度：起点 flatStart 米内与 start 同高，
-            /// 终点 flatEnd 米内与 end 同高，中间线性升降。start / end 原样用作两端点（游戏按坐标完全相等合并节点）。
-            /// </summary>
-            /// <param name="startNode">起点所在的节点（与曲线端点不同时 = 边缘对齐接入）；null = 曲线端点本身。</param>
-            public void Emit(List<RoadSegmentSpec> segments, string name, Vec3 start, Vec3 end, float flatStart, float flatEnd, string? prefab,
-                Vec3? startNode = null, Vec3? endNode = null)
-            {
-                float total = Length;
-                float y0 = start.Y, y1 = end.Y;
-                float rampFrom = Math.Min(flatStart, total), rampTo = Math.Max(rampFrom, total - flatEnd);
-                float Height(float s) => s <= rampFrom ? y0 : s >= rampTo ? y1 : y0 + (y1 - y0) * (s - rampFrom) / (rampTo - rampFrom);
-
-                // 断点（沿全长的距离）
-                // 必须的断点：两端和升降段的起止；圆弧分段（每段不超过约 90°）的断点离它们或彼此不到 kMinSegment 时省掉，
-                // 避免很短的路段。与所接道路并行重叠的两头之内也不分段：那里的节点会让一段独立的路和所接道路重叠
-                var required = new List<float> { 0f, total };
-                // 与所接道路并行重叠的两头总是单独成段（高架时这段要短于游戏切分长度，节点区也不会吞掉整段）
-                if (Math.Abs(y1 - y0) > 0.05f || flatStart > 0f || flatEnd > 0f)
-                {
-                    if (flatStart > 0f || Math.Abs(y1 - y0) > 0.05f)
-                        required.Add(rampFrom);
-                    if (flatEnd > 0f || Math.Abs(y1 - y0) > 0.05f)
-                        required.Add(rampTo);
-                }
-                var optional = new List<float>();
-                float offset = 0f;
-                foreach (var arc in Arcs)
-                {
-                    int pieces = (int)Math.Ceiling(Math.Abs(arc.Angle) / (MathF.PI / 2f + 0.05f));
-                    for (int k = 0; k <= pieces; k++)
-                        optional.Add(offset + arc.Length * k / pieces);
-                    offset += arc.Length;
-                }
-                var sorted = required.Where(c => c >= 0f && c <= total).Distinct().OrderBy(c => c).ToList();
-                for (int i = sorted.Count - 1; i > 0; i--)
-                    if (sorted[i] - sorted[i - 1] < 1f)
-                        sorted.RemoveAt(i == sorted.Count - 1 ? i - 1 : i);
-                foreach (float c in optional)
-                {
-                    bool insideOverlap = (c > 0.5f && c < flatStart - 0.5f) || (c < total - 0.5f && c > total - flatEnd + 0.5f);
-                    if (!insideOverlap && sorted.All(k => Math.Abs(k - c) >= kMinSegment))
-                    {
-                        sorted.Add(c);
-                        sorted.Sort();
-                    }
-                }
-                sorted[sorted.Count - 1] = total;
-
-                // 每个断点的位置和方向只算一次，相邻两段共用（游戏按坐标完全相等合并节点）
-                var points = new List<Vec3>();
-                var headings = new List<Vec3>();
-                var arcOf = new List<int>();
-                for (int i = 0; i < sorted.Count; i++)
-                {
-                    float arcStart = 0f;
-                    int which = Arcs.Count - 1;
-                    for (int j = 0; j < Arcs.Count; j++)
-                    {
-                        if (sorted[i] < arcStart + Arcs[j].Length - 0.5f)
-                        {
-                            which = j;
-                            break;
-                        }
-                        arcStart += Arcs[j].Length;
-                    }
-                    if (which == Arcs.Count - 1)
-                        arcStart = Length - Arcs[which].Length;
-                    float local = Math.Min(Math.Max(sorted[i] - arcStart, 0f), Arcs[which].Length);
-                    Vec3 point = Arcs[which].PointAt(local);
-                    point.Y = Height(sorted[i]);
-                    points.Add(i == 0 ? start : i == sorted.Count - 1 ? end : point);
-                    headings.Add(Arcs[which].HeadingAt(local));
-                    arcOf.Add(which);
-                }
-
-                int index = 0;
-                for (int i = 0; i + 1 < sorted.Count; i++)
-                {
-                    // 这一段所在的圆弧：起点所在的那段（断点落在圆弧交接处时取后一段）
-                    // 一段可能跨两段圆弧（重叠区内不分段），手柄长按弦长和两端方向夹角算：圆弧时等于 4/3·tan(Δ/4)·r
-                    Vec3 a = points[i], b = points[i + 1];
-                    float delta = (float)Math.Acos(Math.Max(-1f, Math.Min(1f, Directions.Dot(headings[i], headings[i + 1]))));
-                    float chord = Vec3.Distance(Flat0(a), Flat0(b));
-                    float cosQuarter = MathF.Cos(delta / 4f);
-                    float k = chord / (3f * cosQuarter * cosQuarter);
-                    Vec3 p1 = a + headings[i] * k, p2 = b - headings[i + 1] * k;
-                    p1.Y = a.Y + (b.Y - a.Y) / 3f;
-                    p2.Y = a.Y + (b.Y - a.Y) * 2f / 3f;
-                    segments.Add(new RoadSegmentSpec($"{name}{++index}", RoadRole.Ramp, new Bezier3(a, p1, p2, b), prefab,
-                        i == 0 ? startNode : null, i + 2 == sorted.Count ? endNode : null));
-                }
-            }
-        }
-
-        private static Vec3 Flat0(Vec3 v) => new Vec3(v.X, 0f, v.Z);
     }
 }

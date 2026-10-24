@@ -83,6 +83,15 @@ namespace InterchangeMod
         /// <summary>true = 主线在上层、被交道路在基层；false 相反。</summary>
         [SettingsUIHidden] public bool MainOnTop { get; set; }
 
+        /// <summary>苜蓿叶：被交道路在上层（默认主线在上层）。</summary>
+        [SettingsUIHidden] public bool CloverleafCrossOnTop { get; set; }
+
+        /// <summary>苜蓿叶：右转匝道贴着环道外侧走，相邻那段与环道合成一条双向匝道（默认 false = 外侧大弧线）。</summary>
+        [SettingsUIHidden] public bool CloverleafHugLoop { get; set; }
+
+        /// <summary>苜蓿叶：交织段放在主线外侧的集散车道上（默认 false = 直接在主线上交织）。</summary>
+        [SettingsUIHidden] public bool CloverleafCollector { get; set; }
+
         /// <summary>主线与被交道路的夹角，90 为正交。</summary>
         [SettingsUIHidden] public float CrossingAngle { get; set; }
 
@@ -185,6 +194,9 @@ namespace InterchangeMod
                 case nameof(BaseElevation): BaseElevation = Clamp(number, -30f, 30f); return true;
                 case nameof(LevelGap): LevelGap = Clamp(number, 0f, 30f); return true;
                 case nameof(MainOnTop): MainOnTop = value == "true"; return true;
+                case nameof(CloverleafCrossOnTop): CloverleafCrossOnTop = value == "true"; return true;
+                case nameof(CloverleafHugLoop): CloverleafHugLoop = value == "true"; return true;
+                case nameof(CloverleafCollector): CloverleafCollector = value == "true"; return true;
                 case nameof(MatchJunctions): MatchJunctions = value == "true"; return true;
                 case nameof(CrossingAngle): CrossingAngle = Clamp(number, 45f, 135f); return true;
                 case nameof(RampLength): RampLength = Clamp(number, 60f, 500f); return true;
@@ -197,7 +209,7 @@ namespace InterchangeMod
                 case nameof(CrossRoadPrefab): CrossRoadPrefab = value ?? ""; return true;
                 case nameof(RampPrefab): RampPrefab = value ?? ""; return true;
                 case nameof(InterchangeType):
-                    InterchangeType = value == "ExpresswayNode" || value == "ExpresswayT" || value == "SinglePoint" || value == "Trumpet" ? value : "Diamond";
+                    InterchangeType = value == "ExpresswayNode" || value == "ExpresswayT" || value == "SinglePoint" || value == "Trumpet" || value == "Cloverleaf" ? value : "Diamond";
                     return true;
                 case nameof(FrontageRoadPrefab): FrontageRoadPrefab = value ?? ""; return true;
                 case nameof(LaneBalance): LaneBalance = value == "true"; return true;

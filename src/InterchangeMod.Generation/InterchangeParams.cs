@@ -1,5 +1,10 @@
+using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Reflection;
+using System.Text;
 
 namespace InterchangeMod.Generation
 {
@@ -77,7 +82,23 @@ namespace InterchangeMod.Generation
         public bool TrumpetLoopForExit { get; set; } = true;
 
         /// <summary>喇叭形近侧直连匝道的半径（米）；0 = 自动（满足坡长约束的最小值）。</summary>
-        public float TrumpetNearRampRadius { get; set; }
+        public float DirectRampRadius { get; set; }
+
+        /// <summary>
+        /// 苜蓿叶：右转匝道贴着环道外侧走，与环道相邻的那段两者合成一条双向匝道（SharedRampPrefab，宽 SharedRampWidth），
+        /// 两端再分开各自接主线 / 被交道路。false 时右转匝道是环道外侧的大弧线。
+        /// </summary>
+        public bool OuterHugsLoop { get; set; }
+
+        /// <summary>
+        /// 苜蓿叶：主线每一幅外侧加一条集散车道（用匝道道路，单行），四条匝道都接在集散车道上，交织移到集散车道；
+        /// 主线只有一处驶出（进集散车道）和一处汇入（从集散车道回来），其间少掉集散车道的车道数。
+        /// </summary>
+        public bool CollectorDistributor { get; set; }
+
+        public string? SharedRampPrefab { get; set; }
+
+        public float SharedRampWidth { get; set; }
 
         /// <summary>允许的最大纵坡，0.08 = 8%。</summary>
         public float MaxGrade { get; set; } = 0.08f;
@@ -118,6 +139,39 @@ namespace InterchangeMod.Generation
                 leg.RoadWidth = roadWidth;
                 leg.MedianWidth = medianWidth;
                 leg.RoadPrefab = prefab;
+            }
+        }
+
+        /// <summary>
+        /// 参数的文字指纹（全部可写属性、每条臂、每层高度）：参数不变时模板可以复用上次的计算结果
+        /// （鼠标移动只改变摆放位置，不改变立交的局部形状）。
+        /// </summary>
+        public string Fingerprint()
+        {
+            var sb = new StringBuilder();
+            AppendProperties(sb, this);
+            foreach (var leg in Legs)
+                AppendProperties(sb, leg);
+            foreach (var level in Levels)
+                sb.Append(level.Elevation.ToString("R", CultureInfo.InvariantCulture)).Append('|');
+            return sb.ToString();
+        }
+
+        private static void AppendProperties(StringBuilder sb, object owner)
+        {
+            foreach (var property in owner.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (!property.CanWrite || property.GetIndexParameters().Length > 0)
+                    continue;
+                object? value = property.GetValue(owner);
+                if (value is IEnumerable && !(value is string))
+                    continue;
+                sb.Append(property.Name).Append('=');
+                if (value != null && value.GetType().IsValueType && !value.GetType().IsPrimitive && !value.GetType().IsEnum)
+                    AppendProperties(sb, value);   // 结构体（如 HeightRange）按字段展开
+                else
+                    sb.Append(Convert.ToString(value, CultureInfo.InvariantCulture));
+                sb.Append('|');
             }
         }
 

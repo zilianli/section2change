@@ -175,9 +175,9 @@ namespace InterchangeMod.Generation.Tests
         public void ManualNearRampRadius_BelowMinimum_IsRejected()
         {
             var p = Make();
-            p.TrumpetNearRampRadius = 40f;
+            p.DirectRampRadius = 40f;
             Assert.Contains(_template.ValidateParams(p), e => e.Contains("直连匝道半径至少"));
-            p.TrumpetNearRampRadius = 600f;
+            p.DirectRampRadius = 600f;
             Assert.Empty(_template.ValidateParams(p));
             var segments = _template.Generate(p);
             Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
