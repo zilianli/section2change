@@ -1,0 +1,115 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<Configurations>Debug;Release</Configurations>
+	
+		<!--The file where mod information which is required for publishing mod on PDX mods are stored-->
+		<PublishConfigurationPath>Properties\PublishConfiguration.xml</PublishConfigurationPath>
+	</PropertyGroup>
+	
+	<!--Imports must be after PropertyGroup block-->
+	<Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.props" />
+	<Import Project="$([System.Environment]::GetEnvironmentVariable('CSII_TOOLPATH', 'EnvironmentVariableTarget.User'))\Mod.targets" />
+
+	<ItemGroup>
+		<Reference Include="Game">
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Colossal.Core">
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Colossal.Logging">
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Colossal.Mathematics">
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Colossal.Collections">
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Colossal.IO.AssetDatabase">
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Colossal.UI">
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Colossal.UI.Binding">
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Colossal.Localization">
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Unity.InputSystem">
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="UnityEngine.CoreModule">
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Unity.Burst">
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Unity.Collections">
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Unity.Entities">
+			<Private>false</Private>
+		</Reference>
+		<Reference Include="Unity.Mathematics">
+			<Private>false</Private>
+		</Reference>
+	</ItemGroup>
+
+	<ItemGroup>
+		<Reference Update="System">
+			<Private>false</Private>
+		</Reference>
+		<Reference Update="System.Core">
+			<Private>false</Private>
+		</Reference>
+		<Reference Update="System.Data">
+			<Private>false</Private>
+		</Reference>
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- 生成层（纯几何计算），随 mod 一起部署 -->
+		<ProjectReference Include="..\InterchangeMod.Generation\InterchangeMod.Generation.csproj" />
+	</ItemGroup>
+
+	<!--
+		UI 模块（../InterchangeMod.UI，React/TS）：
+		  BuildUI   —— UI 源文件有变化时运行 npm run build，输出到 UI 工程的 build/；
+		  DeployUI  —— 在工具链的 DeployWIP（会先删掉整个 mod 文件夹）之后，把 build/ 复制进 mod 文件夹。
+		第一次需要先在 UI 工程里运行 npm install；没装依赖时只给警告，C# 部分照常编译部署。
+	-->
+	<PropertyGroup>
+		<UIProjectDir>$(MSBuildProjectDirectory)\..\InterchangeMod.UI</UIProjectDir>
+		<UIBuildDir>$(UIProjectDir)\build</UIBuildDir>
+	</PropertyGroup>
+
+	<Target Name="BuildUI" BeforeTargets="DeployWIP" Inputs="@(UISource)" Outputs="$(UIBuildDir)\InterchangeMod.mjs" Condition="Exists('$(UIProjectDir)\node_modules')">
+		<Message Text="Building UI module" Importance="high" />
+		<Exec Command="npm run build" WorkingDirectory="$(UIProjectDir)" />
+	</Target>
+
+	<Target Name="WarnUIDependencies" BeforeTargets="DeployWIP" Condition="!Exists('$(UIProjectDir)\node_modules')">
+		<Warning Text="UI module skipped: run 'npm install' in $(UIProjectDir) first" />
+	</Target>
+
+	<Target Name="DeployUI" AfterTargets="DeployWIP" Condition="Exists('$(UIBuildDir)')">
+		<ItemGroup>
+			<UIFilesToDeploy Include="$(UIBuildDir)\**\*.*" Exclude="$(UIBuildDir)\**\*.LICENSE.txt" />
+		</ItemGroup>
+		<Copy SourceFiles="@(UIFilesToDeploy)" DestinationFiles="@(UIFilesToDeploy->'$(DeployDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
+	</Target>
+
+	<ItemGroup>
+		<UISource Include="$(UIProjectDir)\src\**\*.*;$(UIProjectDir)\webpack.config.js;$(UIProjectDir)\mod.json" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="$(ModPropsFile)" Link="Properties\Mod.props" />
+		<None Include="$(ModTargetsFile)" Link="Properties\Mod.targets" />
+	</ItemGroup>
+
+</Project>

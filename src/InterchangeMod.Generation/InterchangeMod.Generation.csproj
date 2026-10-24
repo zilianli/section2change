@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    生成层：只做几何计算，不引用任何游戏 DLL。
+    主 mod 工程由官方工具链固定为 net48，只能引用 netstandard2.0（不能是 2.1）。
+    C# 9 与工具链的 LangVersion 一致。
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>InterchangeMod.Generation</RootNamespace>
+  </PropertyGroup>
+
+</Project>

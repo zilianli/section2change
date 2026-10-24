@@ -1,0 +1,240 @@
+// 游戏 UI 用 Coherent Gameface 渲染：只用 flex 布局和基本属性，避免 grid、gap 等不一定支持的特性。
+
+// 放在左上，宽度和高度都收紧：内容区最高 640rem，超出部分滚动，避免压住底部工具栏
+.container {
+  position: absolute;
+  left: 10rem;
+  top: 70rem;
+  width: 440rem;
+  pointer-events: auto;
+}
+
+.panel {
+  width: 100%;
+}
+
+.content {
+  max-height: 520rem;
+}
+
+// 错误区固定在设置区下面，分隔线隔开；错误很多时自己滚动
+.status {
+  max-height: 200rem;
+  border-top: 1rem solid rgba(255, 255, 255, 0.15);
+}
+
+.section {
+  margin-bottom: 6rem;
+  padding: 4rem 6rem;
+  background-color: rgba(255, 255, 255, 0.04);
+  border-radius: 4rem;
+}
+
+.sectionTitle {
+  font-size: 12rem;
+  font-weight: bold;
+  color: rgba(255, 255, 255, 0.9);
+  margin-bottom: 3rem;
+}
+
+.note {
+  font-size: 11rem;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 2rem;
+}
+
+.row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 3rem;
+}
+
+.label {
+  width: 110rem;
+  flex-shrink: 0;
+  font-size: 12rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.value {
+  min-width: 56rem;
+  text-align: center;
+  font-size: 14rem;
+  color: white;
+}
+
+.stepButton {
+  width: 32rem;
+  height: 24rem;
+  margin: 0 2rem;
+}
+
+.choice,
+.choiceSelected {
+  padding: 2rem 10rem;
+  margin-right: 4rem;
+  height: 24rem;
+  font-size: 12rem;
+}
+
+.choiceSelected {
+  background-color: rgba(83, 165, 255, 0.55);
+  color: white;
+}
+
+.chosenRoad {
+  flex: 1;
+  font-size: 12rem;
+  color: white;
+  margin-right: 6rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.resolved {
+  font-size: 12rem;
+  color: rgba(160, 220, 255, 0.9);
+  margin: 2rem 0 4rem 0;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.picker {
+  margin: 4rem 0 8rem 0;
+  padding: 6rem;
+  background-color: rgba(0, 0, 0, 0.25);
+  border-radius: 4rem;
+}
+
+.tableHeader,
+.tableRow,
+.tableRowSelected {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 3rem 4rem;
+  font-size: 12rem;
+}
+
+.tableHeader {
+  color: rgba(255, 255, 255, 0.6);
+  border-bottom: 1rem solid rgba(255, 255, 255, 0.15);
+}
+
+.tableBody {
+  height: 200rem;
+}
+
+.tableRow {
+  color: rgba(255, 255, 255, 0.85);
+
+  &:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+}
+
+.tableRowSelected {
+  color: white;
+  background-color: rgba(83, 165, 255, 0.45);
+}
+
+.colRecent {
+  width: 20rem;
+  flex-shrink: 0;
+  color: rgb(255, 210, 90);
+}
+
+.colIcon {
+  width: 32rem;
+  height: 28rem;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  margin-right: 6rem;
+}
+
+.roadIcon {
+  width: 28rem;
+  height: 28rem;
+}
+
+.colName {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.colType {
+  width: 120rem;
+  flex-shrink: 0;
+}
+
+.colLanes {
+  width: 80rem;
+  flex-shrink: 0;
+}
+
+.colWidth {
+  width: 50rem;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.advancedToggle {
+  margin-bottom: 6rem;
+}
+
+.errors {
+  margin: 6rem 0;
+  padding: 6rem 8rem;
+  font-size: 12rem;
+  color: rgb(255, 170, 160);
+  background-color: rgba(200, 40, 30, 0.25);
+  border-radius: 4rem;
+}
+
+.errorsTitle {
+  font-weight: bold;
+  margin-bottom: 3rem;
+}
+
+.hint {
+  font-size: 12rem;
+  color: rgba(255, 255, 255, 0.55);
+  margin-top: 4rem;
+}
+
+.warnings {
+  margin: 6rem 0;
+  padding: 6rem 8rem;
+  font-size: 12rem;
+  color: rgb(255, 215, 140);
+  background-color: rgba(200, 140, 30, 0.2);
+  border-radius: 4rem;
+}
+
+.infoBox {
+  margin: 4rem 0;
+  padding: 5rem 8rem;
+  font-size: 12rem;
+  color: rgb(170, 220, 255);
+  background-color: rgba(60, 140, 220, 0.2);
+  border-radius: 4rem;
+}
+
+// Anarchy（无视碰撞）开关：开启时按钮标红，提醒正在无视碰撞
+.anarchyOn {
+  padding: 2rem 6rem;
+  margin-right: 6rem;
+  background-color: rgba(220, 60, 50, 0.85);
+}
+
+.anarchyIcon {
+  width: 24rem;
+  height: 24rem;
+}
