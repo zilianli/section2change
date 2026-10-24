@@ -7,3 +7,4 @@ src/InterchangeMod.UI/build/
 *.suo
 .idea/
 *.log
+src/InterchangeMod/Library/
