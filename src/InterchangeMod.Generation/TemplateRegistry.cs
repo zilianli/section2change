@@ -11,6 +11,7 @@ namespace InterchangeMod.Generation
         {
             new DiamondTemplate(),
             new ExpresswayNodeTemplate(),
+            new ExpresswayNodeTemplate(tee: true),
             new SinglePointTemplate(),
             // TODO 阶段 3: Cloverleaf, PartialCloverleaf, Trumpet
             // TODO 阶段 5: Turbine, Stack, SinglePoint, Roundabout

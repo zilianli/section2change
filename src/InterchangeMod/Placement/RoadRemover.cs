@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Colossal.Collections;
+using Colossal.Entities;
 using Colossal.Mathematics;
 using Game.Common;
 using Game.Net;
@@ -132,6 +133,25 @@ namespace InterchangeMod.Placement
                         Snap(ends[endTarget], ref part.d, ref part.c, ref endElevation);
                         connected++;
                     }
+
+                    // 保留部分太短（比路宽还短）时游戏会报“形状无效”。如果它另一端是普通的路中节点（只接着同一种道路的下一段），
+                    // 就把下一段也拆掉，从臂端直接重建到下一段的另一端，两段合成一段
+                    float length = MathUtils.Length(part);
+                    float width = entityManager.TryGetComponent(prefab, out NetGeometryData geometry) ? geometry.m_DefaultWidth : 0f;
+                    bool merged = false;
+                    if (length < width && (startTarget >= 0) != (endTarget >= 0))
+                    {
+                        Entity node = startTarget >= 0 ? edge.m_End : edge.m_Start;
+                        var legEnd = startTarget >= 0 ? ends[startTarget] : ends[endTarget];
+                        merged = (startTarget >= 0 ? end >= 1f : start <= 0f)
+                            && TryMergeThroughNode(commandBuffer, entityManager, node, entity, prefab, edges, legEnd, ref terrain, randomSeed++);
+                    }
+                    if (Debug)
+                        Mod.log.Info($"[debug] remainder of edge {entity.Index}: {length:F1} m (road {width:F0} m), " +
+                            $"start {(startTarget >= 0 ? "leg end" : start <= 0f ? "original node" : "cut")}, " +
+                            $"end {(endTarget >= 0 ? "leg end" : end >= 1f ? "original node" : "cut")}{(merged ? ", merged with the next edge" : "")}");
+                    if (merged)
+                        continue;
                     NetCourseBuilder.CreateSegment(commandBuffer, prefab, part, startElevation, endElevation, randomSeed++,
                         start <= 0f ? edge.m_Start : Entity.Null,
                         end >= 1f ? edge.m_End : Entity.Null);
@@ -200,6 +220,44 @@ namespace InterchangeMod.Placement
             handle += end.World - point;
             point = end.World;
             elevation = end.Elevation;
+        }
+
+        /// <summary>写调试日志（由工具按设置里的调试开关设置）。</summary>
+        public static bool Debug { get; set; }
+
+        /// <summary>
+        /// 太短的保留部分：它的另一端 node 若只接着同一种道路的下一段（普通路中节点），就把下一段拆掉，
+        /// 从臂端 legEnd 直接重建到下一段的另一端（下一段的方向、形状不变，只把 node 那一端移到臂端）。成功返回 true。
+        /// </summary>
+        private static bool TryMergeThroughNode(EntityCommandBuffer commandBuffer, EntityManager entityManager, Entity node, Entity self,
+            Entity prefab, List<Entity> removing, (float3 World, float Elevation) legEnd, ref TerrainHeightData terrain, int randomSeed)
+        {
+            if (node == Entity.Null || !entityManager.HasBuffer<ConnectedEdge>(node))
+                return false;
+            Entity next = Entity.Null;
+            foreach (ConnectedEdge connected in entityManager.GetBuffer<ConnectedEdge>(node, true))
+            {
+                if (connected.m_Edge == self || !IsRemovableRoad(entityManager, connected.m_Edge))
+                    continue;
+                if (next != Entity.Null)
+                    return false;   // 节点是路口（接着不止一段），不能合并
+                next = connected.m_Edge;
+            }
+            if (next == Entity.Null || removing.Contains(next) || entityManager.GetComponentData<PrefabRef>(next).m_Prefab != prefab)
+                return false;
+
+            Edge nextEdge = entityManager.GetComponentData<Edge>(next);
+            Bezier4x3 curve = entityManager.GetComponentData<Curve>(next).m_Bezier;
+            CreateDelete(commandBuffer, next, nextEdge, curve);
+            bool nodeAtStart = nextEdge.m_Start == node;
+            float startElevation = ElevationAt(curve.a, ref terrain), endElevation = ElevationAt(curve.d, ref terrain);
+            if (nodeAtStart)
+                Snap(legEnd, ref curve.a, ref curve.b, ref startElevation);
+            else
+                Snap(legEnd, ref curve.d, ref curve.c, ref endElevation);
+            NetCourseBuilder.CreateSegment(commandBuffer, prefab, curve, startElevation, endElevation, randomSeed,
+                nodeAtStart ? Entity.Null : nextEdge.m_Start, nodeAtStart ? nextEdge.m_End : Entity.Null);
+            return true;
         }
 
         /// <summary>和推土机（BulldozeToolSystem）删除路段的写法一样。</summary>

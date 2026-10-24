@@ -5,7 +5,7 @@ const GROUP = "interchangeMod";
 
 export type RoadForm = "Auto" | "TwoWay" | "Dual";
 
-export type InterchangeType = "Diamond" | "ExpresswayNode" | "SinglePoint";
+export type InterchangeType = "Diamond" | "ExpresswayNode" | "ExpresswayT" | "SinglePoint";
 
 export interface PanelSettings {
   /** 基层（下层）离地高度。 */
@@ -38,6 +38,8 @@ export interface PanelSettings {
   SpacingInCells: boolean;
   /** 对准已有道路时基层跟随已有道路的高度。 */
   BaseFollowsMatch: boolean;
+  /** T 型空地放置时支路在左侧。 */
+  BranchOnLeft: boolean;
 }
 
 /** 路口匹配结果。main/cross 为“预制体|形式|分隔带”。 */

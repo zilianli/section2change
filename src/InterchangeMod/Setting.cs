@@ -41,7 +41,7 @@ namespace InterchangeMod
 
         // —— 立交参数（工具面板修改）——
 
-        /// <summary>立交类型：Diamond 菱形 / ExpresswayNode 中式快速路节点 / SinglePoint 单点立交。</summary>
+        /// <summary>立交类型：Diamond 菱形 / ExpresswayNode 中式快速路节点 / ExpresswayT 快速路 T 型 / SinglePoint 单点立交。</summary>
         [SettingsUIHidden] public string InterchangeType { get; set; }
 
         /// <summary>中式快速路节点的地面辅路（单行道路）预制体名。空 = Medium Road Oneway。</summary>
@@ -58,6 +58,9 @@ namespace InterchangeMod
 
         /// <summary>对准已有路口/道路时基层跟随已有道路的实际高度（默认）；false 时按面板的基层。</summary>
         [SettingsUIHidden] public bool BaseFollowsMatch { get; set; }
+
+        /// <summary>T 型立交空地放置时支路在主线方向的左侧（false = 右侧）。对准已有 T 型路口时由路口决定。</summary>
+        [SettingsUIHidden] public bool BranchOnLeft { get; set; }
 
         /// <summary>基层（下层）的离地高度。负数为下沉/隧道。改它会让整座立交一起升降。</summary>
         [SettingsUIHidden] public float BaseElevation { get; set; }
@@ -137,6 +140,7 @@ namespace InterchangeMod
             RampGap = 1f;
             SpacingInCells = false;
             BaseFollowsMatch = true;
+            BranchOnLeft = false;
             BaseElevation = 0f;
             LevelGap = 0f;
             MainOnTop = false;
@@ -177,12 +181,15 @@ namespace InterchangeMod
                 case nameof(MainRoadPrefab): MainRoadPrefab = value ?? ""; return true;
                 case nameof(CrossRoadPrefab): CrossRoadPrefab = value ?? ""; return true;
                 case nameof(RampPrefab): RampPrefab = value ?? ""; return true;
-                case nameof(InterchangeType): InterchangeType = value == "ExpresswayNode" || value == "SinglePoint" ? value : "Diamond"; return true;
+                case nameof(InterchangeType):
+                    InterchangeType = value == "ExpresswayNode" || value == "ExpresswayT" || value == "SinglePoint" ? value : "Diamond";
+                    return true;
                 case nameof(FrontageRoadPrefab): FrontageRoadPrefab = value ?? ""; return true;
                 case nameof(LaneBalance): LaneBalance = value == "true"; return true;
                 case nameof(RampGap): RampGap = Clamp(number, 0.5f, 16f); return true;
                 case nameof(SpacingInCells): SpacingInCells = value == "true"; return true;
                 case nameof(BaseFollowsMatch): BaseFollowsMatch = value == "true"; return true;
+                case nameof(BranchOnLeft): BranchOnLeft = value == "true"; return true;
                 default: return false;
             }
         }

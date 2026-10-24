@@ -53,12 +53,15 @@ namespace InterchangeMod.Systems
         private PrefabResolver m_PrefabResolver;
         private readonly IInterchangeTemplate m_Diamond = new DiamondTemplate();
         private readonly IInterchangeTemplate m_Expressway = new ExpresswayNodeTemplate();
+        private readonly IInterchangeTemplate m_ExpresswayT = new ExpresswayNodeTemplate(tee: true);
         private readonly IInterchangeTemplate m_SinglePoint = new SinglePointTemplate();
 
         /// <summary>面板选的立交类型。</summary>
-        private bool IsExpressway => setting?.InterchangeType == "ExpresswayNode";
+        /// <summary>中式快速路节点（十字或 T 型）：有地面辅路。</summary>
+        private bool IsExpressway => setting?.InterchangeType == "ExpresswayNode" || setting?.InterchangeType == "ExpresswayT";
+        private bool IsExpresswayT => setting?.InterchangeType == "ExpresswayT";
         private bool IsSinglePoint => setting?.InterchangeType == "SinglePoint";
-        private IInterchangeTemplate CurrentTemplate => IsExpressway ? m_Expressway : IsSinglePoint ? m_SinglePoint : m_Diamond;
+        private IInterchangeTemplate CurrentTemplate => IsExpresswayT ? m_ExpresswayT : IsExpressway ? m_Expressway : IsSinglePoint ? m_SinglePoint : m_Diamond;
 
         /// <summary>主线是否在上层：中式快速路节点和单点立交的主线总是高架。</summary>
         private bool MainOnTop => IsExpressway || IsSinglePoint || setting.MainOnTop;
@@ -92,6 +95,10 @@ namespace InterchangeMod.Systems
         private (Entity, Entity) m_CrossingKey;
         /// <summary>参与当前立体交叉的所有已有路段：改造时在立交范围内都要拆掉（不论高度）。</summary>
         private List<Entity> m_CrossingEdges = new List<Entity>();
+        /// <summary>指着双幅道路的一幅时量出的实际分隔带；没有对向一幅时为 null。</summary>
+        private float? m_PartnerMedian;
+        /// <summary>最近一次鼠标位置（只对齐一条道路时，T 型支路放在鼠标所在的一侧）。</summary>
+        private Vec3 m_Cursor;
         /// <summary>原路口改造时当前预览的立交范围（局部坐标，相对 m_LastOrigin / m_LastYaw）；不拆除时为 null。</summary>
         private Footprint m_RemovalFootprint;
         /// <summary>立交范围比生成路段中心线的凸包向外多出的距离：原有道路在这之外的部分保留。</summary>
@@ -358,6 +365,7 @@ namespace InterchangeMod.Systems
 
             Entity seed = setting.MatchJunctions ? JunctionReader.FindSeedNode(EntityManager, hitEntity, hitPosition) : Entity.Null;
             var cursor = new Vec3(hitPosition.x, 0f, hitPosition.z);
+            m_Cursor = cursor;
             // 预览里原有道路已显示为拆除，鼠标可能指不到它们：仍在立交范围内就保持当前匹配，否则预览会来回跳
             if (seed == Entity.Null && m_RemovalFootprint != null && m_Match != null && m_Match.Error == null
                 && m_RemovalFootprint.Contains(new Vec3(hitPosition.x - m_LastOrigin.x, 0f, hitPosition.z - m_LastOrigin.z).RotateY(-m_LastYaw)))
@@ -390,6 +398,11 @@ namespace InterchangeMod.Systems
             {
                 TerrainHeightData terrain = m_TerrainSystem.GetHeightData();
                 m_MatchEdges = JunctionReader.Read(EntityManager, m_PrefabSystem, seed, m_RoadsByName, ref terrain);
+                // 指着双幅的一幅时，量出对向那一幅的实际分隔带（没有时用面板的分隔带估算）
+                var netTree = m_NetSearchSystem.GetNetSearchTree(readOnly: true, out JobHandle treeDeps);
+                treeDeps.Complete();
+                m_PartnerMedian = JunctionReader.MeasureDualMedian(EntityManager, m_PrefabSystem, netTree, hitEntity, m_RoadsByName,
+                    !m_CityConfigurationSystem.leftHandTraffic);
                 m_Match = MatchEdges(cursor);
                 if (setting.DebugLogging)
                     Mod.log.Info($"[debug] junction: {m_MatchEdges.Count} edges, {m_Match.LegCount} legs, " +
@@ -447,7 +460,7 @@ namespace InterchangeMod.Systems
         private bool StackedOverMatch => !BaseFollowsMatch && LevelPlanner.BandOf(setting.BaseElevation) is ElevationBand.Elevated or ElevationBand.Tunnel;
 
         private JunctionMatch MatchEdges(Vec3 cursor) =>
-            JunctionMatcher.Match(m_MatchEdges, m_Yaw / Directions.DegToRad, cursor, setting.MedianWidth, !m_CityConfigurationSystem.leftHandTraffic);
+            JunctionMatcher.Match(m_MatchEdges, m_Yaw / Directions.DegToRad, cursor, m_PartnerMedian ?? setting.MedianWidth, !m_CityConfigurationSystem.leftHandTraffic);
 
         /// <summary>把当前路口匹配结果写进面板快照。</summary>
         private void FillMatchState(PanelSnapshot snapshot)
@@ -500,7 +513,7 @@ namespace InterchangeMod.Systems
                 errors.Add($"无法匹配路口：{m_Match.Error}（把鼠标移到空地上可自由放置）");
             else if (m_Match != null && !m_Match.RoadOnly && m_Match.LegCount != CurrentTemplate.LegCount)
                 errors.Add(m_Match.LegCount == 3
-                    ? "这是三向（T 型）路口：当前立交类型需要四向路口；T 型立交（快速路 T 型、喇叭形）正在开发"
+                    ? "这是三向（T 型）路口：当前立交类型需要四向路口，请选择“快速路 T 型”（喇叭形正在开发）"
                     : $"这是 {m_Match.LegCount} 向路口，当前立交类型需要 {CurrentTemplate.LegCount} 向");
             InterchangeParams p = BuildParams(errors, snapshot);
             if (errors.Count == 0)
@@ -542,9 +555,10 @@ namespace InterchangeMod.Systems
                     var netTree = m_NetSearchSystem.GetNetSearchTree(readOnly: true, out JobHandle treeDeps);
                     treeDeps.Complete();
                     List<Entity> removed = RoadRemover.FindEdges(EntityManager, netTree, m_RemovalFootprint, origin, yaw,
-                        // 立体交叉：被替换的高架（或下穿道路）所在的那层也要清理
-                        m_Match.Crossing ? new[] { m_Match.Cross.Elevation, m_Match.Main.Elevation } : new[] { BaseElevation },
+                        // 新立交两层所在的高度都清理：被替换的高架（或下穿道路）和地面道路
+                        new[] { p.Levels[0].Elevation, p.Levels[1].Elevation },
                         ref terrain, m_Match.Crossing ? m_CrossingEdges : null);
+                    RoadRemover.Debug = setting.DebugLogging;
                     snapshot.ConnectedEnds = RoadRemover.CreateDefinitions(commandBuffer, EntityManager, removed, m_RemovalFootprint,
                         InterchangeLayout.LegEnds(segments), origin, yaw, ref terrain, m_RandomSeed + segments.Count);
                     snapshot.RemovedRoads = removed.Count;
@@ -579,12 +593,41 @@ namespace InterchangeMod.Systems
                 crossElevation = m_Match.Cross.Elevation;
                 gap = System.Math.Abs(mainElevation - crossElevation);
             }
+            else if (BaseFollowsMatch && m_Match.RoadOnly && MainOnTop
+                && LevelPlanner.BandOf(m_Match.LowestElevation) == ElevationBand.Elevated)
+            {
+                // 对齐的是一条已有高架（主线在上层的立交）：主线保持这条高架的高度，下层（被交道路、辅路）在地面
+                // （游戏内实测：把高架高度当成基层时主线又抬高一层，原高架留在下面，重叠且接不回）
+                mainElevation = m_Match.LowestElevation;
+                crossElevation = 0f;
+                gap = mainElevation;
+                baseElevation = 0f;
+                snapshot.BaseElevation = baseElevation;
+            }
             p.Levels[0].Elevation = mainElevation;
             p.Levels[1].Elevation = crossElevation;
             snapshot.MainElevation = mainElevation;
             snapshot.CrossElevation = crossElevation;
             snapshot.LevelGap = gap;
-            snapshot.MinimumGap = LevelPlanner.RequiredGap(lower, upper, BaseElevation);
+            snapshot.MinimumGap = LevelPlanner.RequiredGap(lower, upper, baseElevation);
+        }
+
+        /// <summary>
+        /// T 型的支路角度（相对主线臂 0 顺时针，0~360°）：对准已有 T 型路口时取路口的；
+        /// 否则按面板的相交角度，支路在右侧时就是它，在左侧时取 360° − 它。
+        /// </summary>
+        private float BranchAngle(bool matched)
+        {
+            if (matched && !m_Match.RoadOnly && m_Match.LegCount == 3)
+                return m_Match.CrossingAngle;
+            bool left = setting.BranchOnLeft;
+            if (matched && m_Match.RoadOnly)
+            {
+                // 只对齐了一条道路：支路放在鼠标所在的一侧（相对对齐后的主线方向），不用面板的左右
+                Vec3 mainDirection = Directions.FromAngle(m_Match.MainAngle);
+                left = Directions.Dot(m_Cursor - m_Match.Center, Directions.RightOf(mainDirection)) < 0f;
+            }
+            return left ? 360f - setting.CrossingAngle : setting.CrossingAngle;
         }
 
         private InterchangeParams BuildParams(List<string> errors, PanelSnapshot snapshot)
@@ -595,8 +638,12 @@ namespace InterchangeMod.Systems
                 RampLength = setting.RampLength,
                 RampDivergeAngle = setting.RampDivergeAngle,
                 RightHandTraffic = !m_CityConfigurationSystem.leftHandTraffic,
-                Legs = InterchangeParams.CrossLegs(matched && !m_Match.RoadOnly ? m_Match.CrossingAngle : setting.CrossingAngle, mainLevel: 0, crossLevel: 1),
+                Legs = CurrentTemplate.LegCount == 3
+                    ? InterchangeParams.TLegs(BranchAngle(matched), mainLevel: 0, branchLevel: 1)
+                    : InterchangeParams.CrossLegs(matched && !m_Match.RoadOnly ? m_Match.CrossingAngle : setting.CrossingAngle, mainLevel: 0, crossLevel: 1),
             };
+            // 被交道路（支路）的另一端：十字型是臂 3，T 型只有臂 1
+            int crossOther = p.Legs.Count == 4 ? 3 : 1;
 
             string mainName, crossName;
             RoadForm mainForm, crossForm;
@@ -628,7 +675,7 @@ namespace InterchangeMod.Systems
                 (crossName, crossForm) = ResolveRoad(setting.CrossRoadPrefab, kDefaultCrossRoad, setting.CrossRoadForm);
             }
             SetRoad(p, 0, 2, mainForm, mainName, mainMedian, errors);
-            SetRoad(p, 1, 3, crossForm, crossName, crossMedian, errors);
+            SetRoad(p, 1, crossOther, crossForm, crossName, crossMedian, errors);
             PlanLevels(p, snapshot);
 
             // 外部主线是双向道路、但立交主线不在地面：匝道无法从双向道路中心分出，
@@ -657,7 +704,7 @@ namespace InterchangeMod.Systems
             // 原路口改造：已匹配的臂接回原有道路，不在原有道路高度的那层（如高架的上层）在臂端加坡道升降过去
             if (matched && !StackedOverMatch)
             {
-                foreach (int index in m_Match.RoadOnly ? new[] { 0, 2 } : new[] { 0, 1, 2, 3 })
+                foreach (int index in m_Match.RoadOnly ? new[] { 0, 2 } : Enumerable.Range(0, p.Legs.Count).ToArray())
                 {
                     // 立体交叉时两条道路各有自己的高度
                     bool mainLeg = index % 2 == 0;

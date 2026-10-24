@@ -328,7 +328,7 @@ namespace InterchangeMod.Generation.Templates
         /// end = +1 表示道路正方向那一端，−1 表示负方向那一端；point(沿道路距离, 横向偏移) 给出坐标。
         /// 横向 +offset 那幅沿道路正方向行驶（与 AddRoadLine 的约定一致）。
         /// </summary>
-        private static void AddTransition(List<RoadSegmentSpec> segments, string name, RoadRole role, Func<float, float, Vec3> point,
+        internal static void AddTransition(List<RoadSegmentSpec> segments, string name, RoadRole role, Func<float, float, Vec3> point,
             int end, float start, float offset, float outerMin, float angle, string? oneWayPrefab, string? twoWayPrefab)
         {
             float mergeAt = start + offset / MathF.Tan(angle * Directions.DegToRad);

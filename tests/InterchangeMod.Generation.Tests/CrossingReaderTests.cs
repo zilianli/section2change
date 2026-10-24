@@ -47,5 +47,29 @@ namespace InterchangeMod.Generation.Tests
             Assert.Equal(5f, match.Center.X, 3);
             Assert.Equal(0f, match.Center.Z, 3);
         }
+
+        [Fact]
+        public void StreetEndingJustPastViaduct_MatchesAsTee()
+        {
+            // 双幅高架（东西向）下，街道从南边过来，只伸过高架一点就到头：伸过去的那一小半不算臂 → 丁字路口
+            var east = new CrossingRoad { Curve = Bezier3.Line(new Vec3(-200, 0, -10), new Vec3(200, 0, -10)), Road = "Highway Oneway", OneWay = true, Forward = true, Width = 12f, LanesPerDirection = 3, IsHighway = true };
+            var west = new CrossingRoad { Curve = Bezier3.Line(new Vec3(-200, 0, 10), new Vec3(200, 0, 10)), Road = "Highway Oneway", OneWay = true, Forward = false, Width = 12f, LanesPerDirection = 3, IsHighway = true };
+            var street = new CrossingRoad { Curve = Bezier3.Line(new Vec3(0, 0, -150), new Vec3(0, 0, 15)), Road = "Street", OneWay = false, Width = 16f, LanesPerDirection = 2 };
+
+            var edges = new List<ExternalEdge>();
+            foreach (var highway in new[] { east, west })
+            {
+                Assert.True(CrossingReader.Intersect(highway.Curve, street.Curve, out float th, out float ts));
+                edges.AddRange(CrossingReader.Split(highway, th, 10f));
+                // 街道沿曲线方向（向北）只剩几米就到头：只要向南的那一半
+                edges.AddRange(CrossingReader.Split(street, ts, 0f, includeForward: false));
+            }
+
+            var match = JunctionMatcher.Match(edges, preferredAngle: 90f);
+            Assert.Null(match.Error);
+            Assert.Equal(3, match.LegCount);
+            Assert.Equal(RoadForm.Dual, match.Main!.Form);
+            Assert.Equal("Street", match.Cross!.Prefab);
+        }
     }
 }

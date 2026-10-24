@@ -28,11 +28,16 @@ export const InterchangePanel = () => {
   // 只对齐了一条普通道路：主线跟随它，被交道路仍按面板
   const roadAligned = match?.state === "road";
   const t = getStrings(state.locale);
-  const expressway = s.InterchangeType === "ExpresswayNode";
+  // 快速路 T 型和十字型一样有地面辅路
+  const expresswayT = s.InterchangeType === "ExpresswayT";
+  const expressway = s.InterchangeType === "ExpresswayNode" || expresswayT;
   const singlePoint = s.InterchangeType === "SinglePoint";
+  const tee = expresswayT;
   // 中式快速路节点和单点立交的主线固定在上层
   const mainForcedTop = expressway || singlePoint;
-  const typeName = expressway ? t.typeExpressway : singlePoint ? t.typeSinglePoint : t.typeDiamond;
+  const typeName = expresswayT ? t.typeExpresswayT : expressway ? t.typeExpressway : singlePoint ? t.typeSinglePoint : t.typeDiamond;
+  // T 型的被交道路叫“支路”
+  const crossTitle = tee ? t.branchRoad : t.crossRoad;
 
   const formOptions: { value: RoadForm; text: string }[] = [
     { value: "Auto", text: t.formAuto },
@@ -58,10 +63,21 @@ export const InterchangePanel = () => {
       <Panel header={`${t.title} · ${typeName}`} onClose={closeTool} className={styles.panel}>
         <Scrollable className={styles.content} vertical trackVisibility="scrollable">
           <Section title={t.interchangeType}>
-            <Choice label="" value={s.InterchangeType}
+            <Choice label={t.fourWay} value={s.InterchangeType}
               options={[{ value: "Diamond", text: t.typeDiamond }, { value: "ExpresswayNode", text: t.typeExpressway }, { value: "SinglePoint", text: t.typeSinglePoint }]}
               onChange={(v) => setValue("InterchangeType", v)} />
-            {expressway && <div className={styles.note}>{t.expresswayNote}</div>}
+            <Choice label={t.threeWay} value={s.InterchangeType}
+              options={[{ value: "ExpresswayT", text: t.typeExpresswayT }]}
+              onChange={(v) => setValue("InterchangeType", v)} />
+            {expressway && !expresswayT && <div className={styles.note}>{t.expresswayNote}</div>}
+            {expresswayT && <div className={styles.note}>{t.expresswayTNote}</div>}
+            {/* T 型空地放置时选支路在哪一侧；对准已有 T 型路口时由路口决定，只对齐一条道路时放在鼠标所在一侧 */}
+            {tee && !matched && !roadAligned && (
+              <Choice label={t.branchSide} value={s.BranchOnLeft ? "left" : "right"}
+                options={[{ value: "left", text: t.left }, { value: "right", text: t.right }]}
+                onChange={(v) => setValue("BranchOnLeft", v === "left")} />
+            )}
+            {tee && roadAligned && <div className={styles.note}>{t.branchSideByCursor}</div>}
             {singlePoint && <div className={styles.note}>{t.singlePointNote}</div>}
             {/* 装了 Anarchy 才显示：开关就是 Anarchy 自己的开关，和它的工具栏按钮同步 */}
             {state.anarchy && (
@@ -127,7 +143,7 @@ export const InterchangePanel = () => {
             {(matched || roadAligned) && <div className={styles.note}>{t.decidedByMatch}</div>}
           </Section>
 
-          <Section title={t.crossRoad}>
+          <Section title={crossTitle}>
             <RoadChooser strings={t} chosen={s.CrossRoadPrefab || t.defaultCrossRoad}
               open={picker === "cross"} onToggle={() => togglePicker("cross")} />
             {picker === "cross" && (

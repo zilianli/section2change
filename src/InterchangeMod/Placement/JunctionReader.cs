@@ -137,42 +137,264 @@ namespace InterchangeMod.Placement
                 return null;
 
             var fromHit = FindCrossings(entityManager, netTree, hit);
-            if (fromHit.Count == 0)
-                return null;
-            var nearest = fromHit.OrderBy(c => math.distance(c.Point.xz, cursor.xz)).First();
-            if (math.distance(nearest.Point.xz, cursor.xz) > kCrossingRadius)
-                return null;
+            var nearest = fromHit.OrderBy(c => math.distance(c.Point.xz, cursor.xz)).FirstOrDefault();
+            // 没有真正相交的道路时，再看是不是“丁字”：一条路的尽头停在另一条路旁边（如地面道路在高架下方结束）
+            if (fromHit.Count == 0 || math.distance(nearest.Point.xz, cursor.xz) > kCrossingRadius)
+                return ReadTee(entityManager, prefabSystem, netTree, hit, cursor, roads, ref terrain, matched, out key);
             Entity other = nearest.Edge;
             float3 center = nearest.Point;
             key = (hit, other);
 
-            // 两边各收集：与对方道路相交、方向与本方相近、离交叉点不远的路段
-            var sideA = FindCrossings(entityManager, netTree, other).Where(c => Near(c, center) && Parallel(entityManager, c.Edge, hit)).ToList();
-            var sideB = fromHit.Where(c => Near(c, center) && Parallel(entityManager, c.Edge, other)).ToList();
+            return CollectAt(entityManager, prefabSystem, netTree, center, hit, other, roads, ref terrain, matched);
+        }
+
+        /// <summary>虚拟丁字路口：支路尽头离主线中心线不超过这个距离（米）。</summary>
+        private const float kTeeReach = 30f;
+
+        /// <summary>
+        /// 虚拟丁字路口：一条路（支路）在另一条路（主线）旁边结束、两者不相连，例如地面道路停在高架下方。
+        /// 鼠标指着主线时找尽头停在它旁边的道路；指着支路时找从它尽头旁边经过的道路。
+        /// 主线一侧收集与它平行、离交汇点不远的路段（双幅时两幅），在交汇点处切成两半；
+        /// 支路一侧收集尽头也停在主线旁边的平行路段（双幅时两幅），各取离开尽头的那一半。
+        /// 交汇点取支路尽头在主线中心线上的投影。找不到时返回 null。
+        /// </summary>
+        private static List<ExternalEdge> ReadTee(EntityManager entityManager, PrefabSystem prefabSystem,
+            NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree, Entity hit, float3 cursor,
+            IReadOnlyDictionary<string, RoadInfo> roads, ref TerrainHeightData terrain, List<Entity> matched, out (Entity, Entity) key)
+        {
+            key = default;
+            var candidates = FindTeeEnds(entityManager, netTree, hit).Concat(FindTeeMains(entityManager, netTree, hit)).ToList();
+            if (candidates.Count == 0)
+                return null;
+            var tee = candidates.OrderBy(c => math.distance(c.Point.xz, cursor.xz)).First();
+            if (math.distance(tee.Point.xz, cursor.xz) > kCrossingRadius)
+                return null;
+            key = (tee.Main, tee.Branch);
+            return CollectAt(entityManager, prefabSystem, netTree, tee.Point, tee.Main, tee.Branch, roads, ref terrain, matched);
+        }
+
+        /// <summary>
+        /// 在虚拟交汇点 center 周围收集两条道路的路段：与代表路段 roadA / roadB 方向相近（双幅时两幅都算）、
+        /// 高度相近（3 米内，避免把高架旁边的地面辅路当成高架的一幅）、离交汇点不远的路段。
+        ///   横穿交汇点的路段：离交汇点最近处在交汇点正侧方（沿路方向偏离 5 米内），在那里切成两半；
+        ///   停在交汇点旁边结束的路段（虚拟丁字）：最近处是它的尽头，可以离交汇点 kTeeReach，只取离开尽头的那一半；
+        ///   伸过交汇点一点点（kTeeReach 内）就到头的那一半不算一条臂（宽容处理）。
+        /// 交汇点正好落在节点上时，两侧路段各贡献一半。
+        /// </summary>
+        private static List<ExternalEdge> CollectAt(EntityManager entityManager, PrefabSystem prefabSystem,
+            NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree, float3 center, Entity roadA, Entity roadB,
+            IReadOnlyDictionary<string, RoadInfo> roads, ref TerrainHeightData terrain, List<Entity> matched)
+        {
+            float ElevationNear(Entity edge, ref TerrainHeightData heights)
+            {
+                Bezier4x3 c = entityManager.GetComponentData<Curve>(edge).m_Bezier;
+                MathUtils.Distance(c.xz, center.xz, out float t);
+                float3 p = MathUtils.Position(c, t);
+                return p.y - TerrainUtils.SampleHeight(ref heights, p);
+            }
+            float elevationA = ElevationNear(roadA, ref terrain), elevationB = ElevationNear(roadB, ref terrain);
 
             var result = new List<ExternalEdge>();
-            foreach (var crossing in sideA.Concat(sideB))
+            foreach (Entity candidate in NearbyRoadEdges(entityManager, netTree, center, kPartnerSearch))
             {
-                if (matched.Contains(crossing.Edge)) continue;
-                if (!prefabSystem.TryGetPrefab(entityManager.GetComponentData<PrefabRef>(crossing.Edge).m_Prefab, out PrefabBase prefab)
-                    || !roads.TryGetValue(prefab.name, out RoadInfo info))
+                bool groupA = candidate == roadA || (candidate != roadB && Parallel(entityManager, candidate, roadA));
+                bool groupB = !groupA && (candidate == roadB || Parallel(entityManager, candidate, roadB));
+                if ((!groupA && !groupB) || matched.Contains(candidate) || !TryGetRoad(entityManager, prefabSystem, candidate, roads, out RoadInfo info))
                     continue;
-                Bezier4x3 curve = entityManager.GetComponentData<Curve>(crossing.Edge).m_Bezier;
-                var road = new CrossingRoad
-                {
-                    Curve = Flat(curve),
-                    Road = info.Name,
-                    OneWay = info.IsOneWay,
-                    Forward = info.ForwardLanes > 0,
-                    Width = info.Width,
-                    LanesPerDirection = info.LanesPerDirection,
-                    IsHighway = info.IsHighway,
-                };
-                float3 point = MathUtils.Position(curve, crossing.T);
-                result.AddRange(CrossingReader.Split(road, crossing.T, point.y - TerrainUtils.SampleHeight(ref terrain, point)));
-                matched.Add(crossing.Edge);
+                Edge edge = entityManager.GetComponentData<Edge>(candidate);
+                Bezier4x3 curve = entityManager.GetComponentData<Curve>(candidate).m_Bezier;
+                if (MathUtils.Distance(curve.xz, center.xz, out float t) > kPartnerSearch)
+                    continue;
+                float3 point = MathUtils.Position(curve, t);
+                float elevation = point.y - TerrainUtils.SampleHeight(ref terrain, point);
+                if (math.abs(elevation - (groupA ? elevationA : elevationB)) > 3f)
+                    continue;
+                float2 direction = math.normalizesafe(MathUtils.Tangent(curve, t).xz);
+                float along = math.abs(math.dot(point.xz - center.xz, direction));
+                bool atEnd = t <= 0.01f || t >= 0.99f;
+                if (along > (atEnd ? kTeeReach : 5f))
+                    continue;
+                float lengthAfter = MathUtils.Length(MathUtils.Cut(curve, new float2(t, 1f)));
+                float lengthBefore = MathUtils.Length(MathUtils.Cut(curve, new float2(0f, t)));
+                bool forward = lengthAfter > 0.5f && !(lengthAfter < kTeeReach && IsDeadEnd(entityManager, edge.m_End));
+                bool backward = lengthBefore > 0.5f && !(lengthBefore < kTeeReach && IsDeadEnd(entityManager, edge.m_Start));
+                if (!forward && !backward)
+                    continue;
+                result.AddRange(CrossingReader.Split(ToCrossingRoad(curve, info), t, elevation, forward, backward));
+                matched.Add(candidate);
             }
             return result;
+        }
+
+        /// <summary>虚拟丁字路口的一个候选：支路 Branch 的一端（AtStart）停在主线 Main 旁边，Point 是它在主线中心线上的投影。</summary>
+        private readonly struct TeeEnd
+        {
+            public TeeEnd(Entity main, Entity branch, bool atStart, float3 point)
+            {
+                Main = main;
+                Branch = branch;
+                AtStart = atStart;
+                Point = point;
+            }
+
+            public Entity Main { get; }
+            public Entity Branch { get; }
+            public bool AtStart { get; }
+            public float3 Point { get; }
+        }
+
+        /// <summary>把 main 当主线：找一端停在它中心线旁边（kTeeReach 内）、方向大致垂直、与它不相连的道路。</summary>
+        private static List<TeeEnd> FindTeeEnds(EntityManager entityManager, NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree, Entity main)
+        {
+            var result = new List<TeeEnd>();
+            if (!TryGetRoadEdge(entityManager, main, out Edge mainEdge, out Curve mainCurve))
+                return result;
+            var bounds = MathUtils.Bounds(mainCurve.m_Bezier.xz);
+            foreach (Entity candidate in RoadEdgesIn(entityManager, netTree, new Bounds2(bounds.min - kTeeReach, bounds.max + kTeeReach)))
+            {
+                if (candidate == main || !TryGetRoadEdge(entityManager, candidate, out Edge edge, out Curve curve) || Connected(edge, mainEdge))
+                    continue;
+                foreach (bool atStart in new[] { true, false })
+                {
+                    float3 end = atStart ? curve.m_Bezier.a : curve.m_Bezier.d;
+                    if (MathUtils.Distance(mainCurve.m_Bezier.xz, end.xz, out float t) > kTeeReach)
+                        continue;
+                    float2 branchDirection = math.normalizesafe((atStart ? MathUtils.StartTangent(curve.m_Bezier) : -MathUtils.EndTangent(curve.m_Bezier)).xz);
+                    float2 mainDirection = math.normalizesafe(MathUtils.Tangent(mainCurve.m_Bezier, t).xz);
+                    if (math.abs(math.dot(branchDirection, mainDirection)) > math.cos(math.radians(30f)))
+                        continue;   // 与主线几乎平行：不是丁字
+                    result.Add(new TeeEnd(main, candidate, atStart, MathUtils.Position(mainCurve.m_Bezier, t)));
+                }
+            }
+            return result;
+        }
+
+        /// <summary>把 branch 当支路：它的某一端停在另一条不相连道路的中心线旁边时，返回那条道路作为主线。</summary>
+        private static List<TeeEnd> FindTeeMains(EntityManager entityManager, NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree, Entity branch)
+        {
+            var result = new List<TeeEnd>();
+            if (!TryGetRoadEdge(entityManager, branch, out _, out Curve curve))
+                return result;
+            foreach (bool atStart in new[] { true, false })
+            {
+                float3 end = atStart ? curve.m_Bezier.a : curve.m_Bezier.d;
+                foreach (Entity main in NearbyRoadEdges(entityManager, netTree, end, kTeeReach))
+                    result.AddRange(FindTeeEnds(entityManager, netTree, main).Where(t => t.Branch == branch && t.AtStart == atStart));
+            }
+            return result;
+        }
+
+        /// <summary>节点是道路尽头：只接着一条道路路段。</summary>
+        private static bool IsDeadEnd(EntityManager entityManager, Entity node)
+        {
+            if (!entityManager.HasBuffer<ConnectedEdge>(node))
+                return false;
+            int roads = 0;
+            foreach (ConnectedEdge connected in entityManager.GetBuffer<ConnectedEdge>(node, true))
+                if (TryGetRoadEdge(entityManager, connected.m_Edge, out _, out _))
+                    roads++;
+            return roads <= 1;
+        }
+
+        private static bool Connected(Edge a, Edge b) =>
+            a.m_Start == b.m_Start || a.m_Start == b.m_End || a.m_End == b.m_Start || a.m_End == b.m_End;
+
+        /// <summary>包围盒内的道路路段（不含临时、已删除、属于建筑的）。</summary>
+        private static List<Entity> RoadEdgesIn(EntityManager entityManager, NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree, Bounds2 bounds)
+        {
+            var candidates = new NativeList<Entity>(32, Allocator.Temp);
+            var result = new List<Entity>();
+            try
+            {
+                var iterator = new RoadRemover.BoundsIterator { m_Bounds = bounds, m_Result = candidates };
+                netTree.Iterate(ref iterator);
+                foreach (Entity candidate in candidates)
+                {
+                    if (!result.Contains(candidate) && TryGetRoadEdge(entityManager, candidate, out _, out _)
+                        && !entityManager.HasComponent<Deleted>(candidate) && !entityManager.HasComponent<Owner>(candidate))
+                        result.Add(candidate);
+                }
+            }
+            finally
+            {
+                candidates.Dispose();
+            }
+            return result;
+        }
+
+        private static List<Entity> NearbyRoadEdges(EntityManager entityManager, NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree, float3 point, float radius) =>
+            RoadEdgesIn(entityManager, netTree, new Bounds2(point.xz - radius, point.xz + radius));
+
+        private static CrossingRoad ToCrossingRoad(Bezier4x3 curve, RoadInfo info) => new CrossingRoad
+        {
+            Curve = Flat(curve),
+            Road = info.Name,
+            OneWay = info.IsOneWay,
+            Forward = info.ForwardLanes > 0,
+            Width = info.Width,
+            LanesPerDirection = info.LanesPerDirection,
+            IsHighway = info.IsHighway,
+        };
+
+        /// <summary>找对向一幅的最大距离（米，中心线之间）。</summary>
+        private const float kPartnerSearch = 60f;
+
+        /// <summary>
+        /// 鼠标指着双幅道路中的一幅（单行道路）时，找出对向的那一幅，量出实际分隔带宽度：
+        /// 附近与它平行、行驶方向相反、在它左侧（右侧通行；左侧通行时在右侧）的单行道路，取最近的一条。
+        /// 中心线距离减去两幅半宽之和就是分隔带。找不到（或指着的不是单行道路）时返回 null。
+        /// </summary>
+        public static float? MeasureDualMedian(EntityManager entityManager, PrefabSystem prefabSystem,
+            NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree, Entity hit, IReadOnlyDictionary<string, RoadInfo> roads, bool rightHandTraffic)
+        {
+            if (hit != Entity.Null && entityManager.Exists(hit) && entityManager.HasComponent<Temp>(hit))
+                hit = entityManager.GetComponentData<Temp>(hit).m_Original;
+            if (hit == Entity.Null || !entityManager.Exists(hit) || !TryGetRoadEdge(entityManager, hit, out _, out Curve curve)
+                || !TryGetRoad(entityManager, prefabSystem, hit, roads, out RoadInfo self) || !self.IsOneWay)
+                return null;
+
+            float3 point = MathUtils.Position(curve.m_Bezier, 0.5f);
+            float2 travel = math.normalizesafe(MathUtils.Tangent(curve.m_Bezier, 0.5f).xz) * (self.ForwardLanes > 0 ? 1f : -1f);
+            float2 partnerSide = rightHandTraffic ? new float2(-travel.y, travel.x) : new float2(travel.y, -travel.x);   // 左侧（右侧通行）
+
+            var candidates = new NativeList<Entity>(32, Allocator.Temp);
+            float? best = null;
+            try
+            {
+                var bounds = new Bounds2(point.xz - kPartnerSearch, point.xz + kPartnerSearch);
+                var iterator = new RoadRemover.BoundsIterator { m_Bounds = bounds, m_Result = candidates };
+                netTree.Iterate(ref iterator);
+                foreach (Entity candidate in candidates)
+                {
+                    if (candidate == hit || !TryGetRoadEdge(entityManager, candidate, out _, out Curve other)
+                        || !TryGetRoad(entityManager, prefabSystem, candidate, roads, out RoadInfo info) || !info.IsOneWay)
+                        continue;
+                    MathUtils.Distance(other.m_Bezier.xz, point.xz, out float t);
+                    float2 offset = MathUtils.Position(other.m_Bezier, t).xz - point.xz;
+                    float2 otherTravel = math.normalizesafe(MathUtils.Tangent(other.m_Bezier, t).xz) * (info.ForwardLanes > 0 ? 1f : -1f);
+                    float across = math.dot(offset, partnerSide);
+                    // 平行（15° 以内）、反向、在指定一侧、横向距离主要是分隔带方向（不是前后接着的路段）
+                    if (math.dot(otherTravel, travel) > -math.cos(math.radians(15f)) || across <= 0f
+                        || math.abs(math.dot(offset, travel)) > 5f || across > kPartnerSearch)
+                        continue;
+                    float median = across - (self.Width + info.Width) / 2f;
+                    if (median >= 0f && (best == null || median < best))
+                        best = median;
+                }
+            }
+            finally
+            {
+                candidates.Dispose();
+            }
+            return best;
+        }
+
+        private static bool TryGetRoad(EntityManager entityManager, PrefabSystem prefabSystem, Entity edge,
+            IReadOnlyDictionary<string, RoadInfo> roads, out RoadInfo info)
+        {
+            info = null;
+            return prefabSystem.TryGetPrefab(entityManager.GetComponentData<PrefabRef>(edge).m_Prefab, out PrefabBase prefab)
+                && roads.TryGetValue(prefab.name, out info);
         }
 
         private readonly struct CrossingHit
@@ -191,7 +413,6 @@ namespace InterchangeMod.Placement
             public float3 Point { get; }
         }
 
-        private static bool Near(CrossingHit hit, float3 center) => math.distance(hit.Point.xz, center.xz) <= kCrossingRadius;
 
         /// <summary>与 self 相交（水平面上）但不相连的道路路段，以及交叉点在它们上面的参数。</summary>
         private static List<CrossingHit> FindCrossings(EntityManager entityManager, NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree, Entity self)

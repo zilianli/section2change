@@ -102,6 +102,7 @@ namespace InterchangeMod.UI
                 .Field(nameof(s.RampGap), s.RampGap)
                 .Field(nameof(s.SpacingInCells), s.SpacingInCells)
                 .Field(nameof(s.BaseFollowsMatch), s.BaseFollowsMatch)
+                .Field(nameof(s.BranchOnLeft), s.BranchOnLeft)
                 .EndObject();
 
             PanelSnapshot snap = m_ToolSystem.snapshot;

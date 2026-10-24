@@ -54,7 +54,9 @@ namespace InterchangeMod.Generation.Junctions
         /// 把一条路段在参数 t 处切开，得到两条离开交叉点的“路段”：一条沿曲线方向，一条逆曲线方向。
         /// 高度取 elevation（工具层按地形换算好的离地高度）。
         /// </summary>
-        public static IEnumerable<ExternalEdge> Split(CrossingRoad road, float t, float elevation)
+        /// <param name="includeForward">输出沿曲线方向离开交叉点的那一半。</param>
+        /// <param name="includeBackward">输出逆曲线方向离开交叉点的那一半（略微伸过去就到头的一端可以不要，见工具层）。</param>
+        public static IEnumerable<ExternalEdge> Split(CrossingRoad road, float t, float elevation, bool includeForward = true, bool includeBackward = true)
         {
             Vec3 point = road.Curve.Evaluate(t);
             Vec3 tangent = road.Curve.Derivative(t);
@@ -62,6 +64,8 @@ namespace InterchangeMod.Generation.Junctions
             var anchor = new Vec3(point.X, 0f, point.Z);
             foreach (bool alongCurve in new[] { true, false })
             {
+                if (alongCurve ? !includeForward : !includeBackward)
+                    continue;
                 yield return new ExternalEdge
                 {
                     Anchor = anchor,

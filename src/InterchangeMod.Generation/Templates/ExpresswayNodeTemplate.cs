@@ -26,11 +26,25 @@ namespace InterchangeMod.Generation.Templates
         /// <summary>升降段坡度留一点余量，避免数值误差超出上限。</summary>
         private const float kGradeMargin = 0.98f;
 
-        public InterchangeType Type => InterchangeType.ExpresswayNode;
+        /// <param name="tee">
+        /// true = T 型（三向）：被交道路只在一侧（臂 1，支路），从高架下穿过，在远侧辅路处结束，
+        /// 与两侧辅路各形成一个 T 字路口；其余（主线、辅路、四条匝道）与十字型相同。
+        /// </param>
+        public ExpresswayNodeTemplate(bool tee = false)
+        {
+            m_Tee = tee;
+        }
 
-        public string DisplayName => "中式快速路节点";
+        private readonly bool m_Tee;
 
-        public int LegCount => 4;
+        public InterchangeType Type => m_Tee ? InterchangeType.ExpresswayT : InterchangeType.ExpresswayNode;
+
+        public string DisplayName => m_Tee ? "快速路 T 型节点" : "中式快速路节点";
+
+        public int LegCount => m_Tee ? 3 : 4;
+
+        /// <summary>被交道路（支路）另一端的臂：十字型是臂 3，T 型没有，用臂 1 自己。</summary>
+        private int OtherCrossLeg => m_Tee ? 1 : 3;
 
         public IReadOnlyList<string> ValidateParams(InterchangeParams p)
         {
@@ -40,8 +54,8 @@ namespace InterchangeMod.Generation.Templates
 
             var legs = p.Legs;
             if (Directions.AngleBetween(legs[0].Angle, legs[2].Angle) < 180f - kOppositeTolerance
-                || Directions.AngleBetween(legs[1].Angle, legs[3].Angle) < 180f - kOppositeTolerance)
-                errors.Add("快速路节点要求主线（臂 0/2）和被交道路（臂 1/3）各自是直线");
+                || (!m_Tee && Directions.AngleBetween(legs[1].Angle, legs[3].Angle) < 180f - kOppositeTolerance))
+                errors.Add(m_Tee ? "快速路 T 型节点要求主线（臂 0/2）是直线" : "快速路节点要求主线（臂 0/2）和被交道路（臂 1/3）各自是直线");
 
             float crossing = Directions.AngleBetween(legs[0].Angle, legs[1].Angle);
             if (crossing < kMinCrossingAngle || crossing > 180f - kMinCrossingAngle)
@@ -50,9 +64,9 @@ namespace InterchangeMod.Generation.Templates
                 return errors;
             }
 
-            if (legs[0].Level != legs[2].Level || legs[1].Level != legs[3].Level)
+            if (legs[0].Level != legs[2].Level || legs[1].Level != legs[OtherCrossLeg].Level)
                 errors.Add("同一条道路两端必须在同一层");
-            if (!DiamondTemplate.SameRoad(legs[0], legs[2]) || !DiamondTemplate.SameRoad(legs[1], legs[3]))
+            if (!DiamondTemplate.SameRoad(legs[0], legs[2]) || !DiamondTemplate.SameRoad(legs[1], legs[OtherCrossLeg]))
                 errors.Add("同一条道路两端的形式、宽度和分隔带必须一致");
 
             if (legs[0].Form != RoadForm.Dual)
@@ -104,8 +118,11 @@ namespace InterchangeMod.Generation.Templates
             Vec3 Junction(float frontageLateral, float crossLateral) =>
                 Intersect(side * frontageLateral, main, crossSide * crossLateral, cross) + up * L.Ground;
 
-            // —— 主线（高架，双幅）——
+            // —— 主线两端：外部道路比主线低（原有道路在地面、主线是新建高架）时下坡落地，再接外部道路 ——
             float mainOuter = L.MainNode + legs[0].StubLength;
+            var ends = new[] { 1, -1 }.Select(e => (e, end: EndOf(p, L, e, mainOuter))).ToArray();
+
+            // —— 主线（高架，双幅）——
             foreach (int sign in new[] { 1, -1 })
             {
                 float lateral = sign * L.Om;
@@ -114,26 +131,52 @@ namespace InterchangeMod.Generation.Templates
                 var span = DiamondTemplate.LineSpan(p, onMain: true, inner);
                 var mainNodes = new List<Vec3>
                 {
-                    Point(-mainOuter, lateral, L.Main), Point(-L.MainNode, lateral, L.Main),
-                    Point(span.Lo, inner, L.Main), Point(span.Hi, inner, L.Main),
-                    Point(L.MainNode, lateral, L.Main), Point(mainOuter, lateral, L.Main),
+                    Point(-L.MainNode, lateral, L.Main), Point(span.Lo, inner, L.Main), Point(span.Hi, inner, L.Main),
+                    Point(L.MainNode, lateral, L.Main),
                 };
+                foreach (var (e, end) in ends)
+                {
+                    if (!end.Landing)
+                    {
+                        mainNodes.Add(Point(e * mainOuter, lateral, L.Main));
+                        continue;
+                    }
+                    // 坡顶 → 坡底（地面）→ 外端（或过渡段起点）
+                    mainNodes.Add(Point(e * end.SlopeTop, lateral, L.Main));
+                    mainNodes.Add(Point(e * end.SlopeBottom, lateral, end.Elevation));
+                    mainNodes.Add(Point(e * end.Outer, lateral, end.Elevation));
+                }
+                int first = segments.Count;
                 DiamondTemplate.AddRoadLine(segments, sign > 0 ? "MainNB" : "MainSB", RoadRole.MainRoad, main, travelPositive: sign > 0,
                     legs[2].RoadPrefab, legs[0].RoadPrefab, "2", "0", mainNodes, -L.MainNode, L.MainNode, p.MainReducedPrefab, side * (inner - lateral));   // 车道平衡：匝道分出点和汇入点之间减车道，边缘对齐
+                // 坡道段用两端水平的竖曲线，和前后的水平段衔接没有竖向折角
+                for (int i = first; i < segments.Count; i++)
+                {
+                    var s = segments[i];
+                    if (MathF.Abs(s.Curve.P0.Y - s.Curve.P3.Y) > 0.1f)
+                        segments[i] = new RoadSegmentSpec(s.Name, s.Role, Bezier3.SmoothSlope(s.Curve.P0, s.Curve.P3), s.Prefab, s.StartNode, s.EndNode);
+                }
+            }
+            foreach (var (e, end) in ends)
+            {
+                var leg = legs[e > 0 ? 0 : 2];
+                if (end.Landing && leg.NeedsDualToTwoWayTransition)
+                    DiamondTemplate.AddTransition(segments, e > 0 ? "Main-0" : "Main-2", RoadRole.MainRoad, (along, lat) => Point(along, lat, end.Elevation),
+                        e, end.Outer, L.Om, end.Outer + leg.StubLength, p.LegTransitionAngle, leg.RoadPrefab, leg.ExternalPrefab);
             }
 
             // —— 辅路（地面，两侧各一幅，与同侧主线同向）——
             foreach (int sign in new[] { 1, -1 })
             {
                 float lateral = sign * L.Og;
-                var nodes = new List<Vec3>
-                {
-                    Point(-mainOuter, lateral, L.Ground), Point(-L.Landing, lateral, L.Ground),
-                    Point(L.Landing, lateral, L.Ground), Point(mainOuter, lateral, L.Ground),
-                };
+                var nodes = new List<Vec3> { Point(-L.Landing, lateral, L.Ground), Point(L.Landing, lateral, L.Ground) };
+                // 主线落地的一端：辅路不并回主线，和主线一起延伸到外端后结束（留给玩家自行连接）
+                foreach (var (e, end) in ends)
+                    nodes.Add(Point(e * (end.Landing ? end.Outer : mainOuter), lateral, L.Ground));
                 // 加宽段（落地点到上匝道分出点之间，含平交口）按外侧（直行车道）对齐
                 nodes.AddRange(crossLaterals.Select(c => Junction(sign * L.FrontInner, c)));
-                DiamondTemplate.AddRoadLine(segments, sign > 0 ? "FrontNB" : "FrontSB", RoadRole.FrontageRoad, main, travelPositive: sign > 0,
+                string name = sign > 0 ? "FrontNB" : "FrontSB";
+                DiamondTemplate.AddRoadLine(segments, name, RoadRole.FrontageRoad, main, travelPositive: sign > 0,
                     p.FrontagePrefab, p.FrontagePrefab, "2", "0", nodes, -L.Landing, L.Landing, p.FrontageWidenedPrefab, side * (sign * L.FrontInner - lateral));
             }
 
@@ -145,15 +188,18 @@ namespace InterchangeMod.Generation.Templates
                 var span = DiamondTemplate.LineSpan(p, onMain: false, lateral);
                 bool travelPositive = lateral >= 0f;
                 string name = crossLaterals.Length == 1 ? "Cross" : travelPositive ? "CrossPos" : "CrossNeg";
+                var nodes = new List<Vec3>
+                {
+                    Junction(L.FrontInner, lateral), Junction(-L.FrontInner, lateral),
+                    cross * span.Lo + crossSide * lateral + up * L.Ground,
+                    cross * span.Hi + crossSide * lateral + up * L.Ground,
+                    cross * crossOuter + crossSide * lateral + up * L.Ground,
+                };
+                // T 型：支路只伸向臂 1 一侧，另一端就在远侧辅路的 T 字路口结束
+                if (!m_Tee)
+                    nodes.Add(cross * -crossOuter + crossSide * lateral + up * L.Ground);
                 DiamondTemplate.AddRoadLine(segments, name, RoadRole.CrossRoad, cross, travelPositive,
-                    legs[3].RoadPrefab, legs[1].RoadPrefab, "3", "1", new List<Vec3>
-                    {
-                        cross * -crossOuter + crossSide * lateral + up * L.Ground,
-                        Junction(L.FrontInner, lateral), Junction(-L.FrontInner, lateral),
-                        cross * span.Lo + crossSide * lateral + up * L.Ground,
-                        cross * span.Hi + crossSide * lateral + up * L.Ground,
-                        cross * crossOuter + crossSide * lateral + up * L.Ground,
-                    });
+                    legs[OtherCrossLeg].RoadPrefab, legs[1].RoadPrefab, m_Tee ? "far" : "3", "1", nodes);
             }
 
             // —— 匝道 ——
@@ -183,6 +229,50 @@ namespace InterchangeMod.Generation.Templates
                 segments.Add(new RoadSegmentSpec($"{dir}-on-shift", RoadRole.Ramp, Bezier3.FromTangents(onTop, travel, onMain, travel, L.MainShift / 3f), p.RampPrefab));
             }
             return segments;
+        }
+
+        /// <summary>主线落地端：坡顶离最外匝道节点的距离（米）。</summary>
+        private const float kEndStub = 20f;
+        /// <summary>坡底到双幅 → 双向过渡段起点的距离（米）。</summary>
+        private const float kEndTransitionGap = 20f;
+
+        /// <summary>主线一端（沿主线 e = +1 为臂 0 一端，−1 为臂 2 一端）的布置，距离都是离路口中心的距离。</summary>
+        private readonly struct EndPlan
+        {
+            public EndPlan(bool landing, float elevation, float slopeTop, float slopeBottom, float outer)
+            {
+                Landing = landing;
+                Elevation = elevation;
+                SlopeTop = slopeTop;
+                SlopeBottom = slopeBottom;
+                Outer = outer;
+            }
+
+            /// <summary>这一端主线要下坡落地（外部道路比主线低）。</summary>
+            public bool Landing { get; }
+            /// <summary>落地后的高度（外部道路的高度）。</summary>
+            public float Elevation { get; }
+            public float SlopeTop { get; }
+            public float SlopeBottom { get; }
+            /// <summary>主线双幅的外端（外部是双向道路时是过渡段起点）；辅路也延伸到这里结束。</summary>
+            public float Outer { get; }
+        }
+
+        /// <summary>
+        /// 这一端的外部道路（LegSpec.ExternalElevation，原路口改造时由工具设置）比高架主线低时：
+        /// 主线在最外匝道节点之后 kEndStub 处开始用平滑坡道（长度 ≈ 1.5 × 高差 ÷ 坡度上限）降到外部高度，
+        /// 再延伸一段接外部道路；外部是双向道路时在这里双幅收拢成双向（与菱形的臂端过渡相同）。
+        /// 辅路不并回主线，延伸到同一位置后结束（游戏内反馈：辅路不需要再连回快速路）。
+        /// </summary>
+        private static EndPlan EndOf(InterchangeParams p, Layout L, int e, float mainOuter)
+        {
+            var leg = p.Legs[e > 0 ? 0 : 2];
+            if (!(leg.ExternalElevation is float external) || L.Main - external <= InterchangeLayout.ApproachTolerance)
+                return new EndPlan(false, L.Main, 0f, 0f, mainOuter);
+            float top = L.MainNode + kEndStub;
+            float bottom = top + 1.5f * (L.Main - external) / (p.MaxGrade * kGradeMargin);
+            float outer = leg.NeedsDualToTwoWayTransition ? bottom + kEndTransitionGap : bottom + leg.StubLength;
+            return new EndPlan(true, external, top, bottom, outer);
         }
 
         /// <summary>两条直线（点 + 方向）在水平面上的交点。</summary>
