@@ -368,6 +368,7 @@ namespace InterchangeMod.Systems
         {
             m_Cursor = new Vec3(hitPosition.x, 0f, hitPosition.z);
             UpdateJunctionMatchCore(hitEntity, hitPosition);
+            OrientCrossing();
             // 十字路口当 T 型用时，支路取鼠标所在一侧：鼠标移到主线另一侧就重建预览
             bool? side = TeeFromCross ? CursorRightOfMain() : (bool?)null;
             if (side != m_TeeSide)
@@ -375,6 +376,26 @@ namespace InterchangeMod.Systems
                 m_TeeSide = side;
                 m_SettingsVersion++;
             }
+        }
+
+        /// <summary>
+        /// 四向立体交叉（两条路没有共用节点、一上一下）：哪条已有道路当主线由“上层道路”决定——主线在上层时取上面那条，
+        /// 被交道路在上层时取下面那条（中式快速路、单点立交的主线固定在上层）。匹配本身按车道数和朝向选主线，
+        /// 可能选到下面那条，这里按需要对调主线和被交道路；改了“上层道路”也会重新对调。
+        /// </summary>
+        private void OrientCrossing()
+        {
+            var match = m_Match;
+            if (match == null || match.Error != null || !match.Crossing || match.RoadOnly || match.LegCount != 4
+                || match.Main == null || match.Cross == null || System.Math.Abs(match.Main.Elevation - match.Cross.Elevation) < 0.5f
+                || (match.Main.Elevation > match.Cross.Elevation) == MainOnTop)
+                return;
+            // 新主线 = 原被交道路（在原主线顺时针 CrossingAngle 处）；原主线的另一条臂在新主线顺时针 180° − CrossingAngle 处
+            float crossing = match.CrossingAngle;
+            (match.Main, match.Cross) = (match.Cross, match.Main);
+            match.MainAngle = (match.MainAngle + crossing) % 360f;
+            match.CrossingAngle = 180f - crossing;
+            m_SettingsVersion++;
         }
 
         /// <summary>
@@ -767,6 +788,8 @@ namespace InterchangeMod.Systems
             }
             SetRoad(p, 0, 2, mainForm, mainName, mainMedian, errors);
             SetRoad(p, 1, crossOther, crossForm, crossName, crossMedian, errors);
+            // 原有道路的类型（公路 / 街道）：后面双向道路可能被拆成别的单行道路，苜蓿叶集散车道的“自动”按原来的类型判断
+            string mainOriginal = mainName, crossOriginal = crossName;
             PlanLevels(p, snapshot);
 
             // 外部主线是双向道路、但立交主线不在地面（或是苜蓿叶，匝道都接在两幅上）：匝道无法从双向道路中心分出，
@@ -852,7 +875,15 @@ namespace InterchangeMod.Systems
             if (IsCloverleaf && setting.CloverleafHugLoop)
                 ChooseSharedRamp(p, errors);
             // 苜蓿叶集散车道：用匝道道路，主线在集散车道驶出与汇入之间少掉匝道的车道数（车道平衡沿用匝道车道数）
-            p.CollectorDistributor = IsCloverleaf && setting.CloverleafCollector;
+            // 模式：none 主线交织；auto 按道路类型（是公路的路加，两条都是公路就都加）；main 仅主线；both 两条路都加
+            if (IsCloverleaf)
+            {
+                string mode = setting.CloverleafCollectorMode ?? "none";
+                bool mainHighway = m_RoadsByName.TryGetValue(mainOriginal, out RoadInfo mainInfo) && mainInfo.IsHighway;
+                bool crossHighway = m_RoadsByName.TryGetValue(crossOriginal, out RoadInfo crossInfo) && crossInfo.IsHighway;
+                p.CollectorDistributor = mode == "main" || mode == "both" || (mode == "auto" && mainHighway);
+                p.CrossCollectorDistributor = mode == "both" || (mode == "auto" && crossHighway);
+            }
             if (setting.LaneBalance)
                 ApplyLaneBalance(p, mainName, snapshot);
             if (IsExpressway || IsSinglePoint || HasLoops)

@@ -39,7 +39,9 @@ export const InterchangePanel = () => {
   const tee = expresswayT || trumpet;
   // 支路与主线的实际夹角（0~180°）：对准路口时取匹配的，否则取面板的
   const crossing = ((matched ? match!.angle : s.CrossingAngle) % 180 + 180) % 180;
-  const steepSkew = Math.abs(crossing - 90) > 45;
+  // 斜交提示的阈值：苜蓿叶偏离 90° 超过 30°（交角小于 60°），喇叭形超过 45°
+  const skewLimit = cloverleaf ? 30 : 45;
+  const steepSkew = Math.abs(crossing - 90) > skewLimit;
   // 中式快速路节点和单点立交的主线固定在上层
   const mainForcedTop = expressway || singlePoint;
   const typeName = cloverleaf ? t.typeCloverleaf : trumpet ? t.typeTrumpet : expresswayT ? t.typeExpresswayT : expressway ? t.typeExpressway : singlePoint ? t.typeSinglePoint : t.typeDiamond;
@@ -97,11 +99,14 @@ export const InterchangePanel = () => {
             {cloverleaf && s.CloverleafHugLoop && <div className={styles.note}>{t.rightTurnHugNote}</div>}
             {/* 苜蓿叶交织段：直接在主线上（默认），或移到主线外侧的集散车道上 */}
             {cloverleaf && (
-              <Choice label={t.weaving} value={s.CloverleafCollector ? "cd" : "main"}
-                options={[{ value: "main", text: t.weavingMain }, { value: "cd", text: t.weavingCollector }]}
-                onChange={(v) => setValue("CloverleafCollector", v === "cd")} />
+              <Choice label={t.weaving} value={s.CloverleafCollectorMode ?? "none"}
+                options={[{ value: "none", text: t.weavingMain }, { value: "auto", text: t.weavingAuto },
+                  { value: "main", text: t.weavingMainOnly }, { value: "both", text: t.weavingBoth }]}
+                onChange={(v) => setValue("CloverleafCollectorMode", v)} />
             )}
-            {cloverleaf && s.CloverleafCollector && <div className={styles.note}>{t.weavingCollectorNote}</div>}
+            {cloverleaf && s.CloverleafCollectorMode && s.CloverleafCollectorMode !== "none" && (
+              <div className={styles.note}>{s.CloverleafCollectorMode === "auto" ? t.weavingAutoNote : t.weavingCollectorNote}</div>
+            )}
             {/* 喇叭形：环道给驶出主线还是驶入主线的车流用，另一方向走半定向匝道 */}
             {trumpet && (
               <Choice label={t.loopUse} value={s.TrumpetLoopForExit ? "exit" : "entry"}
@@ -283,7 +288,7 @@ export const InterchangePanel = () => {
           {state.anarchy && anarchyOn && <div className={styles.errors}>{t.anarchyWarning}</div>}
           {/* 喇叭形交角很斜（偏离 90° 超过 45°）时，节点和立柱容易压到被拆道路的切断端或新路：提示开启无碰撞放置 */}
           {loops && steepSkew && !anarchyOn && (
-            <div className={styles.warnings}>{state.anarchy ? t.steepSkewAnarchy : t.steepSkewNoAnarchy}</div>
+            <div className={styles.warnings}>{(state.anarchy ? t.steepSkewAnarchy : t.steepSkewNoAnarchy).replace("{lo}", String(90 - skewLimit)).replace("{hi}", String(90 + skewLimit))}</div>
           )}
           {!r && <div className={styles.hint}>{t.noPreview}</div>}
           {r && r.errors.length > 0 && (

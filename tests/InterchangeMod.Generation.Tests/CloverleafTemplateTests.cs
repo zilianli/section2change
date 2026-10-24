@@ -222,6 +222,92 @@ namespace InterchangeMod.Generation.Tests
             Assert.All(onMain, s => Assert.StartsWith("CD", s.Name));
         }
 
+        [Theory]
+        [MemberData(nameof(Cases))]
+        public void CollectorDistributor_OnBothRoads(float angle, bool mainOnTop)
+        {
+            // 两条路都是快速路：主线和被交道路外侧都有集散车道，四条匝道两头都接在集散车道上，两条路本身只接集散车道的 S 形连接段
+            var p = Make(angle, mainOnTop);
+            p.CollectorDistributor = true;
+            p.CrossCollectorDistributor = true;
+            p.RampPrefab = "Ramp Oneway";
+            Assert.Empty(_template.ValidateParams(p));
+            var segments = _template.Generate(p);
+            Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
+            TestHelpers.AssertRampsConnected(segments);
+            Assert.Equal(8, InterchangeLayout.LegEnds(segments).Count);
+            foreach (var prefix in new[] { "CD+", "CD-", "CDX+", "CDX-" })
+                Assert.Contains(segments, s => s.Name.StartsWith(prefix));
+            var roadNodes = segments.Where(s => s.Name.StartsWith("Main") || s.Name.StartsWith("Cross")).SelectMany(s => new[] { s.StartNode, s.EndNode }).ToList();
+            var onRoads = segments.Where(s => s.Role == RoadRole.Ramp && (roadNodes.Contains(s.StartNode) || roadNodes.Contains(s.EndNode))).ToList();
+            Assert.Equal(8, onRoads.Count);
+            Assert.All(onRoads, s => Assert.StartsWith("CD", s.Name));
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void CollectorConnectors_LeaveTheRoadClearly(bool mainOnTop)
+        {
+            // 集散车道两头的 S 形连接段：终点（集散车道那头）离所属道路那一幅中心线的横向距离，
+            // 要比两路刚好不重叠的距离（半宽之和）多出至少 4 米，连接段才有一截不在并行重叠（节点区）里
+            var p = Make(90f, mainOnTop);
+            p.CollectorDistributor = true;
+            p.CrossCollectorDistributor = true;
+            p.RampPrefab = "Ramp Oneway";
+            var segments = _template.Generate(p);
+            foreach (var s in segments.Where(s => s.Name.StartsWith("CD") && (s.Name.Contains("in-") || s.Name.Contains("out-"))))
+            {
+                bool isMain = s.Name.StartsWith("CD+") || s.Name.StartsWith("CD-");
+                float roadWidth = isMain ? MainWidth : CrossWidth;
+                Vec3 onRoad = s.Name.Contains("in-") ? s.StartNode : s.EndNode;
+                Vec3 onCollector = s.Name.Contains("in-") ? s.Curve.P3 : s.Curve.P0;
+                Vec3 dir = isMain ? p.Legs[0].Direction : p.Legs[1].Direction;
+                Vec3 d = onCollector - onRoad;
+                float lateral = System.Math.Abs(dir.X * d.Z - dir.Z * d.X);
+                Assert.True(lateral >= roadWidth / 2f + RampWidth / 2f + 4f, $"{s.Name}: {lateral:F1} m");
+            }
+        }
+
+        [Theory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public void ElevatedBase_CollectorConnectorsShorterThanSplitLength(bool mainOnTop)
+        {
+            // 下层 10 米、上层 20 米，两条路都有集散车道：两头 S 形连接段（整段一节、半空）要短于游戏切分高架路段的长度
+            var p = Make(90f, mainOnTop, baseElevation: 10f);
+            p.CollectorDistributor = true;
+            p.CrossCollectorDistributor = true;
+            p.RampPrefab = "Ramp Oneway";
+            Assert.Empty(_template.ValidateParams(p));
+            var segments = _template.Generate(p);
+            Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
+            TestHelpers.AssertRampsConnected(segments);
+            var connectors = segments.Where(s => s.Name.StartsWith("CD") && (s.Name.Contains("in-") || s.Name.Contains("out-"))).ToList();
+            Assert.Equal(8, connectors.Count);
+            Assert.All(connectors, s => Assert.True(s.Curve.Length() < p.Legs[0].MaxElevatedEdgeLength - 5f, $"{s.Name} {s.Curve.Length():F0} m"));
+        }
+
+        [Theory]
+        [InlineData(61f, true)]
+        [InlineData(61f, false)]
+        [InlineData(90f, true)]
+        [InlineData(120f, false)]
+        public void SkewedCrossingOverCollectors_PillarsFit(float angle, bool mainOnTop)
+        {
+            // 游戏内实测：斜交时上层道路的门式立柱（长约 20 米）压到下层的集散车道。两条路都有集散车道、立柱按实际长度时也要放得下
+            var p = Make(angle, mainOnTop);
+            p.CollectorDistributor = true;
+            p.CrossCollectorDistributor = true;
+            p.RampPrefab = "Ramp Oneway";
+            foreach (var leg in p.Legs)
+                leg.PillarWidth = 20f;
+            Assert.Empty(_template.ValidateParams(p));
+            var segments = _template.Generate(p);
+            Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
+            TestHelpers.AssertRampsConnected(segments);
+        }
+
         [Fact]
         public void IsRegistered()
         {

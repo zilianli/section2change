@@ -39,6 +39,12 @@ namespace InterchangeMod.Generation.Templates
         /// <summary>匝道与所接道路并行重叠的那段再多保持同高这么远（米）才开始升降（见喇叭形）。</summary>
         private const float kFlatMargin = 15f;
         private const float kMinLoopRadius = 30f;
+        /// <summary>立柱柱身在上层道路方向上的厚度（米，约值）。</summary>
+        private const float kPillarThickness = 3f;
+        /// <summary>集散车道两头的 S 形连接段到最近的匝道节点的最小距离（米）。</summary>
+        private const float kCollectorGap = 30f;
+        /// <summary>地面道路的集散车道两头 S 形连接段的圆弧半径（米）；高架时用 kDivergeRadius。</summary>
+        private const float kCollectorSRadius = 120f;
         private const float kMaxLoopRadius = 250f;
         /// <summary>检查两条匝道互不相碰时沿路径的采样间距（米）。</summary>
         private const float kSampleStep = 4f;
@@ -176,22 +182,31 @@ namespace InterchangeMod.Generation.Templates
                 extent = Leg.HalfExtent;
             }
 
-            /// <summary>主线 main 的集散车道：在主线每一幅外侧，隔开 max(匝道间距, 2 米)，用匝道道路。</summary>
-            public Road(InterchangeParams p, Road main)
+            /// <summary>道路 road 的集散车道：在它每一幅外侧，隔开 max(匝道间距, 2 米)，用匝道道路。</summary>
+            public Road(InterchangeParams p, Road road, string tag, float gap)
             {
-                Leg = main.Leg;
-                Opposite = main.Opposite;
-                Axis = main.Axis;
+                Base = road;
+                Leg = road.Leg;
+                Opposite = road.Opposite;
+                Axis = road.Axis;
                 Width = p.RampWidth;
-                Offset = main.Offset + main.Width / 2f + Math.Max(p.RampSideGap, 2f) + Width / 2f;
-                Height = main.Height;
-                Role = RoadRole.MainRoad;
+                // 与所属道路之间多留两侧各 kPillarMargin：半空时两边的立柱（门式立柱的腿在桥面边缘内侧）要错开；
+                // 地面时两头 S 形连接段要有一截明显离开所属道路，否则整段都在并行重叠里，被节点区吞掉（游戏报“形状无效”）
+                Offset = road.Offset + road.Width / 2f + gap + Width / 2f;
+                Height = road.Height;
+                Role = road.Role;
                 Prefab = p.RampPrefab;
-                Tag = "CD";
+                Tag = tag;
                 Sep = Width / 2f + p.RampWidth / 2f + p.RampSideGap;
                 extent = Offset + Width / 2f;
-                main.extent = extent;   // 主线连同集散车道一起算占地（被交道路跨越时立柱要避开两者）
+                road.extent = extent;   // 道路连同集散车道一起算占地（另一条路跨越时立柱要避开两者）
             }
+
+            /// <summary>集散车道所属的道路；道路本身为 null。</summary>
+            public Road? Base { get; }
+
+            /// <summary>主线 / 被交道路本身（集散车道归到它所属的路）。</summary>
+            public Road Family => Base ?? this;
 
             private float extent;
             public float Width { get; }
@@ -262,12 +277,14 @@ namespace InterchangeMod.Generation.Templates
             private readonly InterchangeParams P;
             private readonly float hand, grade;
             private readonly Road main, cross;
-            /// <summary>集散车道（没有时为 null）。</summary>
-            private readonly Road? cd;
+            /// <summary>道路 → 它的集散车道（没有集散车道的路不在里面）。</summary>
+            private readonly Dictionary<Road, Road> collectorOf = new Dictionary<Road, Road>();
             private readonly Line[] lines;
-            /// <summary>集散车道两头接主线的 S 形连接段（沿主线方向的 t：驶出点、汇入点）。</summary>
-            private readonly Dictionary<string, (float Diverge, float Merge, RampPath Out, RampPath In)> cdLinks =
-                new Dictionary<string, (float, float, RampPath, RampPath)>();
+            /// <summary>
+            /// 每条集散车道（按集散车道那一幅的名字）两头接所属道路的 S 形连接段：所属道路那一幅、沿行驶方向的驶出点和汇入点。
+            /// </summary>
+            private readonly Dictionary<string, (Line BaseLine, float Diverge, float Merge, RampPath Out, RampPath In)> cdLinks =
+                new Dictionary<string, (Line, float, float, RampPath, RampPath)>();
             private readonly List<Quadrant> quads = new List<Quadrant>();
             private readonly Dictionary<string, PillarPlanner.Span> spans = new Dictionary<string, PillarPlanner.Span>();
             public readonly List<string> Errors = new List<string>();
@@ -289,12 +306,14 @@ namespace InterchangeMod.Generation.Templates
                     main.Drop = Math.Max(0f, (main.Leg.RoadWidth - p.RampWidth) / 2f);
                 }
                 if (p.CollectorDistributor)
-                    cd = new Road(p, main);
+                    collectorOf[main] = new Road(p, main, "CD", CollectorGap(p, main));
+                if (p.CrossCollectorDistributor)
+                    collectorOf[cross] = new Road(p, cross, "CDX", CollectorGap(p, cross));
                 var all = new List<Line> { new Line(main, 1f, hand), new Line(main, -1f, hand), new Line(cross, 1f, hand), new Line(cross, -1f, hand) };
-                if (cd != null)
+                foreach (var collector in collectorOf.Values)
                 {
-                    all.Add(new Line(cd, 1f, hand));
-                    all.Add(new Line(cd, -1f, hand));
+                    all.Add(new Line(collector, 1f, hand));
+                    all.Add(new Line(collector, -1f, hand));
                 }
                 lines = all.ToArray();
                 foreach (var line in lines)
@@ -307,12 +326,12 @@ namespace InterchangeMod.Generation.Templates
                 }
 
                 // 象限：A 幅到 B 幅是“外侧”转向（右侧通行时右转）的那四对；有集散车道时匝道接在集散车道上而不是主线上
-                var rampLines = lines.Where(l => cd != null ? l.Road != main : true).ToList();
+                var rampLines = lines.Where(l => !collectorOf.ContainsKey(l.Road)).ToList();
                 foreach (var a in rampLines)
                 {
                     foreach (var b in rampLines)
                     {
-                        if (a.Road == b.Road || (a.Road != cross) == (b.Road != cross) || DiamondTemplate.Cross2(a.V, b.V) * hand >= 0f)
+                        if (a.Road.Family == b.Road.Family || DiamondTemplate.Cross2(a.V, b.V) * hand >= 0f)
                             continue;
                         quads.Add(new Quadrant { A = a, B = b });
                     }
@@ -329,8 +348,8 @@ namespace InterchangeMod.Generation.Templates
                     q.LoopFlatA = Flat(R, q.A) + kFlatMargin;
                     float rise = Math.Abs(q.A.Road.Height - q.B.Road.Height);
                     bool fits = rise <= grade * (q.Loop.Length - q.LoopFlatA - q.LoopFlatB)
-                        && q.LoopOnB >= spans[q.B.Name].Hi + RampPath.MinSegment
-                        && q.LoopOnA <= spans[q.A.Name].Lo - RampPath.MinSegment
+                        && q.LoopOnB >= OuterHi(q.B) + RampPath.MinSegment
+                        && q.LoopOnA <= OuterLo(q.A) - RampPath.MinSegment
                         && ShortEnough(q.LoopFlatB, q.B) && ShortEnough(q.LoopFlatA, q.A);
                     if (!fits)
                         LoopsFit = false;
@@ -359,25 +378,38 @@ namespace InterchangeMod.Generation.Templates
                     else if (!SolveHug(q))
                         Errors.Add("贴环道的右转匝道放不下：请加大环道半径，或改回外侧大弧线");
                 }
-                if (cd != null)
+                if (collectorOf.Count > 0)
                     SolveCollectors();
             }
 
             /// <summary>
-            /// 集散车道两头：在所有匝道节点（含并行段）之前从主线驶出、之后汇回主线，用两段反向圆弧的 S 形横移过去。
-            /// 主线高架时 S 形半径取小（整段短于游戏切分高架路段的长度，且中间不设节点：中间点的立柱会落在主线桥面上）。
+            /// 集散车道两头：在所有匝道节点（含并行段）之前从所属道路驶出、之后汇回，用两段反向圆弧的 S 形横移过去。
+            /// 所属道路高架时 S 形半径取小（整段短于游戏切分高架路段的长度，且中间不设节点：中间点的立柱会落在桥面上）。
             /// </summary>
             private void SolveCollectors()
             {
-                var road = cd!;
-                float shift = road.Offset - (main.Offset + main.Drop);
-                float radius = main.Elevated ? kDivergeRadius : 200f;
+                foreach (var pair in collectorOf)
+                    SolveCollector(pair.Key, pair.Value);
+            }
+
+            private void SolveCollector(Road baseRoad, Road road)
+            {
+                float shift = road.Offset - (baseRoad.Offset + baseRoad.Drop);
+                // 高架时整段 S 形要短于游戏切分高架路段的长度（中间不设节点，切分点的立柱会落在所属道路桥面上）：
+                // 两段反向圆弧横移 shift 的长度 = 2·√(r·shift − shift²/4)，按允许的长度反算半径
+                float radius = kCollectorSRadius;
+                if (baseRoad.Elevated)
+                {
+                    float allowed = baseRoad.Leg.MaxElevatedEdgeLength - 10f;
+                    radius = Math.Min(kDivergeRadius, (allowed * allowed / 4f + shift * shift / 4f) / shift);
+                }
                 float theta = (float)Math.Acos(Math.Max(-1f, 1f - shift / (2f * radius)));
                 float along = 2f * radius * MathF.Sin(theta);
-                float spacing = Math.Max(RampPath.MinSegment, P.RampWidth + P.RampSideGap);
+                // S 形连接段和第一个 / 最后一个匝道节点之间至少隔 kCollectorGap：两处节点区都要放得下，中间的路段不会被吞掉
+                float spacing = Math.Max(kCollectorGap, P.RampWidth + P.RampSideGap);
                 foreach (var line in lines.Where(l => l.Road == road))
                 {
-                    var mainLine = new Line(main, line.Dir, hand);
+                    var mainLine = new Line(baseRoad, line.Dir, hand);
                     // 集散车道上最早 / 最晚的匝道节点（含并行段）
                     float first = float.MaxValue, last = float.MinValue;
                     foreach (var q in quads)
@@ -400,11 +432,36 @@ namespace InterchangeMod.Generation.Templates
                         new RampArc(new RampArc(from, line.V, radius, firstTurn * theta).End, Rot(line.V, firstTurn * theta), radius, -firstTurn * theta));
                     var outLink = S(Flat0(mainLine.Point(diverge, Lateral(mainLine))), toward);
                     var inLink = S(Flat0(line.Point(merge - along, road.Offset)), -toward);
-                    cdLinks[line.Name] = (diverge, merge, outLink, inLink);
+                    cdLinks[line.Name] = (mainLine, diverge, merge, outLink, inLink);
                 }
             }
 
-            private Road Other(Road road) => road == cross ? main : cross;
+            private Road Other(Road road) => road.Family == cross ? main : cross;
+
+            /// <summary>
+            /// 道路与它的集散车道之间的空隙：至少 max(匝道间距, 2 米) + 两侧各 kPillarMargin。另一条路在上层高架跨过时，
+            /// 空隙还要放得下它的门式立柱：立柱与上层道路垂直，斜交 θ 时横跨下层的宽度约为 立柱长·cosθ，
+            /// 加上柱身和两侧余量（沿上层道路方向 2·Margin + 厚度，换算到横向乘 sinθ）。
+            /// </summary>
+            private float CollectorGap(InterchangeParams p, Road road)
+            {
+                float gap = Math.Max(p.RampSideGap, 2f) + 2f * kPillarMargin;
+                Road other = road == main ? cross : main;
+                if (other.Height > road.Height && other.Elevated)
+                {
+                    float cos = Math.Abs(Directions.Dot(main.Axis, cross.Axis)), sin = MathF.Sqrt(Math.Max(0f, 1f - cos * cos));
+                    gap = Math.Max(gap, (2f * PillarPlanner.Margin + kPillarThickness) * sin + other.Leg.PillarWidth * cos + 1f);
+                }
+                return gap;
+            }
+
+            /// <summary>上层道路跨越段中间的节点（放在下层各幅之间放得下立柱的空隙里，沿 t），按幅名。</summary>
+            private readonly Dictionary<string, float[]> extraNodes = new Dictionary<string, float[]>();
+
+            /// <summary>这一幅跨越另一条路的范围两端（含另一条路的集散车道）。</summary>
+            private float OuterLo(Line line) => spans[line.Name].Lo;
+
+            private float OuterHi(Line line) => spans[line.Name].Hi;
 
             /// <summary>点 v 离这一幅的横向距离超过匝道与它的重叠间距（即已离开这条路）。</summary>
             private static bool Away(Vec3 v, Line line) =>
@@ -444,8 +501,28 @@ namespace InterchangeMod.Generation.Templates
                 bool upper = line.Road.Height > other.Height && line.Road.Elevated;
                 if (!upper)
                     return new PillarPlanner.Span(center - half - kPillarMargin, center + half + kPillarMargin);
-                return PillarPlanner.Plan(center, half, other.Leg.MedianWidth / 2f / sin, line.Road.Leg.MiddlePillarSpacing,
-                    line.Road.Leg.PillarWidth, line.Road.Leg.MaxElevatedEdgeLength);
+                // 下层每一幅（含集散车道）各是一处占地；立柱只放进放得下的空隙，否则跨过去（PillarPlanner.PlanNodes）。
+                // 门式立柱与上层道路垂直，斜着跨过下层时，下层每一幅在沿线方向上相当于两侧各宽出 立柱长/2 · cot(交角)
+                var zones = new List<(float Lo, float Hi)>();
+                var lowerRoads = collectorOf.TryGetValue(other, out var lowerCollector) ? new[] { other, lowerCollector } : new[] { other };
+                foreach (var lower in lowerRoads)
+                {
+                    foreach (float lateral in new[] { lower.Offset, -lower.Offset })
+                    {
+                        Vec3 q = Directions.RightOf(other.Axis) * lateral;
+                        float t = DiamondTemplate.Cross2(q - origin, other.Axis) / DiamondTemplate.Cross2(line.V, other.Axis);
+                        float w = lower.Width / 2f / sin;
+                        zones.Add((t - w, t + w));
+                    }
+                }
+                float cot = Math.Abs(Directions.Dot(line.V, other.Axis)) / sin;
+                float pillar = kPillarThickness + line.Road.Leg.PillarWidth * cot;
+                var plan = PillarPlanner.PlanNodes(zones, line.Road.Leg.MiddlePillarSpacing, pillar, line.Road.Leg.MaxElevatedEdgeLength);
+                if (plan.Error != null || plan.Nodes.Count < 2)
+                    return new PillarPlanner.Span(center - half - kPillarMargin, center + half + kPillarMargin, plan.Error ?? "上层道路的立柱无法避开下层道路");
+                if (plan.Nodes.Count > 2)
+                    extraNodes[line.Name] = plan.Nodes.Skip(1).Take(plan.Nodes.Count - 2).ToArray();
+                return new PillarPlanner.Span(plan.Nodes[0], plan.Nodes[plan.Nodes.Count - 1]);
             }
 
             /// <summary>
@@ -651,16 +728,15 @@ namespace InterchangeMod.Generation.Templates
                 }
                 foreach (var q in quads)
                 {
-                    if (q.A.Road != cd)
+                    if (q.A.Road.Base == null)
                         Reach(q.A, q.OuterOnA);
-                    if (q.B.Road != cd)
+                    if (q.B.Road.Base == null)
                         Reach(q.B, q.OuterOnB);
                 }
-                foreach (var link in cdLinks)
+                foreach (var link in cdLinks.Values)
                 {
-                    var mainLine = lines.First(l => l.Road == main && l.Name == "Main" + link.Key.Substring(2));
-                    Reach(mainLine, link.Value.Diverge);
-                    Reach(mainLine, link.Value.Merge);
+                    Reach(link.BaseLine, link.Diverge);
+                    Reach(link.BaseLine, link.Merge);
                 }
                 float End(Road road, float end)
                 {
@@ -673,8 +749,10 @@ namespace InterchangeMod.Generation.Templates
                 var lastSegment = new Dictionary<string, int>();
                 foreach (var line in lines)
                 {
-                    bool isCd = line.Road == cd;
+                    bool isCd = line.Road.Base != null;
                     var nodes = new List<(float T, bool Fixed)> { (spans[line.Name].Lo, false), (spans[line.Name].Hi, false) };
+                    if (extraNodes.TryGetValue(line.Name, out var extra))
+                        nodes.AddRange(extra.Select(t => (t, false)));
                     if (isCd)
                     {
                         var link = cdLinks[line.Name];
@@ -688,9 +766,9 @@ namespace InterchangeMod.Generation.Templates
                         nodes.Add((End(line.Road, line.Dir), true));
                     }
                     var ranges = new List<(float Lo, float Hi)>();
-                    if (line.Road == main && cdLinks.TryGetValue("CD" + line.Name.Substring(4), out var mainLink))
+                    foreach (var mainLink in cdLinks.Values.Where(l => l.BaseLine.Name == line.Name))
                     {
-                        // 主线只有集散车道的一处驶出、一处汇入，其间减车道
+                        // 有集散车道的路只有它的一处驶出、一处汇入，其间减车道（主线有车道平衡时）
                         nodes.Add((mainLink.Diverge, true));
                         nodes.Add((mainLink.Merge, true));
                         ranges.Add((mainLink.Diverge, mainLink.Merge));
@@ -749,14 +827,14 @@ namespace InterchangeMod.Generation.Templates
                 foreach (var pair in cdLinks)
                 {
                     var line = lines.First(l => l.Name == pair.Key);
-                    var mainLine = new Line(main, line.Dir, hand);
-                    var (diverge, merge, outLink, inLink) = pair.Value;
+                    var (mainLine, diverge, merge, outLink, inLink) = pair.Value;
+                    Road collector = line.Road, baseRoad = mainLine.Road;
                     float along = Directions.Dot(outLink.End - outLink.Start, line.V);
-                    float h = main.Height;
-                    outLink.Emit(segments, $"{pair.Key}in-", mainLine.Point(diverge, Lateral(mainLine), h), line.Point(diverge + along, cd!.Offset, h),
-                        outLink.Length, 0f, cd.Prefab, startNode: mainLine.Point(diverge, main.Offset, h));
-                    inLink.Emit(segments, $"{pair.Key}out-", line.Point(merge - along, cd.Offset, h), mainLine.Point(merge, Lateral(mainLine), h),
-                        inLink.Length, 0f, cd.Prefab, endNode: mainLine.Point(merge, main.Offset, h));
+                    float h = baseRoad.Height;
+                    outLink.Emit(segments, $"{pair.Key}in-", mainLine.Point(diverge, Lateral(mainLine), h), line.Point(diverge + along, collector.Offset, h),
+                        outLink.Length, 0f, collector.Prefab, startNode: mainLine.Point(diverge, baseRoad.Offset, h));
+                    inLink.Emit(segments, $"{pair.Key}out-", line.Point(merge - along, collector.Offset, h), mainLine.Point(merge, Lateral(mainLine), h),
+                        inLink.Length, 0f, collector.Prefab, endNode: mainLine.Point(merge, baseRoad.Offset, h));
                 }
 
                 // —— 匝道：在所接道路那头的曲线端点在外侧 Drop 处，节点是道路的节点（边缘对齐）——

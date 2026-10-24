@@ -89,8 +89,11 @@ namespace InterchangeMod
         /// <summary>苜蓿叶：右转匝道贴着环道外侧走，相邻那段与环道合成一条双向匝道（默认 false = 外侧大弧线）。</summary>
         [SettingsUIHidden] public bool CloverleafHugLoop { get; set; }
 
-        /// <summary>苜蓿叶：交织段放在主线外侧的集散车道上（默认 false = 直接在主线上交织）。</summary>
-        [SettingsUIHidden] public bool CloverleafCollector { get; set; }
+        /// <summary>
+        /// 苜蓿叶集散车道：none = 直接在主线上交织（默认）；auto = 按道路类型，是公路的路加集散车道（两条都是公路时两条都加）；
+        /// main = 仅主线；both = 两条路都加。
+        /// </summary>
+        [SettingsUIHidden] public string CloverleafCollectorMode { get; set; }
 
         /// <summary>主线与被交道路的夹角，90 为正交。</summary>
         [SettingsUIHidden] public float CrossingAngle { get; set; }
@@ -164,6 +167,7 @@ namespace InterchangeMod
             BranchOnLeft = false;
             TrumpetLoopForExit = true;
             LoopRadius = 0f;
+            CloverleafCollectorMode = "none";
             MaxGradePercent = 8f;
             BaseElevation = 0f;
             LevelGap = 0f;
@@ -196,7 +200,9 @@ namespace InterchangeMod
                 case nameof(MainOnTop): MainOnTop = value == "true"; return true;
                 case nameof(CloverleafCrossOnTop): CloverleafCrossOnTop = value == "true"; return true;
                 case nameof(CloverleafHugLoop): CloverleafHugLoop = value == "true"; return true;
-                case nameof(CloverleafCollector): CloverleafCollector = value == "true"; return true;
+                case nameof(CloverleafCollectorMode):
+                    CloverleafCollectorMode = value == "auto" || value == "main" || value == "both" ? value : "none";
+                    return true;
                 case nameof(MatchJunctions): MatchJunctions = value == "true"; return true;
                 case nameof(CrossingAngle): CrossingAngle = Clamp(number, 45f, 135f); return true;
                 case nameof(RampLength): RampLength = Clamp(number, 60f, 500f); return true;

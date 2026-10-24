@@ -96,6 +96,9 @@ namespace InterchangeMod.Generation
         /// </summary>
         public bool CollectorDistributor { get; set; }
 
+        /// <summary>苜蓿叶：被交道路两幅外侧也加集散车道（两条路都是快速路时用）。</summary>
+        public bool CrossCollectorDistributor { get; set; }
+
         public string? SharedRampPrefab { get; set; }
 
         public float SharedRampWidth { get; set; }

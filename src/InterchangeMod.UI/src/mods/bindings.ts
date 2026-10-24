@@ -44,7 +44,7 @@ export interface PanelSettings {
   LoopRadius: number;
   CloverleafCrossOnTop: boolean;
   CloverleafHugLoop: boolean;
-  CloverleafCollector: boolean;
+  CloverleafCollectorMode: "none" | "auto" | "main" | "both";
   MaxGradePercent: number;
   TrumpetNearRampRadius: number;
 }

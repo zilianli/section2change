@@ -42,12 +42,36 @@ namespace InterchangeMod.Placement
                 return hit;
             if (entityManager.HasComponent<Edge>(hit))
             {
+                // 路段两端：鼠标离路口（三条及以上道路相接的节点）不超过 kJunctionSnap 时优先对准路口，
+                // 不必指在路段靠近路口的那一半（长路段上很难指准）；都不是路口时取近的一端
                 var edge = entityManager.GetComponentData<Edge>(hit);
                 float3 start = entityManager.GetComponentData<Node>(edge.m_Start).m_Position;
                 float3 end = entityManager.GetComponentData<Node>(edge.m_End).m_Position;
-                return math.distancesq(start.xz, hitPosition.xz) <= math.distancesq(end.xz, hitPosition.xz) ? edge.m_Start : edge.m_End;
+                float toStart = math.distance(start.xz, hitPosition.xz), toEnd = math.distance(end.xz, hitPosition.xz);
+                bool startJunction = IsJunction(entityManager, edge.m_Start) && toStart <= kJunctionSnap;
+                bool endJunction = IsJunction(entityManager, edge.m_End) && toEnd <= kJunctionSnap;
+                if (startJunction && (!endJunction || toStart <= toEnd))
+                    return edge.m_Start;
+                if (endJunction)
+                    return edge.m_End;
+                return toStart <= toEnd ? edge.m_Start : edge.m_End;
             }
             return Entity.Null;
+        }
+
+        /// <summary>鼠标在路段上时，离路口节点不超过这个距离（米）就对准路口。</summary>
+        private const float kJunctionSnap = 120f;
+
+        /// <summary>三条及以上道路路段相接的节点。</summary>
+        private static bool IsJunction(EntityManager entityManager, Entity node)
+        {
+            if (!entityManager.HasBuffer<ConnectedEdge>(node))
+                return false;
+            int roads = 0;
+            foreach (ConnectedEdge connected in entityManager.GetBuffer<ConnectedEdge>(node, true))
+                if (TryGetRoadEdge(entityManager, connected.m_Edge, out _, out _))
+                    roads++;
+            return roads >= 3;
         }
 
         public static List<ExternalEdge> Read(EntityManager entityManager, PrefabSystem prefabSystem, Entity seed,
@@ -118,7 +142,7 @@ namespace InterchangeMod.Placement
         }
 
         /// <summary>立体交叉：鼠标离交叉点不超过这个距离时按交叉点匹配。</summary>
-        public const float kCrossingRadius = 60f;
+        public const float kCrossingRadius = 100f;
 
         /// <summary>
         /// 立体交叉（两条道路相交、没有共用节点，如高架跨过街道）：从鼠标指着的路段出发，找离鼠标最近的、

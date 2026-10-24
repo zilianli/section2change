@@ -107,7 +107,7 @@ namespace InterchangeMod.UI
                 .Field(nameof(s.LoopRadius), s.LoopRadius)
                 .Field(nameof(s.CloverleafCrossOnTop), s.CloverleafCrossOnTop)
                 .Field(nameof(s.CloverleafHugLoop), s.CloverleafHugLoop)
-                .Field(nameof(s.CloverleafCollector), s.CloverleafCollector)
+                .Field(nameof(s.CloverleafCollectorMode), s.CloverleafCollectorMode ?? "none")
                 .Field(nameof(s.MaxGradePercent), s.MaxGradePercent)
                 .Field(nameof(s.TrumpetNearRampRadius), s.TrumpetNearRampRadius)
                 .EndObject();
