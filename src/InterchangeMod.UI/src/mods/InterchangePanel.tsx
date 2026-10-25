@@ -49,7 +49,7 @@ export const InterchangePanel = () => {
   // 立交内主线总是双幅（双向主线自动拆成双幅、两端过渡）
   const mainAlwaysDual = cloverleaf || parclo || roundabout || stack;
   // 车道平衡：部分苜蓿叶、环岛式没有用到
-  const laneBalanceUsed = !parclo && !roundabout;
+  const laneBalanceUsed = !parclo && !roundabout && !(stack && s.StackLeftExit);
   // 相交角度可调范围
   const [angleMin, angleMax] = cloverleaf ? [35, 145] : parclo || roundabout || flyoverT || stack ? [60, 120] : [45, 135];
   const tee = expresswayT || trumpet || flyoverT;
@@ -116,6 +116,13 @@ export const InterchangePanel = () => {
             {parclo && <div className={styles.note}>{t.parcloNote}</div>}
             {roundabout && <div className={styles.note}>{t.roundaboutNote}</div>}
             {stack && <div className={styles.note}>{t.stackNote}</div>}
+            {/* 定向式：左转匝道右出右进（默认）或左出左进 */}
+            {stack && (
+              <Choice label={t.leftTurnRamps} value={s.StackLeftExit ? "left" : "right"}
+                options={[{ value: "right", text: t.rightOutRightIn }, { value: "left", text: t.leftOutLeftIn }]}
+                onChange={(v) => setValue("StackLeftExit", v === "left")} />
+            )}
+            {stack && <div className={styles.note}>{s.StackLeftExit ? t.stackLeftExitNote : t.stackRightExitNote}</div>}
             {/* 环岛式：圆形（默认）或沿主线拉长的跑道形 */}
             {roundabout && (
               <Choice label={t.ringShape} value={s.RoundaboutRacetrack ? "racetrack" : "circle"}

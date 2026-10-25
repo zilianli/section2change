@@ -975,6 +975,8 @@ namespace InterchangeMod.Systems
                 ApplyLaneBalance(p, mainName, crossName, snapshot);
             if (IsDirectionalT)
                 p.DirectionalTwoLevel = setting.DirectionalTwoLevel;
+            if (IsStack)
+                p.StackLeftExit = setting.StackLeftExit;
             if (IsExpressway || IsSinglePoint || HasLoops || IsDirectionalT || IsStack)
                 p.RampSideGap = setting.RampGap > 0f ? setting.RampGap : 1f;
 

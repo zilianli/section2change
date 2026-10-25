@@ -140,7 +140,16 @@ namespace InterchangeMod.Generation.Tests
         [InlineData(66f, 0f)]
         [InlineData(67f, 10f)]
         [InlineData(114f, 0f)]
-        public void WideRoadsAndRamps(float angle, float baseElevation)
+        public void WideRoadsAndRamps(float angle, float baseElevation) => WideRoads(angle, baseElevation, leftExit: false);
+
+        [Theory]
+        [InlineData(91f, 0f)]
+        [InlineData(91f, 10f)]
+        [InlineData(75f, 0f)]
+        [InlineData(105f, 10f)]
+        public void WideRoadsAndRampsLeftExit(float angle, float baseElevation) => WideRoads(angle, baseElevation, leftExit: true);
+
+        private void WideRoads(float angle, float baseElevation, bool leftExit)
         {
             // 游戏内实测参数：两条路都是 4 车道公路单行（20 米，分隔带 8 米），2 车道匝道 12 米，层间高差 10 米
             var p = new InterchangeParams { Legs = InterchangeParams.CrossLegs(angle, 0, 1), RampWidth = 12f, RampSideGap = 1f };
@@ -148,6 +157,7 @@ namespace InterchangeMod.Generation.Tests
             p.SetRoad(1, 3, RoadForm.Dual, 20f, 8f, "Highway Oneway");
             p.Levels[0].Elevation = baseElevation;
             p.Levels[1].Elevation = baseElevation + 10f;
+            p.StackLeftExit = leftExit;
             Assert.Empty(_template.ValidateParams(p));
             var segments = _template.Generate(p);
             Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
@@ -192,20 +202,89 @@ namespace InterchangeMod.Generation.Tests
         }
 
         [Theory]
-        [InlineData(90f, -13f, 0f)]
-        [InlineData(70f, -13f, 0f)]
-        [InlineData(89f, -12.9f, 4.5f)]
-        public void MainInTunnelUnderGroundCrossRoad(float angle, float mainElevation, float crossElevation)
+        [InlineData(90f, -13f, 0f, false)]
+        [InlineData(70f, -13f, 0f, false)]
+        [InlineData(89f, -12.9f, 4.5f, false)]
+        [InlineData(89f, -12.9f, 0.3f, true)]
+        [InlineData(76f, -13f, 0f, true)]
+        public void MainInTunnelUnderGroundCrossRoad(float angle, float mainElevation, float crossElevation, bool leftExit)
         {
             // 主线在 −13 米的隧道里（游戏里读出来常是 −12.9 米），被交道路在地面（地形起伏时可能是 4.5 米的路堤）
             var p = Make(angle);
             p.Levels[0].Elevation = mainElevation;
             p.Levels[1].Elevation = crossElevation;
+            p.StackLeftExit = leftExit;
             Assert.Empty(_template.ValidateParams(p));
             var segments = _template.Generate(p);
             Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
             TestHelpers.AssertRampsConnected(segments);
             Assert.All(segments.Where(sg => sg.Name.StartsWith("MainA-")), sg => Assert.Equal(mainElevation, sg.Curve.P0.Y, 1));
+            // 地下的匝道外缘对齐主线外缘分出（从中心线分出时与主线重叠太长，游戏报形状无效）：曲线端点离开节点
+            var mainNodes = new HashSet<Vec3>(segments.Where(sg => sg.Role == RoadRole.MainRoad).SelectMany(sg => new[] { sg.StartNode, sg.EndNode }));
+            foreach (var sg in segments.Where(sg => sg.Role == RoadRole.Ramp && mainNodes.Contains(sg.StartNode) && sg.StartNode.Y < -4f))
+                Assert.True(Vec3.Distance(sg.Curve.P0, sg.StartNode) > 1f, sg.Name);
+            foreach (var sg in segments.Where(sg => sg.Role == RoadRole.Ramp && mainNodes.Contains(sg.EndNode) && sg.EndNode.Y < -4f))
+                Assert.True(Vec3.Distance(sg.Curve.P3, sg.EndNode) > 1f, sg.Name);
+        }
+
+        public static IEnumerable<object[]> LeftExitCases() =>
+            from angle in new[] { 90f, 75f, 105f, 70f, 110f }
+            from baseElevation in new[] { 0f, 10f }
+            select new object[] { angle, baseElevation };
+
+        [Theory]
+        [MemberData(nameof(LeftExitCases))]
+        public void LeftExit(float angle, float baseElevation)
+        {
+            // 左出左进：左转匝道在中央分隔带一侧驶出、汇入
+            var p = Make(angle, baseElevation);
+            p.StackLeftExit = true;
+            var log = new List<string>();
+            StackTemplate.Trace = log.Add;
+            var errors = new StackTemplate().ValidateParams(p);
+            StackTemplate.Trace = null;
+            Assert.True(errors.Count == 0, string.Join("; ", errors.Concat(log)));
+            var segments = _template.Generate(p);
+            if (System.Environment.GetEnvironmentVariable("STACK_PREVIEW") is string dir)
+                System.IO.File.WriteAllText(System.IO.Path.Combine(dir, $"left{angle:F0}_{baseElevation:F0}.svg"), SvgPreview.Render(segments));
+            Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
+            TestHelpers.AssertRampsConnected(segments);
+            Assert.Equal(8, InterchangeLayout.LegEnds(segments).Count);
+            foreach (var sg in segments.Where(sg => sg.Curve.P0.Y > 8.5f || sg.Curve.P3.Y > 8.5f))
+                Assert.True(sg.Curve.Length() < 80f, $"{sg.Name} is {sg.Curve.Length():F0} m");
+            // 左转匝道离开主线时偏向中央分隔带（立交中心一侧）
+            var first = segments.First(sg => sg.Name.StartsWith("LeftMainA-"));
+            var mainA = segments.First(sg => sg.Name == "MainA-1");
+            Vec3 along = mainA.Curve.P3 - mainA.Curve.P0;
+            float Side(Vec3 v) => (v.X - mainA.Curve.P0.X) * along.Z - (v.Z - mainA.Curve.P0.Z) * along.X;
+            Assert.True(System.Math.Sign(Side(first.Curve.P3)) == System.Math.Sign(Side(Vec3.Zero)), "left-exit ramp should leave toward the median");
+        }
+
+        [Theory]
+        [MemberData(nameof(LeftExitCases))]
+        public void LeftExitNoTwoRoadsCrossAtGrade(float angle, float baseElevation)
+        {
+            var p = Make(angle, baseElevation);
+            p.StackLeftExit = true;
+            var segments = _template.Generate(p);
+            float Width(RoadSegmentSpec s) => s.Role == RoadRole.MainRoad ? MainWidth : s.Role == RoadRole.CrossRoad ? CrossWidth : RampWidth;
+            var samples = segments.Select(s => Enumerable.Range(0, 21).Select(i => s.Curve.Evaluate(i / 20f)).ToArray()).ToArray();
+            for (int i = 0; i < segments.Count; i++)
+                for (int j = i + 1; j < segments.Count; j++)
+                {
+                    var a = segments[i];
+                    var b = segments[j];
+                    var nodesA = new[] { a.StartNode, a.EndNode };
+                    if (nodesA.Contains(b.StartNode) || nodesA.Contains(b.EndNode))
+                        continue;
+                    float reach = (Width(a) + Width(b)) / 2f;
+                    foreach (var u in samples[i])
+                        foreach (var v in samples[j])
+                        {
+                            float dx = u.X - v.X, dz = u.Z - v.Z;
+                            Assert.False(dx * dx + dz * dz < reach * reach && System.Math.Abs(u.Y - v.Y) < 7f, $"{a.Name} and {b.Name} cross at grade near ({u.X:F0}, {u.Z:F0})");
+                        }
+                }
         }
 
         [Fact]

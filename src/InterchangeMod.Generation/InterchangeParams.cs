@@ -123,6 +123,9 @@ namespace InterchangeMod.Generation
         /// <summary>环岛式：环岛沿主线拉长成跑道形（两头半圆、中间直线），否则是圆形。</summary>
         public bool RoundaboutRacetrack { get; set; }
 
+        /// <summary>定向式：左转匝道左出左进（在中央分隔带一侧驶出、汇入，立交内两条路的分隔带拉宽），否则右出右进。</summary>
+        public bool StackLeftExit { get; set; }
+
         /// <summary>允许的最大纵坡，0.08 = 8%。</summary>
         public float MaxGrade { get; set; } = 0.08f;
 

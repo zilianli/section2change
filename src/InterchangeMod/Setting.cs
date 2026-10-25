@@ -95,6 +95,9 @@ namespace InterchangeMod
         /// <summary>环岛式：环岛沿主线拉长成跑道形（默认 false = 圆形）。</summary>
         [SettingsUIHidden] public bool RoundaboutRacetrack { get; set; }
 
+        /// <summary>定向式：左转匝道左出左进（默认 false = 右出右进）。</summary>
+        [SettingsUIHidden] public bool StackLeftExit { get; set; }
+
         /// <summary>定向 / 半定向 T 型：两层（一条左转匝道下穿主线），默认 false = 三层。</summary>
         [SettingsUIHidden] public bool DirectionalTwoLevel { get; set; }
 
@@ -182,6 +185,7 @@ namespace InterchangeMod
             CloverleafCollectorMode = "none";
             ParcloLoopsForExit = true;
             RoundaboutRacetrack = false;
+            StackLeftExit = false;
             DirectionalTwoLevel = false;
             TeeMainRoad = "auto";
             MaxGradePercent = 8f;
@@ -218,6 +222,7 @@ namespace InterchangeMod
                 case nameof(CloverleafHugLoop): CloverleafHugLoop = value == "true"; return true;
                 case nameof(ParcloLoopsForExit): ParcloLoopsForExit = value == "true"; return true;
                 case nameof(RoundaboutRacetrack): RoundaboutRacetrack = value == "true"; return true;
+                case nameof(StackLeftExit): StackLeftExit = value == "true"; return true;
                 case nameof(DirectionalTwoLevel): DirectionalTwoLevel = value == "true"; return true;
                 case nameof(TeeMainRoad): TeeMainRoad = value == "upper" || value == "lower" || value == "swap" ? value : "auto"; return true;
                 case nameof(CloverleafCollectorMode):

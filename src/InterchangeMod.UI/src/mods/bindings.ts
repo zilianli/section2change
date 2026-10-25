@@ -46,6 +46,7 @@ export interface PanelSettings {
   CloverleafHugLoop: boolean;
   ParcloLoopsForExit: boolean;
   RoundaboutRacetrack: boolean;
+  StackLeftExit: boolean;
   DirectionalTwoLevel: boolean;
   TeeMainRoad: "auto" | "upper" | "lower" | "swap";
   CloverleafCollectorMode: "none" | "auto" | "main" | "both";
