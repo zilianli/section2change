@@ -57,6 +57,12 @@ namespace InterchangeMod.Generation
         /// <summary>减车道后的主线宽度（米）。中段按不变车道一侧（内侧）对齐，中心线向内平移半个宽度差；0 表示不知道宽度（仍居中）。</summary>
         public float MainReducedWidth { get; set; }
 
+        /// <summary>被交道路（双幅）在匝道分出点和汇入点之间用的道路（车道数 = 被交道路 − 匝道）；null 表示不变。目前只有定向式使用。</summary>
+        public string? CrossReducedPrefab { get; set; }
+
+        /// <summary>减车道后的被交道路宽度（米）。</summary>
+        public float CrossReducedWidth { get; set; }
+
         /// <summary>辅路在匝道落地点和上匝道分出点之间用的道路（车道数 = 辅路 + 匝道）；null 表示不变。</summary>
         public string? FrontageWidenedPrefab { get; set; }
 

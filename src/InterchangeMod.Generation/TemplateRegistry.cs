@@ -19,7 +19,8 @@ namespace InterchangeMod.Generation
             new RoundaboutTemplate(),
             new DirectionalTTemplate(directional: false),
             new DirectionalTTemplate(directional: true),
-            // TODO: Turbine, Stack
+            new StackTemplate(),
+            // TODO: Turbine
         };
 
         public static IReadOnlyList<IInterchangeTemplate> All => Templates;
