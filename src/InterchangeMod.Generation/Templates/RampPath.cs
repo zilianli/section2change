@@ -105,6 +105,76 @@ namespace InterchangeMod.Generation.Templates
             return End;
         }
 
+        /// <summary>整条路径平移 offset（俯视）。</summary>
+        public RampPath Moved(Vec3 offset) =>
+            new RampPath(Arcs.Select(a => new RampArc(a.From + Flat0(offset), a.Heading, a.Radius, a.Angle)).ToList());
+
+        /// <summary>接在后面再加几段。</summary>
+        public RampPath Then(params RampArc[] more) => new RampPath(Arcs.Concat(more).ToList());
+
+        /// <summary>沿路径弧长 s 处的行驶方向（俯视）。</summary>
+        public Vec3 HeadingAt(float s)
+        {
+            foreach (var arc in Arcs)
+            {
+                if (s <= arc.Length)
+                    return arc.HeadingAt(Math.Max(0f, s));
+                s -= arc.Length;
+            }
+            return Arcs[Arcs.Count - 1].EndHeading;
+        }
+
+        /// <summary>弧长 s0 到 s1 之间累计转过的角度（弧度，不计方向）。</summary>
+        public float TurnBetween(float s0, float s1)
+        {
+            float turn = 0f, offset = 0f;
+            foreach (var arc in Arcs)
+            {
+                float a = Math.Max(s0, offset), b = Math.Min(s1, offset + arc.Length);
+                if (b > a)
+                    turn += (b - a) / arc.Radius;
+                offset += arc.Length;
+            }
+            return turn;
+        }
+
+        /// <summary>
+        /// 按给定断点（沿全长的弧长，含两端）输出路段，断点 i 处高度 heights[i]，相邻断点之间线性升降。
+        /// 首末端点用 start / end（给定时原样使用，游戏按坐标完全相等合并节点）。调用方保证每段转角不超过约 90°。
+        /// </summary>
+        public void EmitAt(List<RoadSegmentSpec> segments, string name, RoadRole role, IReadOnlyList<float> cuts, IReadOnlyList<float> heights,
+            string? prefab, Vec3? start = null, Vec3? end = null, Vec3? startNode = null, Vec3? endNode = null)
+        {
+            var points = new List<Vec3>();
+            for (int i = 0; i < cuts.Count; i++)
+            {
+                Vec3 point = PointAt(cuts[i]);
+                point.Y = heights[i];
+                points.Add(i == 0 && start is Vec3 s ? s : i == cuts.Count - 1 && end is Vec3 e ? e : point);
+            }
+            for (int i = 0; i + 1 < cuts.Count; i++)
+            {
+                Vec3 a = points[i], b = points[i + 1];
+                Vec3 ha = HeadingAt(cuts[i]), hb = HeadingAt(cuts[i + 1]);
+                float delta = (float)Math.Acos(Math.Max(-1f, Math.Min(1f, Directions.Dot(ha, hb))));
+                float chord = Vec3.Distance(Flat0(a), Flat0(b));
+                float cosQuarter = MathF.Cos(delta / 4f);
+                float k = chord / (3f * cosQuarter * cosQuarter);
+                Vec3 p1 = a + ha * k, p2 = b - hb * k;
+                p1.Y = a.Y + (b.Y - a.Y) / 3f;
+                p2.Y = a.Y + (b.Y - a.Y) * 2f / 3f;
+                segments.Add(new RoadSegmentSpec($"{name}{i + 1}", role, new Bezier3(a, p1, p2, b), prefab,
+                    i == 0 ? startNode : null, i + 2 == cuts.Count ? endNode : null));
+            }
+        }
+
+        /// <summary>从 from 沿 heading 出发，朝 turnToward 一侧转到 target 方向（单段圆弧）。</summary>
+        public static RampArc TurnTo(Vec3 from, Vec3 heading, Vec3 turnToward, float radius, Vec3 target)
+        {
+            float sign = DiamondTemplate.Cross2(heading, turnToward) >= 0f ? 1f : -1f;
+            return new RampArc(Flat0(from), Flat(heading), radius, sign * RotAngle(heading, target, sign));
+        }
+
         /// <summary>弧长 s0 到 s1 之间的一段。</summary>
         public RampPath Slice(float s0, float s1)
         {

@@ -19,6 +19,10 @@ namespace InterchangeMod.Generation
         SinglePoint,
         /// <summary>环岛式立交。</summary>
         Roundabout,
+        /// <summary>定向 T 型：两条左转匝道左出左进（远侧幅立交内横移让出空间），以跨线桥跨过主线。</summary>
+        DirectionalT,
+        /// <summary>半定向 T 型：两条左转匝道右出右进，以跨线桥跨过主线。</summary>
+        SemiDirectionalT,
         /// <summary>中式快速路节点：主线高架直行，匝道落到两侧地面辅路，地面只有辅路与被交道路的平交口。</summary>
         ExpresswayNode,
         /// <summary>快速路 T 型节点：中式快速路节点的三向版本，支路从高架下穿过、接两侧辅路。</summary>

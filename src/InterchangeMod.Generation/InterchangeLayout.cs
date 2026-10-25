@@ -59,6 +59,9 @@ namespace InterchangeMod.Generation
         /// 升降到外部高度。两端都是水平的竖曲线，最大坡度约为 MaxGrade（长度 ≈ 1.5 × 高差 ÷ MaxGrade）。
         /// 坡道沿用臂端那段路的道路和行驶方向；双幅时两幅各一段。
         /// </summary>
+        /// <summary>臂端坡道每段的最大长度（米），短于游戏切分高架路段的 80 米。</summary>
+        private const float kMaxSlopePiece = 70f;
+
         public static void AddApproachSlopes(List<RoadSegmentSpec> segments, InterchangeParams p)
         {
             foreach (Vec3 end in LegEnds(segments))
@@ -76,7 +79,15 @@ namespace InterchangeMod.Generation
 
                 RoadSegmentSpec owner = segments.First(s => s.StartNode.Equals(end) || s.EndNode.Equals(end));
                 bool outward = owner.EndNode.Equals(end);
-                segments.Add(new RoadSegmentSpec($"{owner.Name}-slope", owner.Role, outward ? curve : curve.Reverse(), owner.Prefab));
+                // 分段（每段不超过 kMaxSlopePiece）：高架路段超过 80 米游戏会从中间切开，切点的立柱位置不受控制
+                int pieces = System.Math.Max(1, (int)System.Math.Ceiling(length / kMaxSlopePiece));
+                for (int k = 0; k < pieces; k++)
+                {
+                    var piece = curve.Slice((float)k / pieces, (float)(k + 1) / pieces);
+                    // 最外面那段（接原有道路）叫 *-slope，里面的叫 *-slope-1、-2…
+                    string name = k == pieces - 1 ? $"{owner.Name}-slope" : $"{owner.Name}-slope-{k + 1}";
+                    segments.Add(new RoadSegmentSpec(name, owner.Role, outward ? piece : piece.Reverse(), owner.Prefab));
+                }
             }
         }
 

@@ -5,7 +5,7 @@ const GROUP = "interchangeMod";
 
 export type RoadForm = "Auto" | "TwoWay" | "Dual";
 
-export type InterchangeType = "Diamond" | "ExpresswayNode" | "ExpresswayT" | "SinglePoint" | "Trumpet" | "Cloverleaf" | "PartialCloverleaf" | "Roundabout";
+export type InterchangeType = "Diamond" | "ExpresswayNode" | "ExpresswayT" | "SinglePoint" | "Trumpet" | "Cloverleaf" | "PartialCloverleaf" | "Roundabout" | "DirectionalT" | "SemiDirectionalT";
 
 export interface PanelSettings {
   /** 基层（下层）离地高度。 */
@@ -46,6 +46,8 @@ export interface PanelSettings {
   CloverleafHugLoop: boolean;
   ParcloLoopsForExit: boolean;
   RoundaboutRacetrack: boolean;
+  DirectionalTwoLevel: boolean;
+  TeeMainRoad: "auto" | "upper" | "lower" | "swap";
   CloverleafCollectorMode: "none" | "auto" | "main" | "both";
   MaxGradePercent: number;
   TrumpetNearRampRadius: number;

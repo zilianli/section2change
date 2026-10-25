@@ -150,6 +150,9 @@ namespace InterchangeMod.Placement
         /// 每条路段在交叉点处切成两半作为离开交叉点的路段（见 CrossingReader）。
         /// 鼠标没指着路段、附近没有立体交叉时返回 null。matched 收到参与交叉的所有路段（改造时要拆掉）。
         /// </summary>
+        /// <summary>最近一次 ReadCrossing 没认出立体交叉的原因（调试日志用）。</summary>
+        public static string LastCrossingReason = "";
+
         public static List<ExternalEdge> ReadCrossing(EntityManager entityManager, PrefabSystem prefabSystem,
             NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree, Entity hit, float3 cursor,
             IReadOnlyDictionary<string, RoadInfo> roads, ref TerrainHeightData terrain, List<Entity> matched, out (Entity, Entity) key)
@@ -162,6 +165,8 @@ namespace InterchangeMod.Placement
 
             var fromHit = FindCrossings(entityManager, netTree, hit);
             var nearest = fromHit.OrderBy(c => math.distance(c.Point.xz, cursor.xz)).FirstOrDefault();
+            LastCrossingReason = fromHit.Count == 0 ? "no road crosses the hovered edge"
+                : $"nearest crossing {math.distance(nearest.Point.xz, cursor.xz):F0} m from the cursor (limit {kCrossingRadius:F0} m)";
             // 没有真正相交的道路时，再看是不是“丁字”：一条路的尽头停在另一条路旁边（如地面道路在高架下方结束）
             if (fromHit.Count == 0 || math.distance(nearest.Point.xz, cursor.xz) > kCrossingRadius)
                 return ReadTee(entityManager, prefabSystem, netTree, hit, cursor, roads, ref terrain, matched, out key);
@@ -169,7 +174,9 @@ namespace InterchangeMod.Placement
             float3 center = nearest.Point;
             key = (hit, other);
 
-            return CollectAt(entityManager, prefabSystem, netTree, center, hit, other, roads, ref terrain, matched);
+            var collected = CollectAt(entityManager, prefabSystem, netTree, center, hit, other, roads, ref terrain, matched);
+            LastCrossingReason = $"crossing found, {collected.Count} edges collected" + (s_Rejected.Count > 0 ? "; rejected: " + string.Join("; ", s_Rejected) : "");
+            return collected;
         }
 
         /// <summary>虚拟丁字路口：支路尽头离主线中心线不超过这个距离（米）。</summary>
@@ -217,14 +224,20 @@ namespace InterchangeMod.Placement
                 return p.y - TerrainUtils.SampleHeight(ref heights, p);
             }
             float elevationA = ElevationNear(roadA, ref terrain), elevationB = ElevationNear(roadB, ref terrain);
+            s_Rejected.Clear();
 
             var result = new List<ExternalEdge>();
             foreach (Entity candidate in NearbyRoadEdges(entityManager, netTree, center, kPartnerSearch))
             {
                 bool groupA = candidate == roadA || (candidate != roadB && Parallel(entityManager, candidate, roadA));
                 bool groupB = !groupA && (candidate == roadB || Parallel(entityManager, candidate, roadB));
-                if ((!groupA && !groupB) || matched.Contains(candidate) || !TryGetRoad(entityManager, prefabSystem, candidate, roads, out RoadInfo info))
+                if ((!groupA && !groupB) || matched.Contains(candidate))
                     continue;
+                if (!TryGetRoad(entityManager, prefabSystem, candidate, roads, out RoadInfo info))
+                {
+                    s_Rejected.Add($"{(groupA ? "A" : "B")}: not a known road prefab");
+                    continue;
+                }
                 Edge edge = entityManager.GetComponentData<Edge>(candidate);
                 Bezier4x3 curve = entityManager.GetComponentData<Curve>(candidate).m_Bezier;
                 if (MathUtils.Distance(curve.xz, center.xz, out float t) > kPartnerSearch)
@@ -232,7 +245,10 @@ namespace InterchangeMod.Placement
                 float3 point = MathUtils.Position(curve, t);
                 float elevation = point.y - TerrainUtils.SampleHeight(ref terrain, point);
                 if (math.abs(elevation - (groupA ? elevationA : elevationB)) > 3f)
+                {
+                    s_Rejected.Add($"{(groupA ? "A" : "B")} {info.Name}: elevation {elevation:F1} vs {(groupA ? elevationA : elevationB):F1}");
                     continue;
+                }
                 float2 direction = math.normalizesafe(MathUtils.Tangent(curve, t).xz);
                 float along = math.abs(math.dot(point.xz - center.xz, direction));
                 bool atEnd = t <= 0.01f || t >= 0.99f;
@@ -249,6 +265,8 @@ namespace InterchangeMod.Placement
             }
             return result;
         }
+
+        private static readonly List<string> s_Rejected = new List<string>();
 
         /// <summary>虚拟丁字路口的一个候选：支路 Branch 的一端（AtStart）停在主线 Main 旁边，Point 是它在主线中心线上的投影。</summary>
         private readonly struct TeeEnd

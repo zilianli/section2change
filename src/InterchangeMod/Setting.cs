@@ -95,6 +95,12 @@ namespace InterchangeMod
         /// <summary>环岛式：环岛沿主线拉长成跑道形（默认 false = 圆形）。</summary>
         [SettingsUIHidden] public bool RoundaboutRacetrack { get; set; }
 
+        /// <summary>定向 / 半定向 T 型：两层（一条左转匝道下穿主线），默认 false = 三层。</summary>
+        [SettingsUIHidden] public bool DirectionalTwoLevel { get; set; }
+
+        /// <summary>三向立交对准立体交叉（十字当 T 型）时哪条是主线：auto = 公路优先、否则上层（默认）；upper；lower。</summary>
+        [SettingsUIHidden] public string TeeMainRoad { get; set; }
+
         /// <summary>
         /// 苜蓿叶集散车道：none = 直接在主线上交织（默认）；auto = 按道路类型，是公路的路加集散车道（两条都是公路时两条都加）；
         /// main = 仅主线；both = 两条路都加。
@@ -176,6 +182,8 @@ namespace InterchangeMod
             CloverleafCollectorMode = "none";
             ParcloLoopsForExit = true;
             RoundaboutRacetrack = false;
+            DirectionalTwoLevel = false;
+            TeeMainRoad = "auto";
             MaxGradePercent = 8f;
             BaseElevation = 0f;
             LevelGap = 0f;
@@ -210,6 +218,8 @@ namespace InterchangeMod
                 case nameof(CloverleafHugLoop): CloverleafHugLoop = value == "true"; return true;
                 case nameof(ParcloLoopsForExit): ParcloLoopsForExit = value == "true"; return true;
                 case nameof(RoundaboutRacetrack): RoundaboutRacetrack = value == "true"; return true;
+                case nameof(DirectionalTwoLevel): DirectionalTwoLevel = value == "true"; return true;
+                case nameof(TeeMainRoad): TeeMainRoad = value == "upper" || value == "lower" || value == "swap" ? value : "auto"; return true;
                 case nameof(CloverleafCollectorMode):
                     CloverleafCollectorMode = value == "auto" || value == "main" || value == "both" ? value : "none";
                     return true;
@@ -225,7 +235,7 @@ namespace InterchangeMod
                 case nameof(CrossRoadPrefab): CrossRoadPrefab = value ?? ""; return true;
                 case nameof(RampPrefab): RampPrefab = value ?? ""; return true;
                 case nameof(InterchangeType):
-                    InterchangeType = value == "ExpresswayNode" || value == "ExpresswayT" || value == "SinglePoint" || value == "Trumpet" || value == "Cloverleaf" || value == "PartialCloverleaf" || value == "Roundabout" ? value : "Diamond";
+                    InterchangeType = value == "ExpresswayNode" || value == "ExpresswayT" || value == "SinglePoint" || value == "Trumpet" || value == "Cloverleaf" || value == "PartialCloverleaf" || value == "Roundabout" || value == "DirectionalT" || value == "SemiDirectionalT" ? value : "Diamond";
                     return true;
                 case nameof(FrontageRoadPrefab): FrontageRoadPrefab = value ?? ""; return true;
                 case nameof(LaneBalance): LaneBalance = value == "true"; return true;

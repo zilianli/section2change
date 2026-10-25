@@ -111,10 +111,11 @@ namespace InterchangeMod.Placement
                     int endTarget = end < 1f ? FindEnd(ends, used, curve, edgeLength, ref end, ref terrain) : -1;
                     if (endTarget >= 0)
                         used[endTarget] = true;
+                    // 高架的切断端还要多退一些：末端节点下有立柱，不能落在立交新建的道路上
                     if (start > 0f && startTarget < 0)
-                        start += (kUnconnectedGap + halfWidth) / edgeLength;
+                        start += (kUnconnectedGap + halfWidth + ElevatedExtra(MathUtils.Position(curve, start), ref terrain)) / edgeLength;
                     if (end < 1f && endTarget < 0)
-                        end -= (kUnconnectedGap + halfWidth) / edgeLength;
+                        end -= (kUnconnectedGap + halfWidth + ElevatedExtra(MathUtils.Position(curve, end), ref terrain)) / edgeLength;
 
                     Bezier4x3 part = MathUtils.Cut(curve, new float2(start, end));
                     if (end <= start || MathUtils.Length(part) < kMinRemainderLength)
@@ -311,6 +312,12 @@ namespace InterchangeMod.Placement
             }
             return false;
         }
+
+        /// <summary>高架（离地达到桥梁高度）的切断端多退的距离（米）。</summary>
+        private const float kElevatedCutGap = 20f;
+
+        private static float ElevatedExtra(float3 position, ref TerrainHeightData terrain) =>
+            ElevationAt(position, ref terrain) >= InterchangeMod.Generation.HeightRange.BridgeThreshold ? kElevatedCutGap : 0f;
 
         private static float ElevationAt(float3 position, ref TerrainHeightData terrain) =>
             position.y - TerrainUtils.SampleHeight(ref terrain, position);

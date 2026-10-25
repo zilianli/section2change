@@ -111,6 +111,9 @@ namespace InterchangeMod.Generation
 
         public float RingWidth { get; set; }
 
+        /// <summary>定向 / 半定向 T 型：两层（支路 → 远侧幅的左转匝道从主线下面穿过），否则三层（它在第三层跨过）。</summary>
+        public bool DirectionalTwoLevel { get; set; }
+
         /// <summary>环岛式：环岛沿主线拉长成跑道形（两头半圆、中间直线），否则是圆形。</summary>
         public bool RoundaboutRacetrack { get; set; }
 

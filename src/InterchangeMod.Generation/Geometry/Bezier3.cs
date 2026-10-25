@@ -53,6 +53,14 @@ namespace InterchangeMod.Generation.Geometry
             return u * u * u * P0 + 3f * u * u * t * P1 + 3f * u * t * t * P2 + t * t * t * P3;
         }
 
+        /// <summary>参数 t0 到 t1 之间的一段（三次曲线的精确截取）。</summary>
+        public Bezier3 Slice(float t0, float t1)
+        {
+            float k = (t1 - t0) / 3f;
+            Vec3 a = Evaluate(t0), d = Evaluate(t1);
+            return new Bezier3(a, a + Derivative(t0) * k, d - Derivative(t1) * k, d);
+        }
+
         /// <summary>一阶导数（未归一化的切线）。</summary>
         public Vec3 Derivative(float t)
         {

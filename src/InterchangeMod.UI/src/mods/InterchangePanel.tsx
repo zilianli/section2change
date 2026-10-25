@@ -36,6 +36,10 @@ export const InterchangePanel = () => {
   const cloverleaf = s.InterchangeType === "Cloverleaf";
   const parclo = s.InterchangeType === "PartialCloverleaf";
   const roundabout = s.InterchangeType === "Roundabout";
+  const directionalT = s.InterchangeType === "DirectionalT";
+  const semiDirectionalT = s.InterchangeType === "SemiDirectionalT";
+  // 定向 / 半定向 T 型：支路与主线同层，左转匝道以跨线桥跨过主线
+  const flyoverT = directionalT || semiDirectionalT;
   // 有环道的类型：环道半径可自动
   const loops = trumpet || cloverleaf || parclo || roundabout;
   // 直匝道的类型：匝道长度、分流角度只对它们起作用
@@ -45,8 +49,8 @@ export const InterchangePanel = () => {
   // 车道平衡：部分苜蓿叶、环岛式没有用到
   const laneBalanceUsed = !parclo && !roundabout;
   // 相交角度可调范围
-  const [angleMin, angleMax] = cloverleaf ? [35, 145] : parclo || roundabout ? [60, 120] : [45, 135];
-  const tee = expresswayT || trumpet;
+  const [angleMin, angleMax] = cloverleaf ? [35, 145] : parclo || roundabout || flyoverT ? [60, 120] : [45, 135];
+  const tee = expresswayT || trumpet || flyoverT;
   // 支路与主线的实际夹角（0~180°）：对准路口时取匹配的，否则取面板的
   const crossing = ((matched ? match!.angle : s.CrossingAngle) % 180 + 180) % 180;
   // 斜交提示的阈值：苜蓿叶偏离 90° 超过 30°（交角小于 60°），喇叭形超过 45°
@@ -54,7 +58,7 @@ export const InterchangePanel = () => {
   const steepSkew = Math.abs(crossing - 90) > skewLimit;
   // 中式快速路节点和单点立交的主线固定在上层
   const mainForcedTop = expressway || singlePoint;
-  const typeName = roundabout ? t.typeRoundabout : parclo ? t.typeParclo : cloverleaf ? t.typeCloverleaf : trumpet ? t.typeTrumpet : expresswayT ? t.typeExpresswayT : expressway ? t.typeExpressway : singlePoint ? t.typeSinglePoint : t.typeDiamond;
+  const typeName = directionalT ? t.typeDirectionalT : semiDirectionalT ? t.typeSemiDirectionalT : roundabout ? t.typeRoundabout : parclo ? t.typeParclo : cloverleaf ? t.typeCloverleaf : trumpet ? t.typeTrumpet : expresswayT ? t.typeExpresswayT : expressway ? t.typeExpressway : singlePoint ? t.typeSinglePoint : t.typeDiamond;
   // T 型的被交道路叫“支路”
   const crossTitle = tee ? t.branchRoad : t.crossRoad;
 
@@ -85,7 +89,7 @@ export const InterchangePanel = () => {
               options={[{ value: "Diamond", text: t.typeDiamond }, { value: "ExpresswayNode", text: t.typeExpressway }, { value: "SinglePoint", text: t.typeSinglePoint }, { value: "Cloverleaf", text: t.typeCloverleaf }, { value: "PartialCloverleaf", text: t.typeParclo }, { value: "Roundabout", text: t.typeRoundabout }]}
               onChange={(v) => setValue("InterchangeType", v)} />
             <Choice label={t.threeWay} value={s.InterchangeType}
-              options={[{ value: "ExpresswayT", text: t.typeExpresswayT }, { value: "Trumpet", text: t.typeTrumpet }]}
+              options={[{ value: "ExpresswayT", text: t.typeExpresswayT }, { value: "Trumpet", text: t.typeTrumpet }, { value: "SemiDirectionalT", text: t.typeSemiDirectionalT }, { value: "DirectionalT", text: t.typeDirectionalT }]}
               onChange={(v) => setValue("InterchangeType", v)} />
             {expressway && !expresswayT && <div className={styles.note}>{t.expresswayNote}</div>}
             {expresswayT && <div className={styles.note}>{t.expresswayTNote}</div>}
@@ -98,6 +102,14 @@ export const InterchangePanel = () => {
             {tee && roadAligned && <div className={styles.note}>{t.branchSideByCursor}</div>}
             {singlePoint && <div className={styles.note}>{t.singlePointNote}</div>}
             {trumpet && <div className={styles.note}>{t.trumpetNote}</div>}
+            {semiDirectionalT && <div className={styles.note}>{t.semiDirectionalTNote}</div>}
+            {directionalT && <div className={styles.note}>{t.directionalTNote}</div>}
+            {/* 定向 / 半定向 T 型：两条左转匝道交叉一次，三层（一条在第三层）或两层（一条下穿主线） */}
+            {flyoverT && (
+              <Choice label={t.flyoverLevels} value={s.DirectionalTwoLevel ? "two" : "three"}
+                options={[{ value: "three", text: t.threeLevels }, { value: "two", text: t.twoLevels }]}
+                onChange={(v) => setValue("DirectionalTwoLevel", v === "two")} />
+            )}
             {cloverleaf && <div className={styles.note}>{t.cloverleafNote}</div>}
             {parclo && <div className={styles.note}>{t.parcloNote}</div>}
             {roundabout && <div className={styles.note}>{t.roundaboutNote}</div>}
@@ -177,6 +189,18 @@ export const InterchangePanel = () => {
               options={[{ value: "on", text: t.on }, { value: "off", text: t.off }]}
               onChange={(v) => setValue("MatchJunctions", v === "on")} />
             {s.MatchJunctions && <MatchDetails strings={t} match={match} />}
+            {/* 三向立交对准立体交叉（十字当 T 型）：哪条路是主线 */}
+            {s.MatchJunctions && tee && matched && match?.crossing && (
+              <Choice label={t.teeMainRoad} value={s.TeeMainRoad === "upper" || s.TeeMainRoad === "lower" ? s.TeeMainRoad : "auto"}
+                options={[{ value: "auto", text: t.auto }, { value: "upper", text: t.upperRoad }, { value: "lower", text: t.lowerRoad }]}
+                onChange={(v) => setValue("TeeMainRoad", v)} />
+            )}
+            {/* 同层的十字路口当 T 型：没有上下层可分，可以把主线换成另一条路（支路仍取鼠标所在一侧） */}
+            {s.MatchJunctions && tee && matched && !match?.crossing && match?.legs === 4 && (
+              <Choice label={t.teeMainRoad} value={s.TeeMainRoad === "swap" ? "swap" : "auto"}
+                options={[{ value: "auto", text: t.auto }, { value: "swap", text: t.otherRoad }]}
+                onChange={(v) => setValue("TeeMainRoad", v)} />
+            )}
           </Section>
 
           <Section title={t.levels}>
@@ -200,7 +224,7 @@ export const InterchangePanel = () => {
               <Stepper label="" value={s.LevelGap} step={0.5} min={1} max={30} unit=" m"
                 onChange={(v) => setValue("LevelGap", v)} />
             )}
-            {!mainForcedTop && !trumpet && !cloverleaf && !parclo && !roundabout && (
+            {!mainForcedTop && !trumpet && !cloverleaf && !parclo && !roundabout && !flyoverT && (
             <Choice label={t.topRoad} value={s.MainOnTop ? "main" : "cross"}
               options={[{ value: "cross", text: t.crossRoad }, { value: "main", text: t.mainRoad }]}
               onChange={(v) => setValue("MainOnTop", v === "main")} />
@@ -211,7 +235,7 @@ export const InterchangePanel = () => {
               options={[{ value: "main", text: t.mainRoad }, { value: "cross", text: t.crossRoad }]}
               onChange={(v) => setValue("CloverleafCrossOnTop", v === "cross")} />
             )}
-            {r && <div className={styles.resolved}>{levelLine(t, r, cloverleaf || parclo || roundabout ? !s.CloverleafCrossOnTop : !trumpet && (s.MainOnTop || mainForcedTop))}</div>}
+            {r && <div className={styles.resolved}>{flyoverT ? flyoverLevelLine(t, r, s.DirectionalTwoLevel) : levelLine(t, r, cloverleaf || parclo || roundabout ? !s.CloverleafCrossOnTop : !trumpet && (s.MainOnTop || mainForcedTop))}</div>}
             {/* 对准已有路口时交角取路口的实际角度（见路口匹配），面板的值不起作用 */}
             {!matched && (
               <Stepper label={t.crossingAngle} value={s.CrossingAngle} step={5} min={angleMin} max={angleMax} unit="°"
@@ -385,6 +409,14 @@ const levelLine = (t: Strings, r: Resolved, mainOnTop: boolean) => {
   const cross = `${t.crossRoad} ${formatMeters(r.crossElevation)}（${bandName(t, r.crossBand)}）`;
   const [lower, upper] = mainOnTop ? [cross, main] : [main, cross];
   return `${t.lowerLevel}：${lower} · ${t.upperLevel}：${upper} · ${t.gap} ${formatMeters(r.levelGap)}（${t.minimum} ${formatMeters(r.minimumGap)}）`;
+};
+
+/** 例：基层：主线、支路 0 m · 第二层 7.5 m · 第三层 15 m（两层时：下穿 −7.5 m） */
+const flyoverLevelLine = (t: Strings, r: Resolved, twoLevel: boolean) => {
+  const base = r.mainElevation, gap = r.levelGap;
+  // 两层时下穿段是完全的隧道（至少 −13 m）
+  const third = twoLevel ? `${t.underpassLevel} ${formatMeters(Math.min(base - gap, -13))}` : `${t.thirdLevel} ${formatMeters(base + 2 * gap)}`;
+  return `${t.baseLevel} ${formatMeters(base)} · ${t.secondLevel} ${formatMeters(base + gap)} · ${third}（${t.minimum} ${formatMeters(r.minimumGap)}）`;
 };
 
 /** “预制体|形式|分隔带” → “Highway Oneway - 3 lanes（双幅，分隔带 14 m）” */

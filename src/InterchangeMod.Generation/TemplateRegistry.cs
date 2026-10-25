@@ -17,6 +17,8 @@ namespace InterchangeMod.Generation
             new CloverleafTemplate(),
             new PartialCloverleafTemplate(),
             new RoundaboutTemplate(),
+            new DirectionalTTemplate(directional: false),
+            new DirectionalTTemplate(directional: true),
             // TODO: Turbine, Stack
         };
 

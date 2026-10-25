@@ -59,6 +59,8 @@ namespace InterchangeMod.Systems
         private readonly IInterchangeTemplate m_Cloverleaf = new CloverleafTemplate();
         private readonly IInterchangeTemplate m_Parclo = new PartialCloverleafTemplate();
         private readonly IInterchangeTemplate m_Roundabout = new RoundaboutTemplate();
+        private readonly IInterchangeTemplate m_DirectionalT = new DirectionalTTemplate(directional: true);
+        private readonly IInterchangeTemplate m_SemiDirectionalT = new DirectionalTTemplate(directional: false);
 
         /// <summary>面板选的立交类型。</summary>
         /// <summary>中式快速路节点（十字或 T 型）：有地面辅路。</summary>
@@ -69,12 +71,15 @@ namespace InterchangeMod.Systems
         private bool IsCloverleaf => setting?.InterchangeType == "Cloverleaf";
         private bool IsParclo => setting?.InterchangeType == "PartialCloverleaf";
         private bool IsRoundabout => setting?.InterchangeType == "Roundabout";
+        /// <summary>定向 T 型或半定向 T 型：支路与主线同层，左转匝道以跨线桥跨过主线。</summary>
+        private bool IsDirectionalT => setting?.InterchangeType == "DirectionalT" || setting?.InterchangeType == "SemiDirectionalT";
         /// <summary>有环道的类型（喇叭形、苜蓿叶）：环道半径可自动；双向被交道路在立交内拆成双幅。</summary>
         private bool HasLoops => IsTrumpet || IsCloverleaf || IsParclo || IsRoundabout;
-        private IInterchangeTemplate CurrentTemplate => IsRoundabout ? m_Roundabout : IsParclo ? m_Parclo : IsCloverleaf ? m_Cloverleaf : IsTrumpet ? m_Trumpet : IsExpresswayT ? m_ExpresswayT : IsExpressway ? m_Expressway : IsSinglePoint ? m_SinglePoint : m_Diamond;
+        private IInterchangeTemplate CurrentTemplate => setting?.InterchangeType == "DirectionalT" ? m_DirectionalT
+            : setting?.InterchangeType == "SemiDirectionalT" ? m_SemiDirectionalT : IsRoundabout ? m_Roundabout : IsParclo ? m_Parclo : IsCloverleaf ? m_Cloverleaf : IsTrumpet ? m_Trumpet : IsExpresswayT ? m_ExpresswayT : IsExpressway ? m_Expressway : IsSinglePoint ? m_SinglePoint : m_Diamond;
 
         /// <summary>主线是否在上层：中式快速路节点和单点立交的主线总是高架。</summary>
-        private bool MainOnTop => IsCloverleaf || IsParclo || IsRoundabout ? !setting.CloverleafCrossOnTop : !IsTrumpet && (IsExpressway || IsSinglePoint || setting.MainOnTop);
+        private bool MainOnTop => IsCloverleaf || IsParclo || IsRoundabout ? !setting.CloverleafCrossOnTop : !IsTrumpet && !IsDirectionalT && (IsExpressway || IsSinglePoint || setting.MainOnTop);
 
         private RoadPrefab m_SelectedRoad;
         private ProxyAction m_RotateLeftAction;
@@ -390,9 +395,37 @@ namespace InterchangeMod.Systems
         private void OrientCrossing()
         {
             var match = m_Match;
-            if (match == null || match.Error != null || !match.Crossing || match.RoadOnly || match.LegCount != 4
-                || match.Main == null || match.Cross == null || System.Math.Abs(match.Main.Elevation - match.Cross.Elevation) < 0.5f
-                || (match.Main.Elevation > match.Cross.Elevation) == MainOnTop)
+            if (match == null || match.Error != null || match.RoadOnly || match.LegCount != 4
+                || match.Main == null || match.Cross == null)
+                return;
+            bool mainUpper = match.Main.Elevation > match.Cross.Elevation;
+            bool stacked = System.Math.Abs(match.Main.Elevation - match.Cross.Elevation) >= 0.5f;
+            bool swap;
+            if (!match.Crossing)
+            {
+                // 同层的十字路口当 T 型用：没有上下层可分，面板“换另一条”时主线换成匹配结果的另一条路（记在匹配结果上，每帧不来回换）
+                if (CurrentTemplate.LegCount != 3)
+                    return;
+                bool wantSwapped = setting.TeeMainRoad == "swap";
+                if (wantSwapped == match.TeeSwapped)
+                    return;
+                match.TeeSwapped = wantSwapped;
+                swap = true;
+            }
+            else if (CurrentTemplate.LegCount == 3)
+            {
+                // 三向立交（十字当 T 型用）：主线按面板选——自动时一条是公路、另一条不是就取公路，否则取上层
+                string choice = setting.TeeMainRoad ?? "auto";
+                if (choice == "auto" && match.Main.IsHighway != match.Cross.IsHighway)
+                    swap = !match.Main.IsHighway;
+                else if (!stacked)
+                    swap = false;
+                else
+                    swap = choice == "lower" ? mainUpper : !mainUpper;
+            }
+            else
+                swap = stacked && mainUpper != MainOnTop;
+            if (!swap)
                 return;
             // 新主线 = 原被交道路（在原主线顺时针 CrossingAngle 处）；原主线的另一条臂在新主线顺时针 180° − CrossingAngle 处
             float crossing = match.CrossingAngle;
@@ -422,6 +455,11 @@ namespace InterchangeMod.Systems
             // 立体交叉（如高架跨过街道，没有共用节点）：以两条道路在俯视图上的交点作为虚拟路口来匹配
             if (setting.MatchJunctions && TryMatchCrossing(hitEntity, hitPosition))
                 return;
+            if (setting.DebugLogging && setting.MatchJunctions && JunctionReader.LastCrossingReason != m_LastCrossingReason)
+            {
+                m_LastCrossingReason = JunctionReader.LastCrossingReason;
+                Mod.log.Info($"[debug] crossing check: {m_LastCrossingReason}");
+            }
 
             Entity seed = setting.MatchJunctions ? JunctionReader.FindSeedNode(EntityManager, hitEntity, hitPosition) : Entity.Null;
             var cursor = new Vec3(hitPosition.x, 0f, hitPosition.z);
@@ -477,6 +515,8 @@ namespace InterchangeMod.Systems
         /// 鼠标指着的路段附近有立体交叉时按交叉点匹配（见 JunctionReader.ReadCrossing），返回 true。
         /// 同一处交叉（同一对路段）不重复匹配。
         /// </summary>
+        private string m_LastCrossingReason = "";
+
         private bool TryMatchCrossing(Entity hitEntity, float3 hitPosition)
         {
             var matched = new List<Entity>();
@@ -619,7 +659,7 @@ namespace InterchangeMod.Systems
                 errors.Add($"无法匹配路口：{m_Match.Error}（把鼠标移到空地上可自由放置）");
             else if (m_Match != null && !m_Match.RoadOnly && m_Match.LegCount != CurrentTemplate.LegCount && !TeeFromCross)
                 errors.Add(m_Match.LegCount == 3
-                    ? "这是三向（T 型）路口：当前立交类型需要四向路口，请选择“快速路 T 型”或“喇叭形”"
+                    ? "这是三向（T 型）路口：当前立交类型需要四向路口，请选择快速路 T 型、喇叭形、定向 T 型或半定向 T 型"
                     : $"这是 {m_Match.LegCount} 向路口，当前立交类型需要 {CurrentTemplate.LegCount} 向");
             InterchangeParams p = BuildParams(errors, snapshot);
             if (errors.Count == 0)
@@ -671,10 +711,14 @@ namespace InterchangeMod.Systems
                     m_RemovalFootprint = new Footprint(segments.Select(s => s.Curve), kRemovalMargin);
                     var netTree = m_NetSearchSystem.GetNetSearchTree(readOnly: true, out JobHandle treeDeps);
                     treeDeps.Complete();
+                    // 新立交两层所在的高度都清理：被替换的高架（或下穿道路）和地面道路。
+                    // 立体交叉时两条原有道路原来的高度也清理：新立交的层不一定和它们同高（如定向 T 型的支路改到主线那一层），
+                    // 否则范围内离交叉点稍远的原有路段会留在原地、和新立交叠在一起
+                    var levels = new List<float> { p.Levels[0].Elevation, p.Levels[1].Elevation };
+                    if (m_Match.Crossing)
+                        levels.AddRange(new[] { m_Match.Main.Elevation, m_Match.Cross.Elevation });
                     List<Entity> removed = RoadRemover.FindEdges(EntityManager, netTree, m_RemovalFootprint, origin, yaw,
-                        // 新立交两层所在的高度都清理：被替换的高架（或下穿道路）和地面道路
-                        new[] { p.Levels[0].Elevation, p.Levels[1].Elevation },
-                        ref terrain, m_Match.Crossing ? m_CrossingEdges : null);
+                        levels, ref terrain, m_Match.Crossing ? m_CrossingEdges : null);
                     RoadRemover.Debug = setting.DebugLogging;
                     snapshot.ConnectedEnds = RoadRemover.CreateDefinitions(commandBuffer, EntityManager, removed, m_RemovalFootprint,
                         InterchangeLayout.LegEnds(segments), origin, yaw, ref terrain, m_RandomSeed + segments.Count);
@@ -695,6 +739,22 @@ namespace InterchangeMod.Systems
         /// </summary>
         private void PlanLevels(InterchangeParams p, PanelSnapshot snapshot)
         {
+            if (IsDirectionalT)
+            {
+                // 定向 / 半定向 T 型：主线、支路在基层（立体交叉时取主线原来的高度），层 1 是第一层跨线桥 = 基层 + 层间高差；
+                // 支路原来的高度只用于臂端坡道接回
+                float baseHeight = m_Match != null && m_Match.Error == null && m_Match.Crossing ? m_Match.Main.Elevation : BaseElevation;
+                float flyGap = LevelPlanner.ResolveGap(p.Legs[0], p.Legs[0], baseHeight, setting.LevelGap);
+                p.Levels[0].Elevation = baseHeight;
+                p.Levels[1].Elevation = baseHeight + flyGap;
+                snapshot.BaseFollows = BaseFollowsMatch;
+                snapshot.BaseElevation = BaseElevation;
+                snapshot.MainElevation = baseHeight;
+                snapshot.CrossElevation = baseHeight;
+                snapshot.LevelGap = flyGap;
+                snapshot.MinimumGap = LevelPlanner.RequiredGap(p.Legs[0], p.Legs[0], baseHeight);
+                return;
+            }
             LegSpec lower = MainOnTop ? p.Legs[1] : p.Legs[0];
             LegSpec upper = MainOnTop ? p.Legs[0] : p.Legs[1];
             float baseElevation = BaseElevation;
@@ -759,7 +819,8 @@ namespace InterchangeMod.Systems
                 RampDivergeAngle = setting.RampDivergeAngle,
                 RightHandTraffic = !m_CityConfigurationSystem.leftHandTraffic,
                 Legs = CurrentTemplate.LegCount == 3
-                    ? InterchangeParams.TLegs(BranchAngle(matched), mainLevel: 0, branchLevel: 1)
+                    // 定向 / 半定向 T 型的支路与主线同层（基层），层 1 是第一层跨线桥
+                    ? InterchangeParams.TLegs(BranchAngle(matched), mainLevel: 0, branchLevel: IsDirectionalT ? 0 : 1)
                     : InterchangeParams.CrossLegs(matched && !m_Match.RoadOnly ? m_Match.CrossingAngle : setting.CrossingAngle, mainLevel: 0, crossLevel: 1),
             };
             // 被交道路（支路）的另一端：十字型是臂 3，T 型只有臂 1
@@ -802,15 +863,15 @@ namespace InterchangeMod.Systems
 
             // 外部主线是双向道路、但立交主线不在地面（或是苜蓿叶，匝道都接在两幅上）：匝道无法从双向道路中心分出，
             // 立交内部改用双幅（每方向车道相同的单行道路），臂端过渡回外部的双向道路；苜蓿叶时两幅外缘对齐双向道路的边缘
-            if (mainForm == RoadForm.TwoWay && (IsCloverleaf || IsParclo || IsRoundabout || (matched && LevelPlanner.BandOf(p.Levels[0].Elevation) != ElevationBand.Ground))
+            if (mainForm == RoadForm.TwoWay && (IsCloverleaf || IsParclo || IsRoundabout || IsDirectionalT || (matched && LevelPlanner.BandOf(p.Levels[0].Elevation) != ElevationBand.Ground))
                 && m_RoadsByName.TryGetValue(mainName, out RoadInfo external))
             {
-                RoadInfo oneWay = (IsCloverleaf ? RampMatcher.PickSplitOneWay(m_RoadCatalog, external) : null)
+                RoadInfo oneWay = (IsCloverleaf || IsDirectionalT ? RampMatcher.PickSplitOneWay(m_RoadCatalog, external) : null)
                     ?? RampMatcher.PickClosest(m_RoadCatalog, external.IsHighway, external.LanesPerDirection, oneWay: true);
                 if (oneWay != null)
                 {
                     float median = setting.MedianWidth, externalWidth = 0f;
-                    if (IsCloverleaf && m_PrefabResolver.TryResolve(mainName, m_SelectedRoad, out NetPrefab mainPrefab)
+                    if ((IsCloverleaf || IsDirectionalT) && m_PrefabResolver.TryResolve(mainName, m_SelectedRoad, out NetPrefab mainPrefab)
                         && m_PrefabResolver.TryResolve(oneWay.Name, m_SelectedRoad, out NetPrefab mainOneWayPrefab))
                     {
                         externalWidth = m_PrefabResolver.GetWidth(mainPrefab);
@@ -840,10 +901,12 @@ namespace InterchangeMod.Systems
                 p.TrumpetLoopForExit = setting.TrumpetLoopForExit;
                 p.ParcloLoopsForExit = setting.ParcloLoopsForExit;
                 p.DirectRampRadius = setting.TrumpetNearRampRadius;
-                // 喇叭形的支路、苜蓿叶的被交道路两幅分开接匝道，是双向道路时立交内部改用双幅，外端过渡回双向
+            }
+            {
+                // 喇叭形、定向 / 半定向 T 型的支路、苜蓿叶的被交道路两幅分开接匝道，是双向道路时立交内部改用双幅，外端过渡回双向
                 // 部分苜蓿叶的被交道路保持双向（匝道在它上面接平交路口）
                 // 环岛式的被交道路也保持双向（直接接环岛）
-                if (!IsParclo && !IsRoundabout && crossForm == RoadForm.TwoWay && m_RoadsByName.TryGetValue(crossName, out RoadInfo branch))
+                if ((HasLoops || IsDirectionalT) && !IsParclo && !IsRoundabout && crossForm == RoadForm.TwoWay && m_RoadsByName.TryGetValue(crossName, out RoadInfo branch))
                 {
                     // 优先选两幅并排正好放得进双向道路宽度的单行道路（街道单行道带人行道较宽，放不下时用同车道数的公路单行道）
                     RoadInfo oneWay = RampMatcher.PickSplitOneWay(m_RoadCatalog, branch)
@@ -905,7 +968,9 @@ namespace InterchangeMod.Systems
             }
             if (setting.LaneBalance)
                 ApplyLaneBalance(p, mainName, snapshot);
-            if (IsExpressway || IsSinglePoint || HasLoops)
+            if (IsDirectionalT)
+                p.DirectionalTwoLevel = setting.DirectionalTwoLevel;
+            if (IsExpressway || IsSinglePoint || HasLoops || IsDirectionalT)
                 p.RampSideGap = setting.RampGap > 0f ? setting.RampGap : 1f;
 
             snapshot.MainRoad = mainName;
@@ -962,6 +1027,9 @@ namespace InterchangeMod.Systems
             m_RoadsByName.TryGetValue(mainRoadName, out RoadInfo main);
             int mainLanes = main?.LanesPerDirection ?? 2;
             int target = setting.RampLanes > 0 ? setting.RampLanes : RampMatcher.DefaultExitLanes(mainLanes);
+            // 定向 / 半定向 T 型：两条左转匝道沿支路两幅并排升降，自动选的匝道不比支路宽（车道数不超过支路每方向车道数）
+            if (IsDirectionalT && setting.RampLanes <= 0 && m_RoadsByName.TryGetValue(p.Legs[1].RoadPrefab ?? "", out RoadInfo branch))
+                target = System.Math.Max(1, System.Math.Min(target, branch.LanesPerDirection));
             bool auto = string.IsNullOrEmpty(setting.RampPrefab);
             p.RampPrefab = auto
                 ? RampMatcher.PickRamp(m_RoadCatalog, main?.IsHighway ?? false, target)?.Name ?? kOneWayRoadPrefab

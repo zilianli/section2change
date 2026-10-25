@@ -61,6 +61,9 @@ namespace InterchangeMod.Generation.Junctions
         /// 改造时两条道路在立交范围内都要拆掉，各自按原高度接回。
         /// </summary>
         public bool Crossing { get; set; }
+
+        /// <summary>十字路口当 T 型用时，主线已按面板换成了匹配结果的另一条路（同层路口用，见工具的主线选择）。</summary>
+        public bool TeeSwapped { get; set; }
         /// <summary>无法匹配时的原因。</summary>
         public string? Error { get; set; }
     }
