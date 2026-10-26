@@ -2,13 +2,21 @@
 	<!--Id must be set in order to update existed mod. it is not required for publishing mod for the first time-->
 	<ModId Value="" />
 	<!--Name of the mod to display to players-->
-	<DisplayName Value="InterchangeMod" />
+	<DisplayName Value="section2change" />
 	<!--Short description of the mod-->
-	<ShortDescription Value="Generate highway interchanges from templates" />
+	<ShortDescription Value="Turn a junction into a complete interchange in one placement (平改立)" />
 	<!--Long description of the mod. Single line or multi line. Supports minimal markdown subset-->
 	<!--LongDescription Value="This is a long description" /-->
 	<LongDescription>
-This is a long description
+section2change (平改立) places a whole interchange at once: pick a type, aim at an existing junction or road (or empty ground), check the preview, confirm.
+
+- 13 types: diamond, single-point, Chinese expressway node, cloverleaf, partial cloverleaf, roundabout, stack, turbine; T junctions: expressway T, trumpet, semi-directional T, directional T; three-way: wye
+- Aims at existing junctions and crossings, matches their roads, levels and angles, removes the old junction and reconnects the roads
+- Follows curved roads; levels by elevation, elevated or ground; ramp grades and clearances checked before placing
+- Auto mode: just point and confirm; manual mode: every parameter adjustable
+- Trumpet, directional / semi-directional T, stack, turbine and wye support right-hand traffic only. Beta: please report problems with a screenshot and the mod log
+
+平改立：一次放下一整座立交。选类型，对准已有路口 / 道路（或空地），确认预览后放置；自动匹配原有道路、层高和角度，拆掉原路口并接回，弯道上整体顺着道路弯曲。
 	</LongDescription>
 	<!--Thumbnail-->
 	<Thumbnail Value="Properties/Thumbnail.png" />
@@ -19,7 +27,7 @@ This is a long description
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="" />
 	<!--Version of the mod-->
-	<ModVersion Value="1.0" />
+	<ModVersion Value="1.0.0-beta" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.0.*" />
 	<!--Dependency for the mod, can be set multiple times-->
@@ -27,7 +35,7 @@ This is a long description
 	<!--Required DLC, can be set multiple times. Supported values are "Landmark Buildings", "San Fransisco Set", "Beach Properties", "Urban Promenades", "Modern Architecture"-->
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
-	<ChangeLog Value="" />
+	<ChangeLog Value="beta 1.0: first public beta" />
 	<!--<ChangeLog>
 	</ChangeLog>-->
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->

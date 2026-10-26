@@ -1,7 +1,7 @@
 // 面板文字。游戏语言以 zh 开头时用中文，否则英文。
 // 注意：游戏字体不含 ▾ ▸ 等符号（会显示成方框），只用普通文字。
 const zh = {
-  title: "立交桥生成器",
+  title: "平改立",
   interchangeType: "立交类型",
   chooseType: "选择立交类型：点开后再调整设置、预览和放置（首页不求解）",
   notes: "注意事项",
@@ -224,7 +224,7 @@ const zh = {
 };
 
 const en: typeof zh = {
-  title: "Interchange Generator",
+  title: "section2change",
   interchangeType: "Interchange type",
   chooseType: "Choose an interchange type: open it to adjust the settings, preview and place (nothing is solved on this page)",
   notes: "Notes",

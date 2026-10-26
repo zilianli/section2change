@@ -283,7 +283,7 @@ namespace InterchangeMod
         {
             return new Dictionary<string, string>
             {
-                { m_Setting.GetSettingsLocaleID(), "Interchange Generator" },
+                { m_Setting.GetSettingsLocaleID(), "section2change" },
                 { m_Setting.GetOptionTabLocaleID(Setting.kSection), "Main" },
 
                 { m_Setting.GetOptionGroupLocaleID(Setting.kKeybindingGroup), "Key bindings" },
@@ -307,7 +307,7 @@ namespace InterchangeMod
                 { m_Setting.GetBindingKeyLocaleID(Mod.kToggleToolActionName), "Toggle interchange tool" },
                 { m_Setting.GetBindingKeyLocaleID(Mod.kRotateLeftActionName), "Rotate left" },
                 { m_Setting.GetBindingKeyLocaleID(Mod.kRotateRightActionName), "Rotate right" },
-                { m_Setting.GetBindingMapLocaleID(), "Interchange Generator" },
+                { m_Setting.GetBindingMapLocaleID(), "section2change" },
             };
         }
 
@@ -328,7 +328,7 @@ namespace InterchangeMod
         {
             return new Dictionary<string, string>
             {
-                { m_Setting.GetSettingsLocaleID(), "立交桥生成器" },
+                { m_Setting.GetSettingsLocaleID(), "平改立" },
                 { m_Setting.GetOptionTabLocaleID(Setting.kSection), "主要" },
 
                 { m_Setting.GetOptionGroupLocaleID(Setting.kKeybindingGroup), "快捷键" },
@@ -352,7 +352,7 @@ namespace InterchangeMod
                 { m_Setting.GetBindingKeyLocaleID(Mod.kToggleToolActionName), "开关立交工具" },
                 { m_Setting.GetBindingKeyLocaleID(Mod.kRotateLeftActionName), "向左旋转" },
                 { m_Setting.GetBindingKeyLocaleID(Mod.kRotateRightActionName), "向右旋转" },
-                { m_Setting.GetBindingMapLocaleID(), "立交桥生成器" },
+                { m_Setting.GetBindingMapLocaleID(), "平改立" },
             };
         }
 
