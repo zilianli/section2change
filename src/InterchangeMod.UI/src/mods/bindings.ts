@@ -192,6 +192,11 @@ export function closeTool() {
   trigger(GROUP, "close");
 }
 
+/** 打开 / 关闭工具（左上角快捷按钮）。 */
+export function toggleTool() {
+  trigger(GROUP, "toggle");
+}
+
 /** 放置固定的预览。 */
 export function confirmPlacement() {
   trigger(GROUP, "confirm");

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Colossal.UI.Binding;
+using Game;
 using Game.SceneFlow;
 using Game.Simulation;
 using Game.UI;
@@ -15,7 +16,7 @@ namespace InterchangeMod.UI
     ///   state  —— 面板要显示的全部状态（JSON 字符串）：是否激活、各参数、实际用到的道路、匝道选择、错误；
     ///   roads  —— 道路选择表（JSON 字符串）：每种道路的车道、类型、宽度、最近使用排名；
     ///   set(key, value) —— 面板修改参数，写进设置并保存，下一帧重建预览；
-    ///   close —— 关闭工具。
+    ///   close —— 关闭工具；toggle —— 打开 / 关闭工具（左上角快捷按钮，与快捷键相同）。
     /// ValueBinding 只在字符串变化时才发给 UI，所以每帧重建 JSON 的开销只在 C# 这边。
     /// </summary>
     public partial class InterchangeUISystem : UISystemBase
@@ -29,6 +30,8 @@ namespace InterchangeMod.UI
         private ValueBinding<string> m_Roads;
         private IReadOnlyList<RoadInfo> m_RoadsSource;
         private string m_RoadsRecent;
+        /// <summary>工具没开时的状态（只带语言，语言变了才重建）。</summary>
+        private string m_InactiveState, m_InactiveLocale;
 
         /// <summary>由 Mod 在加载时注入。</summary>
         public Setting setting { get; set; }
@@ -42,6 +45,7 @@ namespace InterchangeMod.UI
             AddBinding(m_Roads = new ValueBinding<string>(kGroup, "roads", "[]"));
             AddBinding(new TriggerBinding<string, string>(kGroup, "set", OnSet));
             AddBinding(new TriggerBinding(kGroup, "close", OnClose));
+            AddBinding(new TriggerBinding(kGroup, "toggle", OnToggle));
             AddBinding(new TriggerBinding(kGroup, "confirm", () => m_ToolSystem.RequestConfirm()));
             AddBinding(new TriggerBinding(kGroup, "unpin", () => m_ToolSystem.Unpin()));
             AddBinding(new TriggerBinding(kGroup, "pause", () => m_SimulationSystem.selectedSpeed = 0f));
@@ -53,7 +57,7 @@ namespace InterchangeMod.UI
             base.OnUpdate();
             if (setting == null)
                 return;
-            m_State.Update(m_ToolSystem.isActive ? BuildState() : "{\"active\":false}");
+            m_State.Update(m_ToolSystem.isActive ? BuildState() : InactiveState());
 
             // 道路目录建好、或最近使用变化时才重新发送道路表
             if (m_ToolSystem.roadCatalog != null && (m_ToolSystem.roadCatalog != m_RoadsSource || setting.RecentRoads != m_RoadsRecent))
@@ -79,6 +83,25 @@ namespace InterchangeMod.UI
         {
             if (m_ToolSystem.isActive)
                 m_ToolSystem.Toggle();
+        }
+
+        /// <summary>左上角快捷按钮：只在游戏中（非编辑器）打开 / 关闭工具。</summary>
+        private void OnToggle()
+        {
+            if (GameManager.instance.gameMode.IsGame())
+                m_ToolSystem.Toggle();
+        }
+
+        /// <summary>工具没开时的状态：也带上语言，左上角快捷按钮的提示要用。</summary>
+        private string InactiveState()
+        {
+            string locale = GameManager.instance.localizationManager.activeLocaleId;
+            if (m_InactiveState == null || locale != m_InactiveLocale)
+            {
+                m_InactiveLocale = locale;
+                m_InactiveState = new JsonText().BeginObject().Field("active", false).Field("locale", locale).EndObject().ToString();
+            }
+            return m_InactiveState;
         }
 
         private string BuildState()
