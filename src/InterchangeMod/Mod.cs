@@ -42,6 +42,7 @@ namespace InterchangeMod
             m_ToolSystem.setting = m_Setting;
             updateSystem.UpdateAt<InterchangeUISystem>(SystemUpdatePhase.UIUpdate);
             updateSystem.World.GetOrCreateSystemManaged<InterchangeUISystem>().setting = m_Setting;
+            updateSystem.UpdateAt<InterchangeTooltipSystem>(SystemUpdatePhase.UITooltip);
             updateSystem.UpdateAt<FrameTimeProbeSystem>(SystemUpdatePhase.MainLoop);
             m_FrameTimeProbe = updateSystem.World.GetOrCreateSystemManaged<FrameTimeProbeSystem>();
 

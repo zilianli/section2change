@@ -128,6 +128,9 @@ export interface PanelState {
   anarchy?: boolean;
   /** 预览已固定（左键），等待在面板确认放置。 */
   pinned?: boolean;
+  /** 空地放置时的朝向（度）；headingFree 为 true 时朝向由旋转键决定（没对准已有道路）。 */
+  heading?: number;
+  headingFree?: boolean;
   settings?: PanelSettings;
   match?: MatchInfo;
   resolved?: Resolved;

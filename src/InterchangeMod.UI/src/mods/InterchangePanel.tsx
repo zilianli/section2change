@@ -407,6 +407,9 @@ export const InterchangePanel = () => {
             <Button variant="flat" className={styles.choice} onSelect={unpinPreview}>{t.unpin}</Button>
           </div>
         )}
+        {state.headingFree && state.heading !== undefined && (
+          <div className={styles.hint}>{`${t.heading} ${Math.round(state.heading) % 360}° · ${t.rotateKeys}`}</div>
+        )}
         <div className={styles.hint}>{state.pinned ? t.hintPinned : t.hint}</div>
       </Panel>
     </div>

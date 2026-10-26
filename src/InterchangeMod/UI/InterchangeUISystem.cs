@@ -84,6 +84,8 @@ namespace InterchangeMod.UI
                 .Field("selectedRoad", m_ToolSystem.selectedRoadName)
                 .Field("anarchy", m_ToolSystem.anarchyAvailable)
                 .Field("pinned", m_ToolSystem.pinned)
+                .Field("heading", m_ToolSystem.headingDegrees)
+                .Field("headingFree", m_ToolSystem.headingFree)
                 .BeginObject("settings")
                 .Field(nameof(s.BaseElevation), s.BaseElevation)
                 .Field(nameof(s.LevelGap), s.LevelGap)

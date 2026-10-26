@@ -283,10 +283,10 @@ namespace InterchangeMod
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ToggleToolBinding)), "Open or close the interchange tool. All interchange settings are in the tool's panel." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.RotateLeftBinding)), "Rotate left" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.RotateLeftBinding)), "Rotate the interchange preview 15° counterclockwise." },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.RotateLeftBinding)), "Rotate the interchange preview 15° counterclockwise (the mouse wheel also rotates: 15° per notch, 1° with Shift)." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.RotateRightBinding)), "Rotate right" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.RotateRightBinding)), "Rotate the interchange preview 15° clockwise." },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.RotateRightBinding)), "Rotate the interchange preview 15° clockwise (the mouse wheel also rotates: 15° per notch, 1° with Shift)." },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ResetBindings)), "Reset key bindings" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ResetBindings)), "Reset all key bindings of the mod" },
@@ -328,10 +328,10 @@ namespace InterchangeMod
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ToggleToolBinding)), "打开或关闭立交工具。所有立交参数都在工具面板里设置。" },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.RotateLeftBinding)), "向左旋转" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.RotateLeftBinding)), "立交预览逆时针旋转 15°。" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.RotateLeftBinding)), "立交预览逆时针旋转 15°（也可以用滚轮：每格 15°，Shift + 滚轮每格 1°）。" },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.RotateRightBinding)), "向右旋转" },
-                { m_Setting.GetOptionDescLocaleID(nameof(Setting.RotateRightBinding)), "立交预览顺时针旋转 15°。" },
+                { m_Setting.GetOptionDescLocaleID(nameof(Setting.RotateRightBinding)), "立交预览顺时针旋转 15°（也可以用滚轮：每格 15°，Shift + 滚轮每格 1°）。" },
 
                 { m_Setting.GetOptionLabelLocaleID(nameof(Setting.ResetBindings)), "重置快捷键" },
                 { m_Setting.GetOptionDescLocaleID(nameof(Setting.ResetBindings)), "把本 mod 的所有快捷键恢复默认" },

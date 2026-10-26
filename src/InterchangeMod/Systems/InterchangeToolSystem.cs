@@ -42,7 +42,9 @@ namespace InterchangeMod.Systems
         /// <summary>找不到合适匝道时用的单行道路。</summary>
         private const string kOneWayRoadPrefab = "Medium Road Oneway";
 
+        /// <summary>旋转一步：, / . 和滚轮每格 15°，Shift + 滚轮每格 1°。</summary>
         private const float kRotationStep = 15f * Directions.DegToRad;
+        private const float kFineRotationStep = 1f * Directions.DegToRad;
 
         private ToolOutputBarrier m_ToolOutputBarrier;
         private NetToolSystem m_NetToolSystem;
@@ -91,6 +93,12 @@ namespace InterchangeMod.Systems
         private RoadPrefab m_SelectedRoad;
         private ProxyAction m_RotateLeftAction;
         private ProxyAction m_RotateRightAction;
+        /// <summary>
+        /// 滚轮旋转时挡住镜头缩放（游戏的内置输入动作不能由模组直接启用，所以滚轮和 Shift 直接读设备，
+        /// 再用输入屏障挡住镜头的缩放动作）。找不到缩放动作时为 null（滚轮照样旋转，镜头也会缩放）。
+        /// </summary>
+        private InputBarrier m_ZoomBarrier;
+        private bool m_ZoomBarrierChecked;
         private float m_Yaw;
         private bool m_HasPreview;
         /// <summary>预览已固定（左键）：不再跟随鼠标，等面板确认放置。</summary>
@@ -158,6 +166,12 @@ namespace InterchangeMod.Systems
         /// <summary>预览已固定，等待确认放置。</summary>
         public bool pinned => m_Pinned;
 
+        /// <summary>空地放置时的朝向（度，0–360）。</summary>
+        public float headingDegrees => ((m_Yaw / Directions.DegToRad) % 360f + 360f) % 360f;
+
+        /// <summary>朝向由旋转键决定（没有对准已有道路）：面板显示朝向。</summary>
+        public bool headingFree => m_Pinned ? !m_PinnedOnMatch : m_Match == null || m_Match.Error != null;
+
         /// <summary>面板“确认放置”：下一次更新时放置固定的预览（游戏报错阻止放置时不放）。</summary>
         public void RequestConfirm() => m_ConfirmRequested = true;
 
@@ -186,6 +200,7 @@ namespace InterchangeMod.Systems
 
         protected override void OnDestroy()
         {
+            m_ZoomBarrier?.Dispose();
             m_ToolSystem.EventPrefabChanged -= OnPrefabChanged;
             base.OnDestroy();
         }
@@ -298,6 +313,7 @@ namespace InterchangeMod.Systems
             // 旋转键只在工具激活时占用，避免和其他功能抢按键
             m_RotateLeftAction.shouldBeEnabled = true;
             m_RotateRightAction.shouldBeEnabled = true;
+            CreateZoomBarrier();
             // 装了 Anarchy 时把本工具注册给它：开启 Anarchy 后它会移除本工具预览上的大部分错误
             if (!m_AnarchyRegistered)
                 m_AnarchyRegistered = AnarchyIntegration.TryRegister(this);
@@ -312,6 +328,8 @@ namespace InterchangeMod.Systems
         {
             m_RotateLeftAction.shouldBeEnabled = false;
             m_RotateRightAction.shouldBeEnabled = false;
+            if (m_ZoomBarrier != null)
+                m_ZoomBarrier.blocked = false;
             base.OnStopRunning();
         }
 
@@ -337,10 +355,18 @@ namespace InterchangeMod.Systems
                 }
             }
 
+            float turn = 0f;
             if (m_RotateLeftAction.WasPressedThisFrame())
-                m_Yaw -= kRotationStep;
+                turn -= kRotationStep;
             if (m_RotateRightAction.WasPressedThisFrame())
-                m_Yaw += kRotationStep;
+                turn += kRotationStep;
+            // 滚轮：朝向由旋转决定（没对准已有道路）、鼠标不在面板上时旋转，并挡住镜头缩放；否则滚轮照常缩放镜头、滚动面板
+            bool wheelRotates = headingFree && !InputManager.instance.mouseOverUI;
+            if (m_ZoomBarrier != null)
+                m_ZoomBarrier.blocked = wheelRotates;
+            if (turn == 0f && wheelRotates)
+                turn = WheelRotation();
+            m_Yaw += turn;
 
             // 面板点了“确认放置”：放置固定的预览
             if (m_ConfirmRequested)
@@ -406,6 +432,53 @@ namespace InterchangeMod.Systems
             m_LastYaw = yaw;
             m_HasOrigin = true;
             return UpdatePreview(inputDeps, origin, yaw);
+        }
+
+        /// <summary>
+        /// 滚轮这一帧转了多少（直接读鼠标、键盘）：每格 15°，按住 Shift 每格 1°；向上滚逆时针。
+        /// Windows 上一格滚动量是 120，按格数算，快速滚动时一帧可能有好几格。
+        /// </summary>
+        private static float WheelRotation()
+        {
+            var mouse = UnityEngine.InputSystem.Mouse.current;
+            if (mouse == null)
+                return 0f;
+            float scroll = mouse.scroll.ReadValue().y;
+            if (scroll == 0f)
+                return 0f;
+            float notches = System.Math.Abs(scroll) >= 60f ? (float)System.Math.Round(scroll / 120f) : System.Math.Sign(scroll);
+            if (notches == 0f)
+                notches = System.Math.Sign(scroll);
+            var keyboard = UnityEngine.InputSystem.Keyboard.current;
+            bool fine = keyboard != null && keyboard.shiftKey.isPressed;
+            return -notches * (fine ? kFineRotationStep : kRotationStep);
+        }
+
+        /// <summary>
+        /// 找镜头的缩放动作（镜头动作表里名字含 Zoom 的）建一个输入屏障，工具第一次激活时建一次。
+        /// 只挡这一个动作，不碰游戏的内置动作的启用状态。找不到或出错时不挡（调试日志记下镜头动作表）。
+        /// </summary>
+        private void CreateZoomBarrier()
+        {
+            if (m_ZoomBarrierChecked)
+                return;
+            m_ZoomBarrierChecked = true;
+            try
+            {
+                if (!InputManager.instance.TryFindActionMap(InputManager.kCameraMap, out ProxyActionMap camera))
+                    return;
+                var names = camera.actions.Keys.ToList();
+                string zoom = names.FirstOrDefault(n => n.IndexOf("Zoom", System.StringComparison.OrdinalIgnoreCase) >= 0);
+                if (zoom != null)
+                    m_ZoomBarrier = InputManager.instance.CreateActionBarrier(InputManager.kCameraMap, zoom, nameof(InterchangeToolSystem));
+                if (setting.DebugLogging)
+                    Mod.log.Info($"[debug] camera actions: {string.Join(", ", names)}; zoom barrier on '{zoom ?? "none"}'");
+            }
+            catch (System.Exception e)
+            {
+                Mod.log.Warn($"Could not block camera zoom for wheel rotation: {e.Message}");
+                m_ZoomBarrier = null;
+            }
         }
 
         /// <summary>放置当前预览；游戏报错阻止放置时记下原因并返回 null。</summary>
