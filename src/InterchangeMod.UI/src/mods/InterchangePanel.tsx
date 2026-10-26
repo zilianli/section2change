@@ -16,13 +16,14 @@ type PickerSlot = "main" | "cross" | "ramp" | "frontage" | null;
 
 /** 首页的类型：四向、三向两组（顺序同原来的类型按钮）。 */
 const fourWayTypes = ["Diamond", "ExpresswayNode", "SinglePoint", "Cloverleaf", "PartialCloverleaf", "Roundabout", "Stack", "Turbine"];
-const threeWayTypes = ["ExpresswayT", "Trumpet", "SemiDirectionalT", "DirectionalT"];
+const threeWayTypes = ["ExpresswayT", "Trumpet", "SemiDirectionalT", "DirectionalT", "Wye"];
 
 const typeNameOf = (t: Strings, type: string) =>
   ({
     Diamond: t.typeDiamond, ExpresswayNode: t.typeExpressway, SinglePoint: t.typeSinglePoint, Cloverleaf: t.typeCloverleaf,
     PartialCloverleaf: t.typeParclo, Roundabout: t.typeRoundabout, Stack: t.typeStack, Turbine: t.typeTurbine,
     ExpresswayT: t.typeExpresswayT, Trumpet: t.typeTrumpet, SemiDirectionalT: t.typeSemiDirectionalT, DirectionalT: t.typeDirectionalT,
+    Wye: t.typeWye,
   } as Record<string, string>)[type] ?? t.typeDiamond;
 
 const introOf = (t: Strings, type: string) =>
@@ -30,6 +31,7 @@ const introOf = (t: Strings, type: string) =>
     Diamond: t.introDiamond, ExpresswayNode: t.introExpresswayNode, SinglePoint: t.introSinglePoint, Cloverleaf: t.introCloverleaf,
     PartialCloverleaf: t.introPartialCloverleaf, Roundabout: t.introRoundabout, Stack: t.introStack, Turbine: t.introTurbine,
     ExpresswayT: t.introExpresswayT, Trumpet: t.introTrumpet, SemiDirectionalT: t.introSemiDirectionalT, DirectionalT: t.introDirectionalT,
+    Wye: t.introWye,
   } as Record<string, string>)[type] ?? "";
 
 /** 注意事项（设置页里默认收起）：每种立交的结构、要求和交角范围。 */
@@ -38,6 +40,7 @@ const notesOf = (t: Strings, type: string) =>
     Diamond: t.diamondNote, ExpresswayNode: t.expresswayNote, SinglePoint: t.singlePointNote, Cloverleaf: t.cloverleafNote,
     PartialCloverleaf: t.parcloNote, Roundabout: t.roundaboutNote, Stack: t.stackNote, Turbine: t.turbineNote,
     ExpresswayT: t.expresswayTNote, Trumpet: t.trumpetNote, SemiDirectionalT: t.semiDirectionalTNote, DirectionalT: t.directionalTNote,
+    Wye: t.wyeNote,
   } as Record<string, string>)[type] ?? "";
 
 /**
@@ -131,6 +134,8 @@ export const InterchangePanel = () => {
   const stack = s.InterchangeType === "Stack";
   // 涡轮：主线第 1 层、被交道路第 2 层，左转匝道绕中心、最高第 3 层
   const turbine = s.InterchangeType === "Turbine";
+  // Y 型分向：三条路约 120° 汇于一处，三条臂互不相对，没有主线 / 被交道路之分
+  const wye = s.InterchangeType === "Wye";
   // 定向 / 半定向 T 型：支路与主线同层，左转匝道以跨线桥跨过主线
   const flyoverT = directionalT || semiDirectionalT;
   // 有环道的类型：环道半径可自动
@@ -138,9 +143,9 @@ export const InterchangePanel = () => {
   // 直匝道的类型：匝道长度、分流角度只对它们起作用
   const straightRamps = s.InterchangeType === "Diamond" || expressway || singlePoint;
   // 立交内主线总是双幅（双向主线自动拆成双幅、两端过渡）
-  const mainAlwaysDual = cloverleaf || parclo || roundabout || stack || turbine;
+  const mainAlwaysDual = cloverleaf || parclo || roundabout || stack || turbine || wye;
   // 车道平衡：部分苜蓿叶、环岛式没有用到
-  const laneBalanceUsed = !parclo && !roundabout && !(stack && s.StackLeftExit);
+  const laneBalanceUsed = !parclo && !roundabout && !(stack && s.StackLeftExit) && !wye;
   // 相交角度可调范围
   const [angleMin, angleMax] = cloverleaf ? [35, 145] : parclo || roundabout || flyoverT || stack ? [60, 120] : turbine ? [70, 110] : [45, 135];
   const tee = expresswayT || trumpet || flyoverT;
@@ -156,6 +161,10 @@ export const InterchangePanel = () => {
   const crossTitle = tee ? t.branchRoad : t.crossRoad;
   // 有自己选项的类型才显示“立交选项”
   const hasOptions = tee || stack || roundabout || parclo || cloverleaf || loops;
+  // 分层说明（结果和“层与角度”里共用）
+  const levelSummary = (r: Resolved) => wye ? wyeLevelLine(t, r) : turbine ? turbineLevelLine(t, r) : stack ? stackLevelLine(t, r) : flyoverT ? flyoverLevelLine(t, r, s.DirectionalTwoLevel) : levelLine(t, r, cloverleaf || parclo || roundabout ? !s.CloverleafCrossOnTop : !trumpet && (s.MainOnTop || mainForcedTop));
+  // Y 型的“主线”是三条路共用的道路
+  const mainTitle = wye ? t.wyeRoads : t.mainRoad;
 
   const formOptions: { value: RoadForm; text: string }[] = [
     { value: "Auto", text: t.formAuto },
@@ -231,9 +240,9 @@ export const InterchangePanel = () => {
               </Section>
               {r && (
                 <Section title={t.results}>
-                  <div className={styles.resolved}>{turbine ? turbineLevelLine(t, r) : stack ? stackLevelLine(t, r) : flyoverT ? flyoverLevelLine(t, r, s.DirectionalTwoLevel) : levelLine(t, r, cloverleaf || parclo || roundabout ? !s.CloverleafCrossOnTop : !trumpet && (s.MainOnTop || mainForcedTop))}</div>
-                  <div className={styles.resolved}>{`${t.mainRoad}：${r.mainRoad} · ${r.mainForm === "Dual" ? t.formDual : t.formTwoWay} · ${r.mainLanes} ${t.lanesPerDirection}`}</div>
-                  <div className={styles.resolved}>{`${crossTitle}：${r.crossRoad} · ${r.crossForm === "Dual" ? t.formDual : t.formTwoWay} · ${r.crossLanes} ${t.lanesPerDirection}`}</div>
+                  <div className={styles.resolved}>{levelSummary(r)}</div>
+                  <div className={styles.resolved}>{`${mainTitle}：${r.mainRoad} · ${r.mainForm === "Dual" ? t.formDual : t.formTwoWay} · ${r.mainLanes} ${t.lanesPerDirection}`}</div>
+                  {!wye && <div className={styles.resolved}>{`${crossTitle}：${r.crossRoad} · ${r.crossForm === "Dual" ? t.formDual : t.formTwoWay} · ${r.crossLanes} ${t.lanesPerDirection}`}</div>}
                   {expressway && r.frontageRoad && <div className={styles.resolved}>{`${t.frontage}：${r.frontageRoad} · ${r.frontageLanes} ${t.lanes}`}</div>}
                   <div className={styles.resolved}>{`${t.ramps}：${rampLine.replace(`${t.actual}：`, "")}`}</div>
                   {r.extraRoad && (parclo || roundabout) && <div className={styles.resolved}>{`${parclo ? t.stemRoad : t.ringRoad}：${r.extraRoad}`}</div>}
@@ -376,7 +385,7 @@ export const InterchangePanel = () => {
               <Stepper label="" value={s.LevelGap} step={0.5} min={1} max={30} unit=" m"
                 onChange={(v) => setValue("LevelGap", v)} />
             )}
-            {!mainForcedTop && !trumpet && !cloverleaf && !parclo && !roundabout && !flyoverT && !stack && !turbine && (
+            {!mainForcedTop && !trumpet && !cloverleaf && !parclo && !roundabout && !flyoverT && !stack && !turbine && !wye && (
             <Choice label={t.topRoad} value={s.MainOnTop ? "main" : "cross"}
               options={[{ value: "cross", text: t.crossRoad }, { value: "main", text: t.mainRoad }]}
               onChange={(v) => setValue("MainOnTop", v === "main")} />
@@ -387,16 +396,16 @@ export const InterchangePanel = () => {
               options={[{ value: "main", text: t.mainRoad }, { value: "cross", text: t.crossRoad }]}
               onChange={(v) => setValue("CloverleafCrossOnTop", v === "cross")} />
             )}
-            {r && <div className={styles.resolved}>{turbine ? turbineLevelLine(t, r) : stack ? stackLevelLine(t, r) : flyoverT ? flyoverLevelLine(t, r, s.DirectionalTwoLevel) : levelLine(t, r, cloverleaf || parclo || roundabout ? !s.CloverleafCrossOnTop : !trumpet && (s.MainOnTop || mainForcedTop))}</div>}
+            {r && <div className={styles.resolved}>{levelSummary(r)}</div>}
             {/* 对准已有路口时交角取路口的实际角度（见路口匹配），面板的值不起作用 */}
-            {!matched && (
+            {!matched && !wye && (
               <Stepper label={t.crossingAngle} value={s.CrossingAngle} step={5} min={angleMin} max={angleMax} unit="°"
                 onChange={(v) => setValue("CrossingAngle", v)} />
             )}
             <div className={styles.note}>{t.elevationGuide}</div>
           </Section>
 
-          <Section title={t.mainRoad}>
+          <Section title={mainTitle}>
             <RoadChooser strings={t} chosen={s.MainRoadPrefab || defaultMain}
               open={picker === "main"} onToggle={() => togglePicker("main")} />
             {picker === "main" && (
@@ -410,8 +419,14 @@ export const InterchangePanel = () => {
             )}
             {r && <ResolvedLine strings={t} road={r.mainRoad} form={r.mainForm} lanes={r.mainLanes} />}
             {(matched || roadAligned) && <div className={styles.note}>{t.decidedByMatch}</div>}
+            {/* Y 型分向空地放置时三条路都用这条道路，分隔带在这里调 */}
+            {wye && (
+              <SpacingStepper label={t.median} meters={s.MedianWidth} stepMeters={1} minMeters={0} maxMeters={96}
+                inCells={s.SpacingInCells} cellUnit={t.cellUnit} onChange={(v) => setValue("MedianWidth", v)} />
+            )}
           </Section>
 
+          {!wye && (
           <Section title={crossTitle}>
             <RoadChooser strings={t} chosen={s.CrossRoadPrefab || t.defaultCrossRoad}
               open={picker === "cross"} onToggle={() => togglePicker("cross")} />
@@ -431,6 +446,7 @@ export const InterchangePanel = () => {
                 inCells={s.SpacingInCells} cellUnit={t.cellUnit} onChange={(v) => setValue("MedianWidth", v)} />
             )}
           </Section>
+          )}
 
           {expressway && (
             <Section title={t.frontage}>
@@ -590,6 +606,10 @@ const stackLevelLine = (t: Strings, r: Resolved) => {
     `${t.stackLeftLevels} ${formatMeters(base + 2 * gap)}、${t.stackFourthLevel} ${formatMeters(base + 3 * gap)}（${t.minimum} ${formatMeters(r.minimumGap)}）`;
 };
 
+/** 例：基层：三条路 0 m · 跨线桥 10 m（最小 7.5 m） */
+const wyeLevelLine = (t: Strings, r: Resolved) =>
+  `${t.wyeBase} ${formatMeters(r.mainElevation)} · ${t.wyeBridge} ${formatMeters(r.mainElevation + r.levelGap)}（${t.minimum} ${formatMeters(r.minimumGap)}）`;
+
 /** 例：第 1 层：主线 0 m · 第 2 层：被交道路 10 m · 左转匝道：最高第 3 层 20 m（最小高差 7.5 m） */
 const turbineLevelLine = (t: Strings, r: Resolved) => {
   const gap = r.crossElevation - r.mainElevation;
@@ -643,11 +663,18 @@ const describeRadii = (t: Strings, [ahead, behind]: [number, number]) => {
 
 /** 弯道：显示两条路的半径，提示整体弯曲、求解较慢；坡度收紧时显示实际用的坡度。 */
 const CurveNote = ({ strings: t, match, blocked, enabled }: { strings: Strings; match: MatchInfo; blocked?: boolean; enabled: boolean }) => {
-  const curved = [...(match.mainRadii ?? [0, 0]), ...(match.crossRadii ?? [0, 0])].some((r) => r > 0);
+  const legRadii = match.legRadii ?? [];
+  const curved = [...(match.mainRadii ?? [0, 0]), ...(match.crossRadii ?? [0, 0]), ...legRadii].some((r) => r > 0);
   if (!curved) return null;
+  // Y 型分向：三条臂各一个半径
+  const one = (r: number) => (r > 0 ? `${t.radius} ${Math.round(r)} ${t.meters}` : t.straight);
   return (
     <div className={styles.warnings}>
-      <div>{`${t.curveRoads}：${t.mainRoad} ${describeRadii(t, match.mainRadii)} · ${t.crossRoad} ${describeRadii(t, match.crossRadii)}`}</div>
+      <div>
+        {legRadii.length > 0
+          ? `${t.curveRoads}：${t.wyeRoads} ${legRadii.map(one).join(" / ")}`
+          : `${t.curveRoads}：${t.mainRoad} ${describeRadii(t, match.mainRadii)} · ${t.crossRoad} ${describeRadii(t, match.crossRadii)}`}
+      </div>
       {!enabled && <div>{t.curveOff}</div>}
       {enabled && <div>{t.curveNote}</div>}
       {match.curveGrade > 0 && <div>{t.curveGrade.replace("{grade}", (match.curveGrade * 100).toFixed(1))}</div>}

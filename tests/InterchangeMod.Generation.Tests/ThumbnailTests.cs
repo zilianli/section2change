@@ -16,6 +16,24 @@ namespace InterchangeMod.Generation.Tests
         /// <summary>每种类型的典型参数：与各模板测试的默认参数一致。</summary>
         private static InterchangeParams Params(InterchangeType type)
         {
+            if (type == InterchangeType.Wye)
+            {
+                // Y 型分向：三条双幅公路各隔 120°，都在地面
+                var wye = new InterchangeParams
+                {
+                    Legs = new List<LegSpec> { new LegSpec(0f, 0), new LegSpec(120f, 0), new LegSpec(240f, 0) },
+                    RampWidth = 8f,
+                };
+                foreach (var leg in wye.Legs)
+                {
+                    leg.Form = RoadForm.Dual;
+                    leg.RoadWidth = 16f;
+                    leg.MedianWidth = 4f;
+                    leg.RoadPrefab = "Highway Oneway";
+                }
+                wye.Levels[1].Elevation = 10f;
+                return wye;
+            }
             bool tee = type is InterchangeType.Trumpet or InterchangeType.ExpresswayT or InterchangeType.DirectionalT or InterchangeType.SemiDirectionalT;
             bool sameLevel = type is InterchangeType.DirectionalT or InterchangeType.SemiDirectionalT;
             var p = new InterchangeParams

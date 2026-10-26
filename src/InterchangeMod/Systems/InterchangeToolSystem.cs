@@ -68,6 +68,7 @@ namespace InterchangeMod.Systems
         private readonly IInterchangeTemplate m_Stack = new StackTemplate();
         private readonly IInterchangeTemplate m_Turbine = new StackTemplate(turbine: true);
         private readonly IInterchangeTemplate m_SemiDirectionalT = new DirectionalTTemplate(directional: false);
+        private readonly IInterchangeTemplate m_Wye = new WyeTemplate();
 
         /// <summary>面板选的立交类型。</summary>
         /// <summary>中式快速路节点（十字或 T 型）：有地面辅路。</summary>
@@ -85,9 +86,12 @@ namespace InterchangeMod.Systems
         private bool IsStack => setting?.InterchangeType == "Stack" || IsTurbine;
 
         private bool IsTurbine => setting?.InterchangeType == "Turbine";
+
+        /// <summary>Y 型分向：三条路约 120° 汇于一处，三条臂互不相对（不是“主线 + 支路”）。</summary>
+        private bool IsWye => setting?.InterchangeType == "Wye";
         /// <summary>有环道的类型（喇叭形、苜蓿叶）：环道半径可自动；双向被交道路在立交内拆成双幅。</summary>
         private bool HasLoops => IsTrumpet || IsCloverleaf || IsParclo || IsRoundabout;
-        private IInterchangeTemplate CurrentTemplate => IsTurbine ? m_Turbine : IsStack ? m_Stack : setting?.InterchangeType == "DirectionalT" ? m_DirectionalT
+        private IInterchangeTemplate CurrentTemplate => IsWye ? m_Wye : IsTurbine ? m_Turbine : IsStack ? m_Stack : setting?.InterchangeType == "DirectionalT" ? m_DirectionalT
             : setting?.InterchangeType == "SemiDirectionalT" ? m_SemiDirectionalT : IsRoundabout ? m_Roundabout : IsParclo ? m_Parclo : IsCloverleaf ? m_Cloverleaf : IsTrumpet ? m_Trumpet : IsExpresswayT ? m_ExpresswayT : IsExpressway ? m_Expressway : IsSinglePoint ? m_SinglePoint : m_Diamond;
 
         /// <summary>主线是否在上层：中式快速路节点和单点立交的主线总是高架。</summary>
@@ -624,7 +628,7 @@ namespace InterchangeMod.Systems
         /// （拆除照常按立交范围进行；范围外保留的部分没有臂端可接，自由结束）。
         /// </summary>
         private bool TeeFromCross => m_Match != null && m_Match.Error == null && !m_Match.RoadOnly
-            && m_Match.LegCount == 4 && CurrentTemplate.LegCount == 3;
+            && m_Match.LegCount == 4 && CurrentTemplate.LegCount == 3 && !IsWye;
 
         private bool CursorRightOfMain() =>
             Directions.Dot(m_Cursor - m_Match.Center, Directions.RightOf(Directions.FromAngle(m_Match.MainAngle))) > 0f;
@@ -863,6 +867,10 @@ namespace InterchangeMod.Systems
             FillMatchState(snapshot);
             if (m_Match != null && m_Match.Error != null)
                 errors.Add($"无法匹配路口：{m_Match.Error}（把鼠标移到空地上可自由放置）");
+            else if (m_Match != null && m_Match.Wye && !IsWye)
+                errors.Add("这是 Y 型三岔路口（三条路互成角度，没有直行的道路）：请选择 Y 型分向");
+            else if (m_Match != null && IsWye && (m_Match.RoadOnly || !m_Match.Wye) && m_Match.LegCount != 4)
+                errors.Add("Y 型分向只能对准三条路互成角度（相邻夹角 90°–150°）的三岔路口，或在空地放置");
             else if (m_Match != null && !m_Match.RoadOnly && m_Match.LegCount != CurrentTemplate.LegCount && !TeeFromCross)
                 errors.Add(m_Match.LegCount == 3
                     ? "这是三向（T 型）路口：当前立交类型需要四向路口，请选择快速路 T 型、喇叭形、定向 T 型或半定向 T 型"
@@ -870,6 +878,7 @@ namespace InterchangeMod.Systems
             InterchangeParams p = BuildParams(errors, snapshot);
             // 调试日志：定向式每次求解（参数变化时）的耗时，用来查卡顿
             StackTemplate.Trace = IsStack && setting.DebugLogging ? (System.Action<string>)(m => Mod.log.Info($"[debug] stack: {m}")) : null;
+            WyeTemplate.Trace = IsWye && setting.DebugLogging ? (System.Action<string>)(m => Mod.log.Info($"[debug] wye: {m}")) : null;
             if (errors.Count == 0)
             {
                 // 匝道长度设置太短时自动加长到满足坡度，而不是让预览直接失败
@@ -966,14 +975,16 @@ namespace InterchangeMod.Systems
         /// <summary>
         /// 弯道适配（docs/04）：对准已有道路时按追踪出的道路中心线建弯曲变换（主线、被交道路中心前后各一条）；没对准或都是直线时不弯。
         /// 模板的被交道路方向（Legs[1]）与匹配的被交道路方向相反时（如十字路口当 T 型、支路取另一侧）前后对调。
+        /// Y 型分向的三条臂互不相对：三条臂各一条中心线，各沿自己的弯（CurveWarp 的三臂形式）。
         /// 立交范围内最急处半径太小时报错，请玩家先把道路调整得平直一些。
         /// </summary>
         private CurveWarp BuildWarp(InterchangeParams p, List<string> errors, PanelSnapshot snapshot)
         {
             float crossAngle = p.Legs[1].Angle;
             var straight = Centerline.Straight;
+            var identity = new CurveWarp(crossAngle, straight, straight, straight, straight);
             if (m_Match == null || m_Match.Error != null)
-                return new CurveWarp(crossAngle, straight, straight, straight, straight);
+                return identity;
             // 每条中心线按它在中心处离开的方向（世界角度）摆正
             Centerline Line(IReadOnlyList<Vec3> trace, float angle)
             {
@@ -981,6 +992,31 @@ namespace InterchangeMod.Systems
                     return straight;
                 var line = Centerline.FromPoints(trace, Directions.FromAngle(angle));
                 return line.NearlyStraight(kStraightOffset) ? straight : line;
+            }
+            // 面板显示的半径：直线（或只是整体转了一点、没有弯）显示为 0
+            float Radius(Centerline line)
+            {
+                float r = line.IsStraight ? 0f : line.MinRadius(kCurveCheckLength);
+                return float.IsInfinity(r) ? 0f : r;
+            }
+            bool TooSharp(IEnumerable<float> radii)
+            {
+                float sharpest = radii.Where(r => r > 0f).DefaultIfEmpty(float.PositiveInfinity).Min();
+                if (sharpest >= kMinCurveRadius)
+                    return false;
+                errors.Add($"道路在立交范围内最急处半径只有 {sharpest:F0} 米：请先把道路调整得平直一些（弯道半径至少 {kMinCurveRadius:F0} 米）再放置");
+                return true;
+            }
+            if (IsWye)
+            {
+                // 三条臂按放置时的顺序（相对主线方向从小到大，与 Legs 一致）
+                if (!m_Match.Wye || m_Match.TripleLegs == null)
+                    return identity;
+                var lines = m_Match.TripleLegs.OrderBy(l => Normalize(l.Angle - m_Match.MainAngle)).Select(l => Line(l.Trace, l.Angle)).ToList();
+                snapshot.LegRadii = lines.Select(Radius).ToArray();
+                if (!effective.CurveFollow || TooSharp(snapshot.LegRadii))
+                    return identity;
+                return new CurveWarp(p.Legs.Select(l => l.Angle).ToList(), lines);
             }
             float main = m_Match.MainAngle, cross = m_Match.MainAngle + m_Match.CrossingAngle;
             Centerline mainAhead = Line(m_Match.MainAheadTrace, main), mainBehind = Line(m_Match.MainBehindTrace, main + 180f);
@@ -992,26 +1028,13 @@ namespace InterchangeMod.Systems
                 if (Directions.AngleBetween(crossAngle, m_Match.CrossingAngle) > 90f)
                     (crossAhead, crossBehind) = (crossBehind, crossAhead);
             }
-            // 面板显示的半径：直线（或只是整体转了一点、没有弯）显示为 0
-            float Radius(Centerline line)
-            {
-                float r = line.IsStraight ? 0f : line.MinRadius(kCurveCheckLength);
-                return float.IsInfinity(r) ? 0f : r;
-            }
             snapshot.MainRadiusAhead = Radius(mainAhead);
             snapshot.MainRadiusBehind = Radius(mainBehind);
             snapshot.CrossRadiusAhead = Radius(crossAhead);
             snapshot.CrossRadiusBehind = Radius(crossBehind);
             // 面板关了弯道适配：半径照样显示（让玩家知道是弯道），立交按直线放置
-            if (!effective.CurveFollow)
-                return new CurveWarp(crossAngle, straight, straight, straight, straight);
-            float sharpest = new[] { snapshot.MainRadiusAhead, snapshot.MainRadiusBehind, snapshot.CrossRadiusAhead, snapshot.CrossRadiusBehind }
-                .Where(r => r > 0f).DefaultIfEmpty(float.PositiveInfinity).Min();
-            if (sharpest < kMinCurveRadius)
-            {
-                errors.Add($"道路在立交范围内最急处半径只有 {sharpest:F0} 米：请先把道路调整得平直一些（弯道半径至少 {kMinCurveRadius:F0} 米）再放置");
-                return new CurveWarp(crossAngle, straight, straight, straight, straight);
-            }
+            if (!effective.CurveFollow || TooSharp(new[] { snapshot.MainRadiusAhead, snapshot.MainRadiusBehind, snapshot.CrossRadiusAhead, snapshot.CrossRadiusBehind }))
+                return identity;
             return new CurveWarp(crossAngle, mainAhead, mainBehind, crossAhead, crossBehind);
         }
 
@@ -1021,9 +1044,10 @@ namespace InterchangeMod.Systems
         /// </summary>
         private void PlanLevels(InterchangeParams p, PanelSnapshot snapshot)
         {
-            if (IsDirectionalT)
+            if (IsDirectionalT || IsWye)
             {
                 // 定向 / 半定向 T 型：主线、支路在基层（立体交叉时取主线原来的高度），层 1 是第一层跨线桥 = 基层 + 层间高差；
+                // Y 型分向同样：三条路在基层，左转匝道的跨线桥在层 1；
                 // 支路原来的高度只用于臂端坡道接回
                 float baseHeight = m_Match != null && m_Match.Error == null && m_Match.Crossing ? m_Match.Main.Elevation : BaseElevation;
                 float flyGap = LevelPlanner.ResolveGap(p.Legs[0], p.Legs[0], baseHeight, effective.LevelGap);
@@ -1094,6 +1118,8 @@ namespace InterchangeMod.Systems
 
         private InterchangeParams BuildParams(List<string> errors, PanelSnapshot snapshot)
         {
+            if (IsWye)
+                return BuildWyeParams(errors, snapshot);
             bool matched = m_Match != null && m_Match.Error == null;
             var p = new InterchangeParams
             {
@@ -1294,6 +1320,74 @@ namespace InterchangeMod.Systems
                     Mod.log.Info($"[debug] {config}");
                 m_LastDebugConfig = config;
             }
+            return p;
+        }
+
+        /// <summary>角度归到 0~360°。</summary>
+        private static float Normalize(float degrees) => (degrees % 360f + 360f) % 360f;
+
+        /// <summary>
+        /// Y 型分向的三条臂：对准 Y 型三岔路口时取路口三条臂的角度（相对主线臂）和道路；空地放置时各隔 120°，三条都用主线的道路。
+        /// 三条都在基层；双向道路在立交内拆成双幅（同车道数的单行道路，两幅外缘对齐双向道路的边缘），外端过渡回双向。
+        /// </summary>
+        private InterchangeParams BuildWyeParams(List<string> errors, PanelSnapshot snapshot)
+        {
+            bool matched = m_Match != null && m_Match.Error == null && m_Match.Wye && m_Match.TripleLegs != null;
+            var p = new InterchangeParams
+            {
+                RampLength = effective.RampLength,
+                RampDivergeAngle = effective.RampDivergeAngle,
+                RightHandTraffic = !m_CityConfigurationSystem.leftHandTraffic,
+            };
+            var legs = new List<(float Angle, string Name, RoadForm Form, float Median)>();
+            if (matched)
+            {
+                foreach (var (angle, road, _) in m_Match.TripleLegs.OrderBy(l => Normalize(l.Angle - m_Match.MainAngle)))
+                    legs.Add((Normalize(angle - m_Match.MainAngle), road.Prefab, road.Form, road.Form == RoadForm.Dual ? road.MedianWidth : effective.MedianWidth));
+            }
+            else
+            {
+                var (name, form) = ResolveRoad(effective.MainRoadPrefab, m_SelectedRoad.name, effective.MainRoadForm);
+                foreach (float angle in new[] { 0f, 120f, 240f })
+                    legs.Add((angle, name, form, effective.MedianWidth));
+            }
+            p.Legs = legs.Select(l => new LegSpec(l.Angle, 0)).ToList();
+            for (int i = 0; i < 3; i++)
+            {
+                var (_, name, form, median) = legs[i];
+                if (form == RoadForm.TwoWay && m_RoadsByName.TryGetValue(name, out RoadInfo external))
+                {
+                    RoadInfo oneWay = RampMatcher.PickSplitOneWay(m_RoadCatalog, external)
+                        ?? RampMatcher.PickClosest(m_RoadCatalog, external.IsHighway, external.LanesPerDirection, oneWay: true);
+                    if (oneWay != null && m_PrefabResolver.TryResolve(name, m_SelectedRoad, out NetPrefab twoWayPrefab)
+                        && m_PrefabResolver.TryResolve(oneWay.Name, m_SelectedRoad, out NetPrefab oneWayPrefab))
+                    {
+                        float twoWayWidth = m_PrefabResolver.GetWidth(twoWayPrefab);
+                        float aligned = twoWayWidth - 2f * m_PrefabResolver.GetWidth(oneWayPrefab);
+                        SetRoad(p, i, i, RoadForm.Dual, oneWay.Name, aligned >= 0f ? System.Math.Max(aligned, TrumpetTemplate.kMinSplitMedian) : effective.MedianWidth, errors);
+                        p.Legs[i].ExternalForm = RoadForm.TwoWay;
+                        p.Legs[i].ExternalPrefab = name;
+                        p.Legs[i].ExternalWidth = twoWayWidth;
+                        continue;
+                    }
+                }
+                SetRoad(p, i, i, form, name, median, errors);
+            }
+            PlanLevels(p, snapshot);
+            // 原路口改造：三条臂接回原有道路，高度不同时臂端加坡道
+            if (matched && !StackedOverMatch)
+                foreach (var leg in p.Legs)
+                    leg.ExternalElevation = m_Match.LowestElevation;
+            string mainName = p.Legs[0].RoadPrefab ?? legs[0].Name;
+            ChooseRamp(p, mainName, errors, snapshot);
+            p.RampSideGap = effective.RampGap > 0f ? effective.RampGap : 1f;
+
+            snapshot.MainRoad = mainName;
+            snapshot.MainForm = p.Legs[0].Form.ToString();
+            snapshot.MainLanes = LanesOf(mainName);
+            snapshot.CrossRoad = p.Legs[1].RoadPrefab ?? "";
+            snapshot.CrossForm = p.Legs[1].Form.ToString();
+            snapshot.CrossLanes = LanesOf(snapshot.CrossRoad);
             return p;
         }
 
@@ -1588,6 +1682,8 @@ namespace InterchangeMod.Systems
         public float LoopRadius;
         /// <summary>弯道适配：主线 / 被交道路中心前后两侧的半径（米），0 = 直线。</summary>
         public float MainRadiusAhead, MainRadiusBehind, CrossRadiusAhead, CrossRadiusBehind;
+        /// <summary>Y 型分向：三条臂各自的最小半径（米，0 = 直线），按放置顺序；其他类型为空。</summary>
+        public float[] LegRadii = new float[0];
         /// <summary>弯道内侧坡度超限、收紧后实际求解用的最大坡度；没收紧时为 0。</summary>
         public float CurveGrade;
     }

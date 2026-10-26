@@ -11,8 +11,9 @@ import SinglePoint from "./thumbs/interchange-SinglePoint.svg";
 import Stack from "./thumbs/interchange-Stack.svg";
 import Trumpet from "./thumbs/interchange-Trumpet.svg";
 import Turbine from "./thumbs/interchange-Turbine.svg";
+import Wye from "./thumbs/interchange-Wye.svg";
 
 export const thumbnails: Record<string, string> = {
   Diamond, ExpresswayNode, SinglePoint, Cloverleaf, PartialCloverleaf, Roundabout, Stack, Turbine,
-  ExpresswayT, Trumpet, SemiDirectionalT, DirectionalT,
+  ExpresswayT, Trumpet, SemiDirectionalT, DirectionalT, Wye,
 };

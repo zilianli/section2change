@@ -27,5 +27,7 @@ namespace InterchangeMod.Generation
         ExpresswayNode,
         /// <summary>快速路 T 型节点：中式快速路节点的三向版本，支路从高架下穿过、接两侧辅路。</summary>
         ExpresswayT,
+        /// <summary>Y 型分向：三条路约 120° 汇于一处，三向全定向、交点分散（两层）。</summary>
+        Wye,
     }
 }

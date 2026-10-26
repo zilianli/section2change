@@ -21,6 +21,7 @@ namespace InterchangeMod.Generation
             new DirectionalTTemplate(directional: true),
             new StackTemplate(),
             new StackTemplate(turbine: true),
+            new WyeTemplate(),
         };
 
         public static IReadOnlyList<IInterchangeTemplate> All => Templates;

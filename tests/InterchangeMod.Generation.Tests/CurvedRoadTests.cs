@@ -104,6 +104,79 @@ namespace InterchangeMod.Generation.Tests
         }
 
         [Fact]
+        public void WyeMatch_CarriesEachLegsCenterline()
+        {
+            // Y 型三岔路口三条臂各有自己的弯：匹配结果里每条臂一条从中心往外的中心线
+            float[] curvatures = { 0f, 1f / 500f, -1f / 700f };
+            var edges = new List<ExternalEdge>();
+            for (int i = 0; i < 3; i++)
+                edges.Add(new ExternalEdge
+                {
+                    Anchor = Vec3.Zero, Direction = Directions.FromAngle(120f * i), Road = "R" + i, Width = 16f, LanesPerDirection = 2,
+                    Trace = Road(Vec3.Zero, 120f * i, 0f, curvatures[i]),
+                });
+            var m = JunctionMatcher.Match(edges, preferredAngle: 0f);
+            Assert.Null(m.Error);
+            Assert.True(m.Wye);
+            for (int i = 0; i < 3; i++)
+            {
+                var (angle, _, trace) = m.TripleLegs![i];
+                var line = Centerline.FromPoints(trace!, Directions.FromAngle(angle));
+                if (curvatures[i] == 0f)
+                    Assert.True(line.NearlyStraight(0.5f));
+                else
+                    Assert.InRange(line.MinRadius(600f), 0.95f / System.Math.Abs(curvatures[i]), 1.05f / System.Math.Abs(curvatures[i]));
+            }
+        }
+
+        [Fact]
+        public void ThreeLegWarp_EachLegFollowsItsOwnCurve()
+        {
+            float[] angles = { 0f, 125f, 235f };
+            var lines = new[] { Centerline.Straight, Centerline.Arc(1f / 500f), Centerline.Arc(-1f / 700f) };
+            var warp = new CurveWarp(angles, lines);
+            Assert.False(warp.IsIdentity);
+            Assert.True(new CurveWarp(angles, new[] { Centerline.Straight, Centerline.Straight, Centerline.Straight }).IsIdentity);
+            // 臂上离中心 260 米以外：走廊里的点落在这条臂弯道中心线同一弧长处的法线上，横距不变（各幅、匝道精确平行）
+            for (int i = 0; i < 3; i++)
+            {
+                float yaw = angles[i] * Directions.DegToRad;
+                Vec3 dir = Directions.FromAngle(angles[i]), right = Directions.RightOf(dir);
+                foreach (float a in new[] { 260f, 400f, 700f })
+                {
+                    Vec3 center = lines[i].Point(a).RotateY(yaw);
+                    Vec3 tangent = Vec3.Normalize(lines[i].Point(a + 0.5f).RotateY(yaw) - lines[i].Point(a - 0.5f).RotateY(yaw));
+                    foreach (float lateral in new[] { -30f, -14f, 0f, 14f, 30f })
+                    {
+                        Vec3 off = warp.Apply(dir * a + right * lateral) - center;
+                        Assert.InRange(Directions.Dot(off, tangent), -0.05f, 0.05f);
+                        Assert.InRange(Directions.Dot(off, Directions.RightOf(tangent)), lateral - 0.05f, lateral + 0.05f);
+                    }
+                }
+            }
+            // 立交用到的范围（离中心 350 米内、各臂走廊里 600 米内）处处连续、不折叠：相距 1 米的两点弯曲后相距 0.25–2 米
+            // （两条臂都朝同一个扇区弯时那里确实被挤窄：这里臂 1、臂 2 离中心 350 米处夹角从 110° 缩到约 40°，压缩到一半以下是对的）
+            bool InUse(Vec3 v) => v.X * v.X + v.Z * v.Z <= 350f * 350f || angles.Any(angle =>
+            {
+                Vec3 dir = Directions.FromAngle(angle);
+                float along = Directions.Dot(v, dir);
+                return along >= 0f && along <= 600f && System.Math.Abs(Directions.Dot(v, Directions.RightOf(dir))) <= 60f;
+            });
+            for (float x = -600f; x <= 600f; x += 10f)
+                for (float z = -600f; z <= 600f; z += 10f)
+                {
+                    var v = new Vec3(x, 0f, z);
+                    if (!InUse(v))
+                        continue;
+                    foreach (var step in new[] { new Vec3(1f, 0f, 0f), new Vec3(0f, 0f, 1f) })
+                    {
+                        float moved = Flat(warp.Apply(v), warp.Apply(v + step));
+                        Assert.True(moved > 0.25f && moved < 2f, $"({x}, {z}) + {step}: {moved:F2}");
+                    }
+                }
+        }
+
+        [Fact]
         public void PlacedOnCurvedRoad_CenterAndHeadingFollowTheRoad()
         {
             // 只对准一条弯道（双向）：鼠标在离节点 200 米处的弯道旁边，中心落在道路上、主线方向取那里的切线

@@ -18,6 +18,14 @@ namespace InterchangeMod.Generation
     /// A(s) 是这条路中心线上离中心弧长 s 处的点，φ(s) 是那里切线相对中心处转过的角度（Centerline，不必是圆弧）；
     /// 每条路中心前后两侧各一条中心线（例如一侧直、一侧弯），两侧在中心处都与原方向相切。
     /// 高度（Y）不变。同一个局部点总是得到同一个结果，共用的节点照样精确相等。
+    ///
+    /// 三条臂（Y 型分向：三条臂互不相对，没有主线 / 被交道路之分）另用一种：每条臂只有从中心离开的一条中心线，
+    ///   点落在相邻两条臂 i、j（顺时针）之间的扇区里，按这两条臂的斜坐标 p = a·ê_i + b·ê_j（a、b ≥ 0）照两条路的公式弯：
+    ///   W_i = A_i(a) + Rot(φ_i(a))·A_j(b)，W_j = A_j(b) + Rot(φ_j(b))·A_i(a)，混合 W = (1 − t)·W_i + t·W_j，
+    ///   t = smoothstep(0.1, 0.9, 0.5 + 0.5·(d_i − d_j) / (d_i + d_j + kSoftness))（d 是到两条臂的距离扣掉走廊；中心区两者平均）。
+    ///   臂上 W_i、W_j 都等于 A_i(a)，所以跨过臂进入另一个扇区时连续。斜坐标的横向分量沿相邻那条臂取，它也弯时臂的走廊里横距会差
+    ///   几十厘米，所以离中心 kExactFrom–kExactTo 米起走廊里逐渐改按这条臂的正交坐标弯：A_i(α) + Rot(φ_i(α))·(λ·R_i)
+    ///   （α、λ 是沿臂和向右的分量；臂上两者相同，仍连续），臂端、分岔处的各幅和匝道精确平行。
     /// </summary>
     public sealed class CurveWarp
     {
@@ -27,11 +35,15 @@ namespace InterchangeMod.Generation
         private const float kCorridor = 60f;
         /// <summary>离开走廊后两种弯法过渡的快慢（米）：被交道路走廊里离开主线走廊 9 倍这么远后完全按被交道路弯；再小时象限里的苜蓿叶环道被压得太陡，再大时立交两端对不准原有道路。</summary>
         private const float kSoftness = 20f;
+        /// <summary>三条臂时：离中心这段距离（米）里，臂的走廊逐渐改按这条臂的正交坐标弯（之外精确平行）。</summary>
+        private const float kExactFrom = 120f, kExactTo = 200f;
 
         private readonly Vec3 m_Main, m_Cross;
         private readonly Centerline m_MainAhead, m_MainBehind, m_CrossAhead, m_CrossBehind;
         private readonly float m_MainYaw, m_CrossYaw;
         private readonly float m_Det;
+        /// <summary>三条臂时：每条臂的方向、方向角（弧度）和中心线；两条路时为 null。</summary>
+        private readonly (Vec3 Direction, float Yaw, Centerline Line)[]? m_Legs;
 
         /// <summary>两条路各是一段圆弧：曲率 κ（沿 ê 前进向右弯为正，0 = 直线），中心前后是同一个圆。</summary>
         public CurveWarp(float crossingAngle, float mainCurvature, float crossCurvature)
@@ -56,6 +68,24 @@ namespace InterchangeMod.Generation
             IsIdentity = mainAhead.IsStraight && mainBehind.IsStraight && crossAhead.IsStraight && crossBehind.IsStraight;
         }
 
+        /// <summary>
+        /// 三条臂（相邻夹角都小于 180°）各沿自己的中心线弯：臂 i 沿 FromAngle(legAngles[i])，中心线按“离开中心”的方向记。
+        /// </summary>
+        public CurveWarp(IReadOnlyList<float> legAngles, IReadOnlyList<Centerline> legLines)
+            : this(0f, Centerline.Straight, Centerline.Straight, Centerline.Straight, Centerline.Straight)
+        {
+            // 按方向角从小到大（顺时针）排好，相邻两条之间是一个扇区
+            m_Legs = legAngles.Select((angle, i) => (Directions.FromAngle(angle), Wrap(angle * Directions.DegToRad), legLines[i]))
+                .OrderBy(l => l.Item2).ToArray();
+            IsIdentity = legLines.All(l => l.IsStraight);
+        }
+
+        private static float Wrap(float radians)
+        {
+            float full = 2f * MathF.PI;
+            return ((radians % full) + full) % full;
+        }
+
         private static Centerline ArcFrom(float curvature) => curvature == 0f ? Centerline.Straight : Centerline.Arc(curvature);
 
         /// <summary>两条路都是直线：不用弯。</summary>
@@ -66,6 +96,8 @@ namespace InterchangeMod.Generation
         {
             if (IsIdentity)
                 return p;
+            if (m_Legs != null)
+                return ApplyLegs(p);
             // 斜坐标：p = a·ê_m + b·ê_c
             float a = Cross2(p, m_Cross) / m_Det, b = Cross2(m_Main, p) / m_Det;
             var (arcMain, turnMain) = Along(m_MainAhead, m_MainBehind, m_MainYaw, a);
@@ -77,6 +109,48 @@ namespace InterchangeMod.Generation
             float dm = Math.Max(0f, Math.Abs(b) * sin - kCorridor), dc = Math.Max(0f, Math.Abs(a) * sin - kCorridor);
             float t = SmoothStep(0.1f, 0.9f, dm / (dm + dc + kSoftness));
             Vec3 flat = alongMain * (1f - t) + alongCross * t;
+            return new Vec3(flat.X, p.Y, flat.Z);
+        }
+
+        /// <summary>三条臂时的弯曲（见类说明）。</summary>
+        private Vec3 ApplyLegs(Vec3 p)
+        {
+            var legs = m_Legs!;
+            // 所在扇区：p 的方向角（从 +Z 顺时针）落在臂 i 和下一条臂 j 之间
+            float heading = Wrap(MathF.Atan2(p.X, p.Z));
+            int i = 0;
+            for (int k = 0; k < legs.Length; k++)
+            {
+                float from = legs[k].Yaw, to = legs[(k + 1) % legs.Length].Yaw;
+                if (Wrap(heading - from) <= Wrap(to - from))
+                {
+                    i = k;
+                    break;
+                }
+            }
+            var (ei, yawI, lineI) = legs[i];
+            var (ej, yawJ, lineJ) = legs[(i + 1) % legs.Length];
+            float det = Cross2(ei, ej);
+            float a = Math.Max(0f, Cross2(p, ej) / det), b = Math.Max(0f, Cross2(ei, p) / det);
+            Vec3 arcI = lineI.Point(a).RotateY(yawI), arcJ = lineJ.Point(b).RotateY(yawJ);
+            Vec3 alongI = arcI + arcJ.RotateY(lineI.Angle(a));
+            Vec3 alongJ = arcJ + arcI.RotateY(lineJ.Angle(b));
+            float sin = Math.Abs(det);
+            float di = Math.Max(0f, b * sin - kCorridor), dj = Math.Max(0f, a * sin - kCorridor);
+            float t = SmoothStep(0.1f, 0.9f, 0.5f + 0.5f * (di - dj) / (di + dj + kSoftness));
+            Vec3 flat = alongI * (1f - t) + alongJ * t;
+            // 臂的走廊里（离中心够远时）按这条臂的正交坐标弯：各幅、匝道精确平行
+            foreach (var (direction, yaw, line) in legs)
+            {
+                Vec3 right = Directions.RightOf(direction);
+                float along = p.X * direction.X + p.Z * direction.Z, lateral = p.X * right.X + p.Z * right.Z;
+                float exact = SmoothStep(kExactFrom, kExactTo, along) * (1f - SmoothStep(kCorridor, kCorridor + kSoftness, Math.Abs(lateral)));
+                if (exact > 0f)
+                {
+                    Vec3 parallel = line.Point(along).RotateY(yaw) + (right * lateral).RotateY(line.Angle(along));
+                    flat = flat + (parallel - flat) * exact;
+                }
+            }
             return new Vec3(flat.X, p.Y, flat.Z);
         }
 

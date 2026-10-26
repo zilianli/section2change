@@ -158,16 +158,21 @@ namespace InterchangeMod.Generation.Tests
         }
 
         [Fact]
-        public void TJunction_WithoutStraightRoad_IsRejected()
+        public void ThreeLegsWithoutStraightRoad_IsAWye()
         {
-            // 三条臂互成 120°：没有直行的道路
+            // 三条臂互成 120°：没有直行的道路，认作 Y 型三岔路口（只有 Y 型分向能对准），给出三条臂的角度和道路
             var edges = Edges(
                 OneSide(TwoWayRoad(Vec3.Zero, 0f, "A", 2), 0f),
                 OneSide(TwoWayRoad(Vec3.Zero, 120f, "B", 2), 120f),
                 OneSide(TwoWayRoad(Vec3.Zero, 240f, "C", 2), 240f));
-            var m = JunctionMatcher.Match(edges, 0f);
+            var m = JunctionMatcher.Match(edges, 130f);
             Assert.Equal(3, m.LegCount);
-            Assert.Contains("直行", m.Error);
+            Assert.Null(m.Error);
+            Assert.True(m.Wye);
+            Assert.Equal(120f, m.MainAngle, 1);
+            Assert.Equal(new[] { 0f, 120f, 240f }, m.TripleLegs!.Select(l => (float)System.Math.Round(l.Angle)).ToArray());
+            Assert.Equal(new[] { "A", "B", "C" }, m.TripleLegs!.Select(l => l.Road.Prefab).ToArray());
+            Assert.True(Vec3.Distance(m.Center, Vec3.Zero) < 0.5f, $"center {m.Center}");
         }
 
         [Fact]

@@ -69,6 +69,15 @@ namespace InterchangeMod.Generation.Junctions
 
         /// <summary>十字路口当 T 型用时，主线已按面板换成了匹配结果的另一条路（同层路口用，见工具的主线选择）。</summary>
         public bool TeeSwapped { get; set; }
+
+        /// <summary>
+        /// 三向路口的三条臂：世界角度（度，从小到大）、道路和从立交中心沿这条臂往外的中心线（弯道适配，没有追踪时为 null）。
+        /// Y 型分向按它们放置；T 型用 Main / Cross。
+        /// </summary>
+        public IReadOnlyList<(float Angle, MatchedRoad Road, IReadOnlyList<Vec3>? Trace)>? TripleLegs { get; set; }
+
+        /// <summary>三向路口里没有一条直行的道路（三条臂大致均分，Y 型）：只有 Y 型分向能对准，T 型立交不能用。</summary>
+        public bool Wye { get; set; }
         /// <summary>无法匹配时的原因。</summary>
         public string? Error { get; set; }
 
@@ -265,7 +274,19 @@ namespace InterchangeMod.Generation.Junctions
             var (mainA, mainB, branch) = pairs[0];
             float straightness = Directions.AngleBetween(mainA.Angle, mainB.Angle);
             if (straightness < 180f - kOppositeTolerance)
-                return Fail(result, $"T 型路口里没有一条直行的道路（最直的两条臂夹角 {straightness:F0}°），无法匹配");
+            {
+                // Y 型三岔路口：主线取离当前朝向近的臂，被交道路取顺时针下一条（只用于显示）；中心取三条臂中心点的平均
+                result.Wye = true;
+                var first = legs.OrderBy(l => Directions.AngleBetween(preferredAngle, l.Angle)).First();
+                var next = legs.Where(l => l != first).OrderBy(l => Normalize(l.Angle - first.Angle)).First();
+                result.MainAngle = first.Angle;
+                result.CrossingAngle = Normalize(next.Angle - first.Angle);
+                result.Main = first.Road;
+                result.Cross = next.Road;
+                result.Center = legs.Aggregate(Vec3.Zero, (acc, l) => acc + l.CenterPoint) * (1f / legs.Count);
+                result.TripleLegs = TripleLegs(legs, result.Center);
+                return result;
+            }
 
             Leg mainLeg = Directions.AngleBetween(preferredAngle, mainA.Angle) <= Directions.AngleBetween(preferredAngle, mainB.Angle) ? mainA : mainB;
             result.MainAngle = mainLeg.Angle;
@@ -276,8 +297,12 @@ namespace InterchangeMod.Generation.Junctions
             result.MainAheadTrace = FromCenter(mainLeg, result.Center);
             result.MainBehindTrace = FromCenter(mainLeg == mainA ? mainB : mainA, result.Center);
             result.CrossAheadTrace = FromCenter(branch, result.Center);
+            result.TripleLegs = TripleLegs(legs, result.Center);
             return result;
         }
+
+        private static List<(float Angle, MatchedRoad Road, IReadOnlyList<Vec3>? Trace)> TripleLegs(List<Leg> legs, Vec3 center) =>
+            legs.OrderBy(l => Normalize(l.Angle)).Select(l => (Normalize(l.Angle), l.Road, (IReadOnlyList<Vec3>?)FromCenter(l, center))).ToList();
 
         private static JunctionMatch Fail(JunctionMatch result, string error)
         {

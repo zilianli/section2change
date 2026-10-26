@@ -5,7 +5,7 @@ const GROUP = "interchangeMod";
 
 export type RoadForm = "Auto" | "TwoWay" | "Dual";
 
-export type InterchangeType = "Diamond" | "ExpresswayNode" | "ExpresswayT" | "SinglePoint" | "Trumpet" | "Cloverleaf" | "PartialCloverleaf" | "Roundabout" | "DirectionalT" | "SemiDirectionalT" | "Stack" | "Turbine";
+export type InterchangeType = "Diamond" | "ExpresswayNode" | "ExpresswayT" | "SinglePoint" | "Trumpet" | "Cloverleaf" | "PartialCloverleaf" | "Roundabout" | "DirectionalT" | "SemiDirectionalT" | "Stack" | "Turbine" | "Wye";
 
 export interface PanelSettings {
   /** 基层（下层）离地高度。 */
@@ -95,6 +95,8 @@ export interface MatchInfo {
   /** 弯道适配：主线 / 被交道路中心前后两侧的半径（米），0 = 直线。 */
   mainRadii: [number, number];
   crossRadii: [number, number];
+  /** Y 型分向：三条臂各自的半径（米，0 = 直线）；其他类型为空。 */
+  legRadii: number[];
   /** 弯道内侧坡度超限、收紧后实际求解用的最大坡度；0 = 没收紧。 */
   curveGrade: number;
 }

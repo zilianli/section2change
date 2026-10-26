@@ -142,7 +142,10 @@ namespace InterchangeMod.UI
                     .BeginArray("mainRadii").Item(snap.MainRadiusAhead).Item(snap.MainRadiusBehind).EndArray()
                     .BeginArray("crossRadii").Item(snap.CrossRadiusAhead).Item(snap.CrossRadiusBehind).EndArray()
                     .Field("curveGrade", snap.CurveGrade)
-                    .EndObject();
+                    .BeginArray("legRadii");
+                foreach (float radius in snap.LegRadii)
+                    json.Item(radius);
+                json.EndArray().EndObject();
                 json.BeginObject("resolved")
                     .Field("mainElevation", snap.MainElevation).Field("crossElevation", snap.CrossElevation)
                     .Field("mainBand", LevelPlanner.BandOf(snap.MainElevation).ToString())
