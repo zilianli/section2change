@@ -213,6 +213,23 @@
   margin-bottom: 3rem;
 }
 
+// 两步放置：确认放置 / 取消固定
+.confirmRow {
+  display: flex;
+  flex-direction: row;
+  margin-top: 6rem;
+}
+
+.confirmButton {
+  flex: 1;
+  margin-right: 6rem;
+  padding: 6rem 10rem;
+  font-weight: bold;
+  color: white;
+  background-color: rgba(60, 160, 90, 0.85);
+  border-radius: 4rem;
+}
+
 .hint {
   font-size: 12rem;
   color: rgba(255, 255, 255, 0.55);

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useValue } from "cs2/api";
 import { Button, Panel, Scrollable } from "cs2/ui";
-import { anarchyEnabled$, closeTool, ElevationBand, MatchInfo, PanelSettings, PanelState, parseJson, Resolved, RoadForm, roads$, RoadRow, setValue, state$, toggleAnarchy } from "./bindings";
+import { anarchyEnabled$, closeTool, confirmPlacement, ElevationBand, MatchInfo, PanelSettings, PanelState, parseJson, Resolved, RoadForm, roads$, RoadRow, setValue, state$, toggleAnarchy, unpinPreview } from "./bindings";
 import { errorName, getStrings, Strings } from "./i18n";
 import { RoadPicker } from "./RoadPicker";
 import { Choice, SpacingStepper, Stepper } from "./Stepper";
@@ -397,7 +397,17 @@ export const InterchangePanel = () => {
             );
           })}
         </Scrollable>
-        <div className={styles.hint}>{t.hint}</div>
+        {/* 两步放置：左键固定预览后，在这里确认放置或取消固定 */}
+        {state.pinned && (
+          <div className={styles.confirmRow}>
+            <Button variant="flat" className={styles.confirmButton} onSelect={confirmPlacement}
+              disabled={!r || r.errors.length > 0 || r.gameErrors.some((error) => error.blocking)}>
+              {t.confirmPlace}
+            </Button>
+            <Button variant="flat" className={styles.choice} onSelect={unpinPreview}>{t.unpin}</Button>
+          </div>
+        )}
+        <div className={styles.hint}>{state.pinned ? t.hintPinned : t.hint}</div>
       </Panel>
     </div>
   );

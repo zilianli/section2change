@@ -126,6 +126,8 @@ export interface PanelState {
   selectedRoad?: string;
   /** 装了 Anarchy 模组（无视碰撞）并已注册本工具。 */
   anarchy?: boolean;
+  /** 预览已固定（左键），等待在面板确认放置。 */
+  pinned?: boolean;
   settings?: PanelSettings;
   match?: MatchInfo;
   resolved?: Resolved;
@@ -159,6 +161,16 @@ export function setValue(key: keyof PanelSettings, value: string | number | bool
 
 export function closeTool() {
   trigger(GROUP, "close");
+}
+
+/** 放置固定的预览。 */
+export function confirmPlacement() {
+  trigger(GROUP, "confirm");
+}
+
+/** 取消固定：预览重新跟随鼠标。 */
+export function unpinPreview() {
+  trigger(GROUP, "unpin");
 }
 
 export function parseJson<T>(text: string, fallback: T): T {

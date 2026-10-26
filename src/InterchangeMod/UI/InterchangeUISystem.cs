@@ -38,6 +38,8 @@ namespace InterchangeMod.UI
             AddBinding(m_Roads = new ValueBinding<string>(kGroup, "roads", "[]"));
             AddBinding(new TriggerBinding<string, string>(kGroup, "set", OnSet));
             AddBinding(new TriggerBinding(kGroup, "close", OnClose));
+            AddBinding(new TriggerBinding(kGroup, "confirm", () => m_ToolSystem.RequestConfirm()));
+            AddBinding(new TriggerBinding(kGroup, "unpin", () => m_ToolSystem.Unpin()));
         }
 
         protected override void OnUpdate()
@@ -81,6 +83,7 @@ namespace InterchangeMod.UI
                 .Field("locale", GameManager.instance.localizationManager.activeLocaleId)
                 .Field("selectedRoad", m_ToolSystem.selectedRoadName)
                 .Field("anarchy", m_ToolSystem.anarchyAvailable)
+                .Field("pinned", m_ToolSystem.pinned)
                 .BeginObject("settings")
                 .Field(nameof(s.BaseElevation), s.BaseElevation)
                 .Field(nameof(s.LevelGap), s.LevelGap)

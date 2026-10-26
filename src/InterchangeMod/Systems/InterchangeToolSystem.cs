@@ -21,8 +21,8 @@ using Unity.Mathematics;
 namespace InterchangeMod.Systems
 {
     /// <summary>
-    /// 立交工具：整座立交跟随鼠标预览，, / . 旋转，左键放置，右键退出。
-    /// 参数暂时来自选项菜单（阶段 3 换成工具面板）。
+    /// 立交工具：整座立交跟随鼠标预览，, / . 旋转，右键退出。两步放置：左键只把预览固定在原处（固定后改设置、旋转都在原处重建，
+    /// 左键点别处换位置，右键取消固定），在面板点“确认放置”才真正放置——求解慢时不会因为鼠标一动就重算。
     ///
     /// 每帧流程（与原版 NetToolSystem 相同）：
     ///   预览变化：applyMode = Clear（清掉旧临时道路）→ 销毁旧定义实体 → 重新创建
@@ -93,6 +93,12 @@ namespace InterchangeMod.Systems
         private ProxyAction m_RotateRightAction;
         private float m_Yaw;
         private bool m_HasPreview;
+        /// <summary>预览已固定（左键）：不再跟随鼠标，等面板确认放置。</summary>
+        private bool m_Pinned;
+        /// <summary>固定时对准了已有路口：朝向跟随匹配结果，旋转键不起作用。</summary>
+        private bool m_PinnedOnMatch;
+        /// <summary>面板点了“确认放置”，下一次更新时放置。</summary>
+        private bool m_ConfirmRequested;
         private PreviewKey m_LastKey;
         private string m_LastReportedErrors;
         private string m_LastDebugConfig;
@@ -148,6 +154,19 @@ namespace InterchangeMod.Systems
 
         /// <summary>面板改了参数：下一帧重建预览。</summary>
         public void NotifySettingsChanged() => m_SettingsVersion++;
+
+        /// <summary>预览已固定，等待确认放置。</summary>
+        public bool pinned => m_Pinned;
+
+        /// <summary>面板“确认放置”：下一次更新时放置固定的预览（游戏报错阻止放置时不放）。</summary>
+        public void RequestConfirm() => m_ConfirmRequested = true;
+
+        /// <summary>面板“取消固定”：预览重新跟随鼠标。</summary>
+        public void Unpin()
+        {
+            m_Pinned = false;
+            m_ConfirmRequested = false;
+        }
 
         protected override void OnCreate()
         {
@@ -271,6 +290,8 @@ namespace InterchangeMod.Systems
         {
             base.OnStartRunning();
             m_HasPreview = false;
+            m_Pinned = false;
+            m_ConfirmRequested = false;
             m_LastReportedErrors = null;
             m_RotateLeftAction = setting.GetAction(Mod.kRotateLeftActionName);
             m_RotateRightAction = setting.GetAction(Mod.kRotateRightActionName);
@@ -303,11 +324,17 @@ namespace InterchangeMod.Systems
                 return inputDeps;
             EnsureRoadCatalog();
 
+            // 右键：固定时取消固定（预览重新跟随鼠标），否则退出工具
             if (cancelAction.WasPressedThisFrame())
             {
-                m_ToolSystem.activeTool = m_DefaultToolSystem;
-                m_HasPreview = false;
-                return Clear(inputDeps);
+                if (m_Pinned)
+                    Unpin();
+                else
+                {
+                    m_ToolSystem.activeTool = m_DefaultToolSystem;
+                    m_HasPreview = false;
+                    return Clear(inputDeps);
+                }
             }
 
             if (m_RotateLeftAction.WasPressedThisFrame())
@@ -315,15 +342,28 @@ namespace InterchangeMod.Systems
             if (m_RotateRightAction.WasPressedThisFrame())
                 m_Yaw += kRotationStep;
 
-            // 鼠标在面板等界面上：不放置、不跟随鼠标，预览留在原处；但面板改了参数要在原处重建预览
+            // 面板点了“确认放置”：放置固定的预览
+            if (m_ConfirmRequested)
+            {
+                m_ConfirmRequested = false;
+                if (m_Pinned && m_HasPreview && TryApply(inputDeps) is JobHandle applied)
+                {
+                    m_Pinned = false;
+                    return applied;
+                }
+            }
+
+            // 鼠标在面板等界面上、或预览已固定（左键点别处才换位置）：不跟随鼠标，预览留在原处；
+            // 面板改了参数、旋转了要在原处重建预览
             float3 origin;
             float yaw;
-            if (InputManager.instance.mouseOverUI)
+            bool repin = m_Pinned && !InputManager.instance.mouseOverUI && applyAction.WasPressedThisFrame();
+            if (InputManager.instance.mouseOverUI || (m_Pinned && !repin))
             {
                 if (!m_HasOrigin)
                     return inputDeps;
                 origin = m_LastOrigin;
-                yaw = m_LastYaw;
+                yaw = m_Pinned && !m_PinnedOnMatch ? m_Yaw : m_LastYaw;
             }
             else
             {
@@ -343,20 +383,11 @@ namespace InterchangeMod.Systems
                     yaw = m_Match.MainAngle * Directions.DegToRad;
                 }
 
-                if (applyAction.WasPressedThisFrame() && m_HasPreview)
+                // 左键：把预览固定在这里（已固定时换到这里）
+                if (applyAction.WasPressedThisFrame())
                 {
-                    if (GetAllowApply())
-                    {
-                        applyMode = ApplyMode.Apply;
-                        m_HasPreview = false;
-                        m_RandomSeed = m_Random.NextInt();
-                        return DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
-                    }
-                    RefreshGameErrors();
-                    string details = snapshot == null ? "" : string.Join("; ", snapshot.GameErrors);
-                    Mod.log.Info($"Placement blocked by the game: {details}");
-                    if (setting.DebugLogging && snapshot != null)
-                        LogErrorLocations(snapshot.GameErrors);
+                    m_Pinned = true;
+                    m_PinnedOnMatch = m_Match != null && m_Match.Error == null;
                 }
             }
 
@@ -375,6 +406,24 @@ namespace InterchangeMod.Systems
             m_LastYaw = yaw;
             m_HasOrigin = true;
             return UpdatePreview(inputDeps, origin, yaw);
+        }
+
+        /// <summary>放置当前预览；游戏报错阻止放置时记下原因并返回 null。</summary>
+        private JobHandle? TryApply(JobHandle inputDeps)
+        {
+            if (GetAllowApply())
+            {
+                applyMode = ApplyMode.Apply;
+                m_HasPreview = false;
+                m_RandomSeed = m_Random.NextInt();
+                return DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
+            }
+            RefreshGameErrors();
+            string details = snapshot == null ? "" : string.Join("; ", snapshot.GameErrors);
+            Mod.log.Info($"Placement blocked by the game: {details}");
+            if (setting.DebugLogging && snapshot != null)
+                LogErrorLocations(snapshot.GameErrors);
+            return null;
         }
 
         /// <summary>
