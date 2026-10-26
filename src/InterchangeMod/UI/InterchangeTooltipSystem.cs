@@ -28,6 +28,12 @@ namespace InterchangeMod.UI
                 return;
             string locale = GameManager.instance.localizationManager.activeLocaleId ?? "";
             bool zh = locale.StartsWith("zh");
+            if (m_ToolSystem.browsing)
+            {
+                m_Tooltip.value = LocalizedString.Value(zh ? "在面板选择立交类型 · 右键退出" : "Choose an interchange type in the panel · Right click to exit");
+                AddMouseTooltip(m_Tooltip);
+                return;
+            }
             if (!m_ToolSystem.paused)
             {
                 m_Tooltip.value = LocalizedString.Value(zh ? "请先暂停游戏（人口多时求解可能卡死）· 右键退出" : "Pause the game first (solving can freeze large cities) · Right click to exit");

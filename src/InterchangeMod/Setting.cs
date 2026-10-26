@@ -41,6 +41,9 @@ namespace InterchangeMod
 
         // —— 立交参数（工具面板修改）——
 
+        /// <summary>面板设置页的模式：false = 自动（只显示提示、结果和报错，参数全部用默认值，对准路口照常）；true = 手动（显示全部设置）。</summary>
+        [SettingsUIHidden] public bool ManualMode { get; set; }
+
         /// <summary>立交类型：Diamond 菱形 / ExpresswayNode 中式快速路节点 / ExpresswayT 快速路 T 型 / SinglePoint 单点立交 / Trumpet 喇叭形。</summary>
         [SettingsUIHidden] public string InterchangeType { get; set; }
 
@@ -177,6 +180,7 @@ namespace InterchangeMod
         public override void SetDefaults()
         {
             InterchangeType = "Diamond";
+            ManualMode = false;
             FrontageRoadPrefab = "";
             LaneBalance = true;
             RampGap = 1f;
@@ -233,6 +237,7 @@ namespace InterchangeMod
                     CloverleafCollectorMode = value == "auto" || value == "main" || value == "both" ? value : "none";
                     return true;
                 case nameof(MatchJunctions): MatchJunctions = value == "true"; return true;
+                case nameof(ManualMode): ManualMode = value == "true"; return true;
                 case nameof(CurveFollow): CurveFollow = value == "true"; return true;
                 case nameof(CrossingAngle): CrossingAngle = Clamp(number, 45f, 135f); return true;
                 case nameof(RampLength): RampLength = Clamp(number, 60f, 500f); return true;

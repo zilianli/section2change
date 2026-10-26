@@ -54,7 +54,20 @@ export interface PanelSettings {
   CloverleafCollectorMode: "none" | "auto" | "main" | "both";
   MaxGradePercent: number;
   TrumpetNearRampRadius: number;
+  /** 设置页模式：false = 自动（只显示提示、结果和报错，参数全部用默认值），true = 手动（显示全部设置）。 */
+  ManualMode: boolean;
 }
+
+/** 自动模式下求解用的设置：与 C# Setting.SetDefaults 一致，只照搬立交类型（自动模式的结果行按它显示）。 */
+export const autoSettings = (s: PanelSettings): PanelSettings => ({
+  ...s,
+  BaseElevation: 0, LevelGap: 0, MainOnTop: false, CrossingAngle: 90, RampLength: 250, MainRoadForm: "Auto", CrossRoadForm: "TwoWay",
+  MainRoadPrefab: "", CrossRoadPrefab: "", MedianWidth: 4, RampDivergeAngle: 15, RampLanes: 0, RampPrefab: "", MatchJunctions: true,
+  CurveFollow: true, FrontageRoadPrefab: "", LaneBalance: true, RampGap: 1, BaseFollowsMatch: true, BranchOnLeft: false,
+  TrumpetLoopForExit: true, LoopRadius: 0, CloverleafCrossOnTop: false, CloverleafHugLoop: false, ParcloLoopsForExit: true,
+  RoundaboutRacetrack: false, StackLeftExit: false, DirectionalTwoLevel: false, TeeMainRoad: "auto", CloverleafCollectorMode: "none",
+  MaxGradePercent: 8, TrumpetNearRampRadius: 0,
+});
 
 /** 路口匹配结果。main/cross 为“预制体|形式|分隔带”。 */
 export interface MatchInfo {
@@ -137,6 +150,8 @@ export interface PanelState {
   pinned?: boolean;
   /** 游戏已暂停（速度为 0）。 */
   paused?: boolean;
+  /** 面板在首页（选立交类型）：工具不求解、不预览。打开工具时总是先到首页。 */
+  browsing?: boolean;
   /** 空地放置时的朝向（度）；headingFree 为 true 时朝向由旋转键决定（没对准已有道路）。 */
   heading?: number;
   headingFree?: boolean;
@@ -188,6 +203,11 @@ export function unpinPreview() {
 /** 暂停游戏（游戏速度设为 0）。 */
 export function pauseGame() {
   trigger(GROUP, "pause");
+}
+
+/** 回到首页（true，不求解）或进入某种立交的设置页（false，开始求解、预览）。 */
+export function browseTypes(on: boolean) {
+  trigger(GROUP, "browse", on);
 }
 
 export function parseJson<T>(text: string, fallback: T): T {

@@ -45,6 +45,7 @@ namespace InterchangeMod.UI
             AddBinding(new TriggerBinding(kGroup, "confirm", () => m_ToolSystem.RequestConfirm()));
             AddBinding(new TriggerBinding(kGroup, "unpin", () => m_ToolSystem.Unpin()));
             AddBinding(new TriggerBinding(kGroup, "pause", () => m_SimulationSystem.selectedSpeed = 0f));
+            AddBinding(new TriggerBinding<bool>(kGroup, "browse", on => m_ToolSystem.Browse(on)));
         }
 
         protected override void OnUpdate()
@@ -89,6 +90,7 @@ namespace InterchangeMod.UI
                 .Field("selectedRoad", m_ToolSystem.selectedRoadName)
                 .Field("anarchy", m_ToolSystem.anarchyAvailable)
                 .Field("pinned", m_ToolSystem.pinned)
+                .Field("browsing", m_ToolSystem.browsing)
                 .Field("paused", m_SimulationSystem.selectedSpeed == 0f)
                 .Field("heading", m_ToolSystem.headingDegrees)
                 .Field("headingFree", m_ToolSystem.headingFree)
@@ -107,6 +109,7 @@ namespace InterchangeMod.UI
                 .Field(nameof(s.RampLanes), s.RampLanes)
                 .Field(nameof(s.RampPrefab), s.RampPrefab)
                 .Field(nameof(s.MatchJunctions), s.MatchJunctions)
+                .Field(nameof(s.ManualMode), s.ManualMode)
                 .Field(nameof(s.CurveFollow), s.CurveFollow)
                 .Field(nameof(s.InterchangeType), s.InterchangeType ?? "Diamond")
                 .Field(nameof(s.FrontageRoadPrefab), s.FrontageRoadPrefab ?? "")

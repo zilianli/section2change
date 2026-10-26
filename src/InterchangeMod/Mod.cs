@@ -40,6 +40,8 @@ namespace InterchangeMod
             updateSystem.UpdateAt<InterchangeToolSystem>(SystemUpdatePhase.ToolUpdate);
             m_ToolSystem = updateSystem.World.GetOrCreateSystemManaged<InterchangeToolSystem>();
             m_ToolSystem.setting = m_Setting;
+            // 面板“自动”模式求解用的默认值设置（不注册、不保存）
+            m_ToolSystem.autoSetting = new Setting(this);
             updateSystem.UpdateAt<InterchangeUISystem>(SystemUpdatePhase.UIUpdate);
             updateSystem.World.GetOrCreateSystemManaged<InterchangeUISystem>().setting = m_Setting;
             updateSystem.UpdateAt<InterchangeTooltipSystem>(SystemUpdatePhase.UITooltip);

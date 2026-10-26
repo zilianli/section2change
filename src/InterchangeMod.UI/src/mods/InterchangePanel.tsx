@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useValue } from "cs2/api";
 import { Button, Panel, Scrollable } from "cs2/ui";
-import { anarchyEnabled$, closeTool, confirmPlacement, ElevationBand, pauseGame, MatchInfo, PanelSettings, PanelState, parseJson, Resolved, RoadForm, roads$, RoadRow, setValue, state$, toggleAnarchy, unpinPreview } from "./bindings";
+import { anarchyEnabled$, autoSettings, browseTypes, closeTool, confirmPlacement, ElevationBand, pauseGame, MatchInfo, PanelSettings, PanelState, parseJson, Resolved, RoadForm, roads$, RoadRow, setValue, state$, toggleAnarchy, unpinPreview } from "./bindings";
 import { errorName, getStrings, Strings } from "./i18n";
 import { RoadPicker } from "./RoadPicker";
 import { Choice, SpacingStepper, Stepper } from "./Stepper";
+import { thumbnails } from "./thumbs";
+import closeIcon from "./icons/interchange-close.svg";
 import styles from "./panel.module.scss";
 
 type PickerSlot = "main" | "cross" | "ramp" | "frontage" | null;
@@ -12,22 +14,109 @@ type PickerSlot = "main" | "cross" | "ramp" | "frontage" | null;
 // 注意：游戏 UI 把相邻的多个文字片段（JSX 里 {a}{b}）分成多行显示，
 // 所以凡是一行文字都先拼成一个字符串再放进元素。
 
-/** 立交工具面板：工具激活时显示在屏幕左侧，内容超出时可滚动。 */
+/** 首页的类型：四向、三向两组（顺序同原来的类型按钮）。 */
+const fourWayTypes = ["Diamond", "ExpresswayNode", "SinglePoint", "Cloverleaf", "PartialCloverleaf", "Roundabout", "Stack", "Turbine"];
+const threeWayTypes = ["ExpresswayT", "Trumpet", "SemiDirectionalT", "DirectionalT"];
+
+const typeNameOf = (t: Strings, type: string) =>
+  ({
+    Diamond: t.typeDiamond, ExpresswayNode: t.typeExpressway, SinglePoint: t.typeSinglePoint, Cloverleaf: t.typeCloverleaf,
+    PartialCloverleaf: t.typeParclo, Roundabout: t.typeRoundabout, Stack: t.typeStack, Turbine: t.typeTurbine,
+    ExpresswayT: t.typeExpresswayT, Trumpet: t.typeTrumpet, SemiDirectionalT: t.typeSemiDirectionalT, DirectionalT: t.typeDirectionalT,
+  } as Record<string, string>)[type] ?? t.typeDiamond;
+
+const introOf = (t: Strings, type: string) =>
+  ({
+    Diamond: t.introDiamond, ExpresswayNode: t.introExpresswayNode, SinglePoint: t.introSinglePoint, Cloverleaf: t.introCloverleaf,
+    PartialCloverleaf: t.introPartialCloverleaf, Roundabout: t.introRoundabout, Stack: t.introStack, Turbine: t.introTurbine,
+    ExpresswayT: t.introExpresswayT, Trumpet: t.introTrumpet, SemiDirectionalT: t.introSemiDirectionalT, DirectionalT: t.introDirectionalT,
+  } as Record<string, string>)[type] ?? "";
+
+/** 注意事项（设置页里默认收起）：每种立交的结构、要求和交角范围。 */
+const notesOf = (t: Strings, type: string) =>
+  ({
+    Diamond: t.diamondNote, ExpresswayNode: t.expresswayNote, SinglePoint: t.singlePointNote, Cloverleaf: t.cloverleafNote,
+    PartialCloverleaf: t.parcloNote, Roundabout: t.roundaboutNote, Stack: t.stackNote, Turbine: t.turbineNote,
+    ExpresswayT: t.expresswayTNote, Trumpet: t.trumpetNote, SemiDirectionalT: t.semiDirectionalTNote, DirectionalT: t.directionalTNote,
+  } as Record<string, string>)[type] ?? "";
+
+/**
+ * 立交工具面板：工具激活时显示在屏幕左侧。
+ * 首页按四向、三向排出各类立交的缩略图，点选后进入这种立交的设置页（这时工具才开始求解、预览）；
+ * 设置页上方是缩略图、简介和默认收起的注意事项，下面是设置和高级设置；错误、确认放置和操作提示固定在底部。
+ */
 export const InterchangePanel = () => {
   const state = parseJson<PanelState>(useValue(state$), { active: false });
   const roads = parseJson<RoadRow[]>(useValue(roads$), []);
   const [picker, setPicker] = useState<PickerSlot>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
   const anarchyOn = useValue(anarchyEnabled$);
 
   if (!state.active || !state.settings) return null;
-  const s = state.settings;
+  const settings = state.settings;
+  const t = getStrings(state.locale);
+
+  // 自己画的顶栏（游戏 Panel 自带的标题栏居中、不好放别的按钮）：设置页左边是返回，标题靠左，
+  // 右边是无视碰撞开关（装了 Anarchy 时，开启时标红）和关闭
+  const titleBar = (title: string, back: boolean) => (
+    <div className={styles.titleBar}>
+      {back && <Button variant="flat" className={styles.backButton} onSelect={() => browseTypes(true)}>{"<"}</Button>}
+      <div className={styles.titleText}>{title}</div>
+      {state.anarchy && (
+        <Button variant="flat" selected={anarchyOn} className={anarchyOn ? styles.anarchyOn : styles.anarchyOff} onSelect={toggleAnarchy}>
+          <img className={styles.anarchyIcon} src="coui://uil/Colored/Anarchy.svg" />
+        </Button>
+      )}
+      <Button variant="flat" className={styles.closeButton} onSelect={closeTool}>
+        <img className={styles.closeIcon} src={closeIcon} />
+      </Button>
+    </div>
+  );
+
+  // 首页：只选类型，工具不求解
+  if (state.browsing) {
+    const open = (type: string) => {
+      if (type !== settings.InterchangeType) setValue("InterchangeType", type);
+      setShowNotes(false);
+      setPicker(null);
+      browseTypes(false);
+    };
+    const grid = (types: string[]) => (
+      <div className={styles.typeGrid}>
+        {types.map((type) => (
+          <div key={type} className={type === settings.InterchangeType ? styles.typeCardSelected : styles.typeCard} onClick={() => open(type)}>
+            <img className={styles.typeThumb} src={thumbnails[type]} />
+            <div className={styles.typeName}>{typeNameOf(t, type)}</div>
+          </div>
+        ))}
+      </div>
+    );
+    return (
+      <div className={styles.container}>
+        <Panel className={styles.panel}>
+          {titleBar(t.title, false)}
+          <Scrollable className={styles.homeContent} vertical trackVisibility="scrollable">
+            <div className={styles.homeHint}>{t.chooseType}</div>
+            <div className={styles.groupTitle}>{t.fourWay}</div>
+            {grid(fourWayTypes)}
+            <div className={styles.groupTitle}>{t.threeWay}</div>
+            {grid(threeWayTypes)}
+          </Scrollable>
+          {state.anarchy && anarchyOn && <div className={styles.errors}>{t.anarchyWarning}</div>}
+        </Panel>
+      </div>
+    );
+  }
+
+  // 设置页模式：自动时参数全部用默认值（C# 同样处理），只显示提示、结果和报错；手动时显示全部设置
+  const manual = settings.ManualMode === true;
+  const s = manual ? settings : autoSettings(settings);
   const r = state.resolved;
   const match = state.match;
   const matched = match?.state === "matched";
   // 只对齐了一条普通道路：主线跟随它，被交道路仍按面板
   const roadAligned = match?.state === "road";
-  const t = getStrings(state.locale);
   // 快速路 T 型和十字型一样有地面辅路
   const expresswayT = s.InterchangeType === "ExpresswayT";
   const expressway = s.InterchangeType === "ExpresswayNode" || expresswayT;
@@ -62,9 +151,11 @@ export const InterchangePanel = () => {
   const steepSkew = Math.abs(crossing - 90) > skewLimit;
   // 中式快速路节点和单点立交的主线固定在上层
   const mainForcedTop = expressway || singlePoint;
-  const typeName = turbine ? t.typeTurbine : stack ? t.typeStack : directionalT ? t.typeDirectionalT : semiDirectionalT ? t.typeSemiDirectionalT : roundabout ? t.typeRoundabout : parclo ? t.typeParclo : cloverleaf ? t.typeCloverleaf : trumpet ? t.typeTrumpet : expresswayT ? t.typeExpresswayT : expressway ? t.typeExpressway : singlePoint ? t.typeSinglePoint : t.typeDiamond;
+  const typeName = typeNameOf(t, s.InterchangeType);
   // T 型的被交道路叫“支路”
   const crossTitle = tee ? t.branchRoad : t.crossRoad;
+  // 有自己选项的类型才显示“立交选项”
+  const hasOptions = tee || stack || roundabout || parclo || cloverleaf || loops;
 
   const formOptions: { value: RoadForm; text: string }[] = [
     { value: "Auto", text: t.formAuto },
@@ -84,11 +175,12 @@ export const InterchangePanel = () => {
       (straightRamps ? ` · ${Math.round(r.rampLength)} m` + (r.rampLength > s.RampLength ? `（${t.extended}）` : "") : "")
     : "";
 
-  // 游戏没暂停：整个面板挡住，只给暂停提示和按钮（人口多时求解容易卡死，工具这时也不预览）
+  // 游戏没暂停：设置页整个挡住，只给暂停提示和按钮（人口多时求解容易卡死，工具这时也不预览）
   if (state.paused === false)
     return (
       <div className={styles.container}>
-        <Panel header={`${t.title} · ${typeName}`} onClose={closeTool} className={styles.panel}>
+        <Panel className={styles.panel}>
+          {titleBar(`${t.title} · ${typeName}`, true)}
           <div className={styles.pauseBlock}>
             <div className={styles.pauseTitle}>{t.pauseTitle}</div>
             <div>{t.pauseHint}</div>
@@ -98,118 +190,145 @@ export const InterchangePanel = () => {
       </div>
     );
 
+  // 底部提示：固定时说明确认 / 取消；没固定时左键固定、右键退出，能旋转时加上朝向和旋转方式
+  const hint = state.pinned ? t.hintPinned
+    : t.hint + (state.headingFree && state.heading !== undefined ? ` · ${t.heading} ${Math.round(state.heading) % 360}° · ${t.rotateKeys}` : "");
+
   return (
     <div className={styles.container}>
-      <Panel header={`${t.title} · ${typeName}`} onClose={closeTool} className={styles.panel}>
+      <Panel className={styles.panel}>
+        {titleBar(`${t.title} · ${typeName}`, true)}
         <Scrollable className={styles.content} vertical trackVisibility="scrollable">
-          <Section title={t.interchangeType}>
-            <Choice label={t.fourWay} value={s.InterchangeType}
-              options={[{ value: "Diamond", text: t.typeDiamond }, { value: "ExpresswayNode", text: t.typeExpressway }, { value: "SinglePoint", text: t.typeSinglePoint }, { value: "Cloverleaf", text: t.typeCloverleaf }, { value: "PartialCloverleaf", text: t.typeParclo }, { value: "Roundabout", text: t.typeRoundabout }, { value: "Stack", text: t.typeStack }, { value: "Turbine", text: t.typeTurbine }]}
-              onChange={(v) => setValue("InterchangeType", v)} />
-            <Choice label={t.threeWay} value={s.InterchangeType}
-              options={[{ value: "ExpresswayT", text: t.typeExpresswayT }, { value: "Trumpet", text: t.typeTrumpet }, { value: "SemiDirectionalT", text: t.typeSemiDirectionalT }, { value: "DirectionalT", text: t.typeDirectionalT }]}
-              onChange={(v) => setValue("InterchangeType", v)} />
-            {expressway && !expresswayT && <div className={styles.note}>{t.expresswayNote}</div>}
-            {expresswayT && <div className={styles.note}>{t.expresswayTNote}</div>}
-            {/* T 型空地放置时选支路在哪一侧；对准已有 T 型路口时由路口决定，只对齐一条道路时放在鼠标所在一侧 */}
-            {tee && !matched && !roadAligned && (
-              <Choice label={t.branchSide} value={s.BranchOnLeft ? "left" : "right"}
-                options={[{ value: "left", text: t.left }, { value: "right", text: t.right }]}
-                onChange={(v) => setValue("BranchOnLeft", v === "left")} />
-            )}
-            {tee && roadAligned && <div className={styles.note}>{t.branchSideByCursor}</div>}
-            {singlePoint && <div className={styles.note}>{t.singlePointNote}</div>}
-            {trumpet && <div className={styles.note}>{t.trumpetNote}</div>}
-            {semiDirectionalT && <div className={styles.note}>{t.semiDirectionalTNote}</div>}
-            {directionalT && <div className={styles.note}>{t.directionalTNote}</div>}
-            {/* 定向 / 半定向 T 型：两条左转匝道交叉一次，三层（一条在第三层）或两层（一条下穿主线） */}
-            {flyoverT && (
-              <Choice label={t.flyoverLevels} value={s.DirectionalTwoLevel ? "two" : "three"}
-                options={[{ value: "three", text: t.threeLevels }, { value: "two", text: t.twoLevels }]}
-                onChange={(v) => setValue("DirectionalTwoLevel", v === "two")} />
-            )}
-            {cloverleaf && <div className={styles.note}>{t.cloverleafNote}</div>}
-            {parclo && <div className={styles.note}>{t.parcloNote}</div>}
-            {roundabout && <div className={styles.note}>{t.roundaboutNote}</div>}
-            {stack && <div className={styles.note}>{t.stackNote}</div>}
-            {turbine && <div className={styles.note}>{t.turbineNote}</div>}
-            {/* 定向式：左转匝道右出右进（默认）或左出左进 */}
-            {stack && (
-              <Choice label={t.leftTurnRamps} value={s.StackLeftExit ? "left" : "right"}
-                options={[{ value: "right", text: t.rightOutRightIn }, { value: "left", text: t.leftOutLeftIn }]}
-                onChange={(v) => setValue("StackLeftExit", v === "left")} />
-            )}
-            {stack && <div className={styles.note}>{s.StackLeftExit ? t.stackLeftExitNote : t.stackRightExitNote}</div>}
-            {/* 环岛式：圆形（默认）或沿主线拉长的跑道形 */}
-            {roundabout && (
-              <Choice label={t.ringShape} value={s.RoundaboutRacetrack ? "racetrack" : "circle"}
-                options={[{ value: "circle", text: t.ringCircle }, { value: "racetrack", text: t.ringRacetrack }]}
-                onChange={(v) => setValue("RoundaboutRacetrack", v === "racetrack")} />
-            )}
-            {/* 部分苜蓿叶：环道用于驶出主线（B2）还是驶入主线（A2） */}
-            {parclo && (
-              <Choice label={t.loopUse} value={s.ParcloLoopsForExit ? "exit" : "entry"}
-                options={[{ value: "exit", text: t.parcloLoopExit }, { value: "entry", text: t.parcloLoopEntry }]}
-                onChange={(v) => setValue("ParcloLoopsForExit", v === "exit")} />
-            )}
-            {/* 苜蓿叶右转匝道：外侧大弧线（默认），或贴环道外侧、相邻段与环道合成一条双向匝道（占地更小） */}
-            {cloverleaf && (
-              <Choice label={t.rightTurnRamp} value={s.CloverleafHugLoop ? "hug" : "outer"}
-                options={[{ value: "outer", text: t.rightTurnOuter }, { value: "hug", text: t.rightTurnHug }]}
-                onChange={(v) => setValue("CloverleafHugLoop", v === "hug")} />
-            )}
-            {cloverleaf && s.CloverleafHugLoop && <div className={styles.note}>{t.rightTurnHugNote}</div>}
-            {/* 苜蓿叶交织段：直接在主线上（默认），或移到主线外侧的集散车道上 */}
-            {cloverleaf && (
-              <Choice label={t.weaving} value={s.CloverleafCollectorMode ?? "none"}
-                options={[{ value: "none", text: t.weavingMain }, { value: "auto", text: t.weavingAuto },
-                  { value: "main", text: t.weavingMainOnly }, { value: "both", text: t.weavingBoth }]}
-                onChange={(v) => setValue("CloverleafCollectorMode", v)} />
-            )}
-            {cloverleaf && s.CloverleafCollectorMode && s.CloverleafCollectorMode !== "none" && (
-              <div className={styles.note}>{s.CloverleafCollectorMode === "auto" ? t.weavingAutoNote : t.weavingCollectorNote}</div>
-            )}
-            {/* 喇叭形：环道给驶出主线还是驶入主线的车流用，另一方向走半定向匝道 */}
-            {trumpet && (
-              <Choice label={t.loopUse} value={s.TrumpetLoopForExit ? "exit" : "entry"}
-                options={[{ value: "exit", text: t.loopExit }, { value: "entry", text: t.loopEntry }]}
-                onChange={(v) => setValue("TrumpetLoopForExit", v === "exit")} />
-            )}
-            {/* 环道半径：自动 = 能放下的最小半径（随交角、坡度上限变化）；手动可以调大 */}
-            {loops && (
-              <Choice label={roundabout ? t.ringRadius : t.loopRadius} value={s.LoopRadius > 0 ? "manual" : "auto"}
-                options={[{ value: "auto", text: t.gapAuto }, { value: "manual", text: t.gapManual }]}
-                onChange={(v) => setValue("LoopRadius", v === "auto" ? 0 : Math.max(roundabout ? 40 : 30, Math.round((r?.loopRadius ?? 40) / 5) * 5))} />
-            )}
-            {loops && s.LoopRadius > 0 && (
-              <Stepper label="" value={s.LoopRadius} step={5} min={roundabout ? 40 : 30} max={roundabout ? 300 : 250} unit=" m"
-                onChange={(v) => setValue("LoopRadius", v)} />
-            )}
-            {loops && s.LoopRadius <= 0 && r && r.loopRadius > 0 && (
-              <div className={styles.resolved}>{`${t.actual}：${Math.round(r.loopRadius)} m`}</div>
-            )}
-            {/* 近侧两条直连匝道的半径：自动 = 满足支路下桥坡长的最小值；手动不能小于它（面板会报错并给出下限） */}
-            {trumpet && (
-              <Choice label={t.nearRampRadius} value={s.TrumpetNearRampRadius > 0 ? "manual" : "auto"}
-                options={[{ value: "auto", text: t.gapAuto }, { value: "manual", text: t.gapManual }]}
-                onChange={(v) => setValue("TrumpetNearRampRadius", v === "auto" ? 0 : 200)} />
-            )}
-            {trumpet && s.TrumpetNearRampRadius > 0 && (
-              <Stepper label="" value={s.TrumpetNearRampRadius} step={10} min={30} max={1000} unit=" m"
-                onChange={(v) => setValue("TrumpetNearRampRadius", v)} />
-            )}
-            {/* 装了 Anarchy 才显示：开关就是 Anarchy 自己的开关，和它的工具栏按钮同步 */}
-            {state.anarchy && (
-              <div className={styles.row}>
-                <div className={styles.label}>{t.anarchy}</div>
-                <Button variant="flat" selected={anarchyOn} className={anarchyOn ? styles.anarchyOn : styles.choice}
-                  onSelect={toggleAnarchy}>
-                  <img className={styles.anarchyIcon} src="coui://uil/Colored/Anarchy.svg" />
-                </Button>
-                <div className={styles.label}>{anarchyOn ? t.on : t.off}</div>
-              </div>
-            )}
-          </Section>
+          {/* 缩略图、简介；注意事项默认收起 */}
+          <div className={styles.hero}>
+            <img className={styles.heroThumb} src={thumbnails[s.InterchangeType]} />
+            <div className={styles.heroText}>
+              <div className={styles.heroName}>{typeName}</div>
+              <div className={styles.intro}>{introOf(t, s.InterchangeType)}</div>
+              <Button variant="flat" selected={showNotes} className={showNotes ? styles.choiceSelected : styles.choice}
+                onSelect={() => setShowNotes(!showNotes)}>
+                {`${t.notes} · ${showNotes ? t.collapse : t.show}`}
+              </Button>
+            </div>
+          </div>
+          {showNotes && <div className={styles.notesBox}>{notesOf(t, s.InterchangeType)}</div>}
+
+          {/* 主开关：自动 / 手动 */}
+          <div className={styles.modeRow}>
+            <Button variant="flat" selected={!manual} className={manual ? styles.modeButton : styles.modeButtonSelected}
+              onSelect={() => manual && setValue("ManualMode", false)}>{t.modeAuto}</Button>
+            <Button variant="flat" selected={manual} className={manual ? styles.modeButtonSelected : styles.modeButton}
+              onSelect={() => !manual && setValue("ManualMode", true)}>{t.modeManual}</Button>
+          </div>
+
+          {/* 自动：对准路口照常，道路、匝道、分层等全部自动；只显示提示和结果（报错在底部） */}
+          {!manual && (
+            <>
+              <Section title={t.hints}>
+                <div className={styles.note}>{t.autoNote}</div>
+                <MatchDetails strings={t} match={match} blocked={!!r && r.gameErrors.some((error) => error.blocking)} curveFollow={true} />
+                {tee && roadAligned && <div className={styles.note}>{t.branchSideByCursor}</div>}
+              </Section>
+              {r && (
+                <Section title={t.results}>
+                  <div className={styles.resolved}>{turbine ? turbineLevelLine(t, r) : stack ? stackLevelLine(t, r) : flyoverT ? flyoverLevelLine(t, r, s.DirectionalTwoLevel) : levelLine(t, r, cloverleaf || parclo || roundabout ? !s.CloverleafCrossOnTop : !trumpet && (s.MainOnTop || mainForcedTop))}</div>
+                  <div className={styles.resolved}>{`${t.mainRoad}：${r.mainRoad} · ${r.mainForm === "Dual" ? t.formDual : t.formTwoWay} · ${r.mainLanes} ${t.lanesPerDirection}`}</div>
+                  <div className={styles.resolved}>{`${crossTitle}：${r.crossRoad} · ${r.crossForm === "Dual" ? t.formDual : t.formTwoWay} · ${r.crossLanes} ${t.lanesPerDirection}`}</div>
+                  {expressway && r.frontageRoad && <div className={styles.resolved}>{`${t.frontage}：${r.frontageRoad} · ${r.frontageLanes} ${t.lanes}`}</div>}
+                  <div className={styles.resolved}>{`${t.ramps}：${rampLine.replace(`${t.actual}：`, "")}`}</div>
+                  {r.extraRoad && (parclo || roundabout) && <div className={styles.resolved}>{`${parclo ? t.stemRoad : t.ringRoad}：${r.extraRoad}`}</div>}
+                  {loops && r.loopRadius > 0 && <div className={styles.resolved}>{`${roundabout ? t.ringRadius : t.loopRadius}：${Math.round(r.loopRadius)} m`}</div>}
+                  {laneBalanceUsed && <div className={styles.resolved}>{laneBalanceLine(t, r, expressway)}</div>}
+                </Section>
+              )}
+            </>
+          )}
+
+          {manual && (
+            <>
+
+          {hasOptions && (
+            <Section title={t.typeOptions}>
+              {/* T 型空地放置时选支路在哪一侧；对准已有 T 型路口时由路口决定，只对齐一条道路时放在鼠标所在一侧 */}
+              {tee && !matched && !roadAligned && (
+                <Choice label={t.branchSide} value={s.BranchOnLeft ? "left" : "right"}
+                  options={[{ value: "left", text: t.left }, { value: "right", text: t.right }]}
+                  onChange={(v) => setValue("BranchOnLeft", v === "left")} />
+              )}
+              {tee && roadAligned && <div className={styles.note}>{t.branchSideByCursor}</div>}
+              {/* 定向 / 半定向 T 型：两条左转匝道交叉一次，三层（一条在第三层）或两层（一条下穿主线） */}
+              {flyoverT && (
+                <Choice label={t.flyoverLevels} value={s.DirectionalTwoLevel ? "two" : "three"}
+                  options={[{ value: "three", text: t.threeLevels }, { value: "two", text: t.twoLevels }]}
+                  onChange={(v) => setValue("DirectionalTwoLevel", v === "two")} />
+              )}
+              {/* 定向式：左转匝道右出右进（默认）或左出左进 */}
+              {stack && (
+                <Choice label={t.leftTurnRamps} value={s.StackLeftExit ? "left" : "right"}
+                  options={[{ value: "right", text: t.rightOutRightIn }, { value: "left", text: t.leftOutLeftIn }]}
+                  onChange={(v) => setValue("StackLeftExit", v === "left")} />
+              )}
+              {stack && <div className={styles.note}>{s.StackLeftExit ? t.stackLeftExitNote : t.stackRightExitNote}</div>}
+              {/* 环岛式：圆形（默认）或沿主线拉长的跑道形 */}
+              {roundabout && (
+                <Choice label={t.ringShape} value={s.RoundaboutRacetrack ? "racetrack" : "circle"}
+                  options={[{ value: "circle", text: t.ringCircle }, { value: "racetrack", text: t.ringRacetrack }]}
+                  onChange={(v) => setValue("RoundaboutRacetrack", v === "racetrack")} />
+              )}
+              {/* 部分苜蓿叶：环道用于驶出主线（B2）还是驶入主线（A2） */}
+              {parclo && (
+                <Choice label={t.loopUse} value={s.ParcloLoopsForExit ? "exit" : "entry"}
+                  options={[{ value: "exit", text: t.parcloLoopExit }, { value: "entry", text: t.parcloLoopEntry }]}
+                  onChange={(v) => setValue("ParcloLoopsForExit", v === "exit")} />
+              )}
+              {/* 苜蓿叶右转匝道：外侧大弧线（默认），或贴环道外侧、相邻段与环道合成一条双向匝道（占地更小） */}
+              {cloverleaf && (
+                <Choice label={t.rightTurnRamp} value={s.CloverleafHugLoop ? "hug" : "outer"}
+                  options={[{ value: "outer", text: t.rightTurnOuter }, { value: "hug", text: t.rightTurnHug }]}
+                  onChange={(v) => setValue("CloverleafHugLoop", v === "hug")} />
+              )}
+              {cloverleaf && s.CloverleafHugLoop && <div className={styles.note}>{t.rightTurnHugNote}</div>}
+              {/* 苜蓿叶交织段：直接在主线上（默认），或移到主线外侧的集散车道上 */}
+              {cloverleaf && (
+                <Choice label={t.weaving} value={s.CloverleafCollectorMode ?? "none"}
+                  options={[{ value: "none", text: t.weavingMain }, { value: "auto", text: t.weavingAuto },
+                    { value: "main", text: t.weavingMainOnly }, { value: "both", text: t.weavingBoth }]}
+                  onChange={(v) => setValue("CloverleafCollectorMode", v)} />
+              )}
+              {cloverleaf && s.CloverleafCollectorMode && s.CloverleafCollectorMode !== "none" && (
+                <div className={styles.note}>{s.CloverleafCollectorMode === "auto" ? t.weavingAutoNote : t.weavingCollectorNote}</div>
+              )}
+              {/* 喇叭形：环道给驶出主线还是驶入主线的车流用，另一方向走半定向匝道 */}
+              {trumpet && (
+                <Choice label={t.loopUse} value={s.TrumpetLoopForExit ? "exit" : "entry"}
+                  options={[{ value: "exit", text: t.loopExit }, { value: "entry", text: t.loopEntry }]}
+                  onChange={(v) => setValue("TrumpetLoopForExit", v === "exit")} />
+              )}
+              {/* 环道半径：自动 = 能放下的最小半径（随交角、坡度上限变化）；手动可以调大 */}
+              {loops && (
+                <Choice label={roundabout ? t.ringRadius : t.loopRadius} value={s.LoopRadius > 0 ? "manual" : "auto"}
+                  options={[{ value: "auto", text: t.gapAuto }, { value: "manual", text: t.gapManual }]}
+                  onChange={(v) => setValue("LoopRadius", v === "auto" ? 0 : Math.max(roundabout ? 40 : 30, Math.round((r?.loopRadius ?? 40) / 5) * 5))} />
+              )}
+              {loops && s.LoopRadius > 0 && (
+                <Stepper label="" value={s.LoopRadius} step={5} min={roundabout ? 40 : 30} max={roundabout ? 300 : 250} unit=" m"
+                  onChange={(v) => setValue("LoopRadius", v)} />
+              )}
+              {loops && s.LoopRadius <= 0 && r && r.loopRadius > 0 && (
+                <div className={styles.resolved}>{`${t.actual}：${Math.round(r.loopRadius)} m`}</div>
+              )}
+              {/* 近侧两条直连匝道的半径：自动 = 满足支路下桥坡长的最小值；手动不能小于它（面板会报错并给出下限） */}
+              {trumpet && (
+                <Choice label={t.nearRampRadius} value={s.TrumpetNearRampRadius > 0 ? "manual" : "auto"}
+                  options={[{ value: "auto", text: t.gapAuto }, { value: "manual", text: t.gapManual }]}
+                  onChange={(v) => setValue("TrumpetNearRampRadius", v === "auto" ? 0 : 200)} />
+              )}
+              {trumpet && s.TrumpetNearRampRadius > 0 && (
+                <Stepper label="" value={s.TrumpetNearRampRadius} step={10} min={30} max={1000} unit=" m"
+                  onChange={(v) => setValue("TrumpetNearRampRadius", v)} />
+              )}
+            </Section>
+          )}
 
           <Section title={t.match}>
             <Choice label={t.matchSwitch} value={s.MatchJunctions ? "on" : "off"}
@@ -384,6 +503,8 @@ export const InterchangePanel = () => {
             </Section>
           )}
 
+            </>
+          )}
         </Scrollable>
         {/* 错误和警告放在滚动区外面单独一块，滚动或调参数时始终看得到 */}
         <Scrollable className={styles.status} vertical trackVisibility="scrollable">
@@ -417,20 +538,17 @@ export const InterchangePanel = () => {
             );
           })}
         </Scrollable>
-        {/* 两步放置：左键固定预览后，在这里确认放置或取消固定 */}
+        {/* 两步放置：左键固定预览后，在这里确认放置（绿）或取消固定（红） */}
         {state.pinned && (
           <div className={styles.confirmRow}>
             <Button variant="flat" className={styles.confirmButton} onSelect={confirmPlacement}
               disabled={!r || r.errors.length > 0 || r.gameErrors.some((error) => error.blocking)}>
               {t.confirmPlace}
             </Button>
-            <Button variant="flat" className={styles.choice} onSelect={unpinPreview}>{t.unpin}</Button>
+            <Button variant="flat" className={styles.cancelButton} onSelect={unpinPreview}>{t.unpin}</Button>
           </div>
         )}
-        {state.headingFree && state.heading !== undefined && (
-          <div className={styles.hint}>{`${t.heading} ${Math.round(state.heading) % 360}° · ${t.rotateKeys}`}</div>
-        )}
-        <div className={styles.hint}>{state.pinned ? t.hintPinned : t.hint}</div>
+        <div className={styles.hint}>{hint}</div>
       </Panel>
     </div>
   );
