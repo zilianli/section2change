@@ -122,6 +122,8 @@ namespace InterchangeMod.Generation.Templates
                     for (int i = 0; i < built.Count; i++)
                         built[i] = built[i].Transform(Mirror).Reversed();
                 }
+                // 外部被交道路是双幅时，两端从双向分回双幅
+                InterchangeLayout.AddDualTails(built, p);
                 InterchangeLayout.AddApproachSlopes(built, p);
                 s_segments = built;
                 s_segmentsKey = key;

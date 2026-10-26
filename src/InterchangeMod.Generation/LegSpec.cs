@@ -84,6 +84,15 @@ namespace InterchangeMod.Generation
         public bool NeedsDualToTwoWayTransition => Form == RoadForm.Dual && ExternalForm == RoadForm.TwoWay;
 
         /// <summary>
+        /// 这条臂的臂端是否需要从内部双向分成外部双幅（单点立交、部分苜蓿叶的被交道路要求双向）：
+        /// 双向道路的臂端节点分出两条单行道路（ExternalPrefab，宽 ExternalWidth），接到外部双幅的位置（分隔带 ExternalMedian）。
+        /// </summary>
+        public bool NeedsTwoWayToDualTransition => Form == RoadForm.TwoWay && ExternalForm == RoadForm.Dual;
+
+        /// <summary>外部双幅道路的中央分隔带宽度（米），内部双向、外部双幅时使用。</summary>
+        public float ExternalMedian { get; set; }
+
+        /// <summary>
         /// 高架时路段中部的立柱：null = 没有中部立柱（只在节点有）；0 = 每段正中一根；
         /// > 0 = 按这个间距均布（游戏规则：段长 L 时根数 n = ⌊L / 间距 − 0.5⌋，位于 L·k/(n+1)，L &lt; 1.5 倍间距时没有）。
         /// 由工具层从预制体的 SubObject（EdgePlacement + MiddlePlacement 的立柱）读出。

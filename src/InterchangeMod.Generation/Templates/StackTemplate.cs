@@ -15,10 +15,19 @@ namespace InterchangeMod.Generation.Templates
     /// 坐标：每一幅是一条直线（起点 Origin、行驶方向 Dir），立交中心为原点。左转匝道的转弯半径从小到大找第一个可行的，
     /// 升降放在两段直线里（长度按坡度求），跨越其他道路的范围前后保持这一层高度；跨线桥的立柱不落在下面的道路上，
     /// 高架段每段短于游戏切分长度。立交范围内两条路的中央分隔带拉宽到能放立柱，两端 S 形接回。
-    /// 右转匝道在出口一侧晚于左转匝道驶出、在入口一侧早于左转匝道汇入，从左转匝道已经升高的直线段下面穿过。
+    /// 右转匝道在左转匝道外侧，比它早驶出、晚汇入，平行走到转角再转小弯。面板可选左出左进（左转匝道在拉宽的分隔带里升降）。
+    ///
+    /// turbine = true 时是涡轮立交（三层），左转匝道的造型和高度见 StackTemplate.Turbine.cs。
     /// </summary>
-    public sealed class StackTemplate : IInterchangeTemplate
+    public sealed partial class StackTemplate : IInterchangeTemplate
     {
+        private readonly bool m_Turbine;
+
+        public StackTemplate(bool turbine = false)
+        {
+            m_Turbine = turbine;
+        }
+
         private const float kMaxSkew = 30f;
         private const float kOppositeTolerance = 1f;
         private const float kGradeMargin = 0.98f;
@@ -40,6 +49,8 @@ namespace InterchangeMod.Generation.Templates
         /// <summary>左转匝道在高架那头横移出 / 入的 S 形半径（米）：并行重叠段要短于游戏切分高架路段的长度。</summary>
         private const float kElevatedShiftRadius = 50f;
         private const float kMinSegment = 10f;
+        /// <summary>道路按长度加节点时每段的最小长度（米）：太短的路段游戏报形状无效。</summary>
+        private const float kMinPiece = 20f;
         /// <summary>高架路段每段的最大长度（米），短于游戏切分高架路段的 80 米。</summary>
         private const float kMaxElevatedPiece = 70f;
         private const float kMaxGroundPiece = 600f;
@@ -79,12 +90,12 @@ namespace InterchangeMod.Generation.Templates
         /// <summary>识别出的隧道深度允许比 −13 米浅的余量（米）：原有隧道读出来常是 −12.9 米。</summary>
         private const float kTunnelTolerance = 0.5f;
 
-        public InterchangeType Type => InterchangeType.Stack;
+        public InterchangeType Type => m_Turbine ? InterchangeType.Turbine : InterchangeType.Stack;
 
         /// <summary>调试：求解失败的原因。</summary>
         public static Action<string>? Trace;
 
-        public string DisplayName => "定向式";
+        public string DisplayName => m_Turbine ? "涡轮" : "定向式";
 
         public int LegCount => 4;
 
@@ -95,15 +106,15 @@ namespace InterchangeMod.Generation.Templates
                 return errors;
             var legs = p.Legs;
             if (!p.RightHandTraffic)
-                errors.Add("定向式目前只支持右侧通行");
+                errors.Add($"{DisplayName}目前只支持右侧通行");
             if (Directions.AngleBetween(legs[0].Angle, legs[2].Angle) < 180f - kOppositeTolerance
                 || Directions.AngleBetween(legs[1].Angle, legs[3].Angle) < 180f - kOppositeTolerance)
-                errors.Add("定向式要求两条道路都是直线（臂 0/2、臂 1/3 各自相对）");
+                errors.Add($"{DisplayName}要求两条道路都是直线（臂 0/2、臂 1/3 各自相对）");
             float crossing = Directions.AngleBetween(legs[0].Angle, legs[1].Angle);
             if (Math.Abs(crossing - 90f) > kMaxSkew)
-                errors.Add($"两条道路夹角 {crossing:F0}°：定向式需要 {90f - kMaxSkew:F0}°–{90f + kMaxSkew:F0}°");
+                errors.Add($"两条道路夹角 {crossing:F0}°：{DisplayName}需要 {90f - kMaxSkew:F0}°–{90f + kMaxSkew:F0}°");
             if (legs[0].Form != RoadForm.Dual || legs[1].Form != RoadForm.Dual)
-                errors.Add("定向式的两条道路都需要是双幅（双向道路会在立交内拆成双幅、外端接回）");
+                errors.Add($"{DisplayName}的两条道路都需要是双幅（双向道路会在立交内拆成双幅、外端接回）");
             float hm = p.ElevationOf(legs[0]), hc = p.ElevationOf(legs[1]);
             float gap = DiamondTemplate.RequiredGap(p);
             if (hc - hm < gap)
@@ -158,8 +169,11 @@ namespace InterchangeMod.Generation.Templates
                 return hit.Plan;
             }
             var watch = System.Diagnostics.Stopwatch.StartNew();
-            var plan = new Plan(p);
+            var plan = new Plan(p, m_Turbine);
             Trace?.Invoke($"solved in {watch.ElapsedMilliseconds} ms: {(plan.Fits ? "ok " + plan.Summary : plan.Errors[0])}");
+            // 失败时记下完整参数，便于在测试里还原
+            if (!plan.Fits)
+                Trace?.Invoke($"params: {key}");
             m_Plans.Add((key, plan));
             if (m_Plans.Count > kPlanCache)
                 m_Plans.RemoveAt(0);
@@ -202,7 +216,6 @@ namespace InterchangeMod.Generation.Templates
             }
         }
 
-        /// <summary>按采样点表示的路径（匝道），带高度。</summary>
         /// <summary>按采样点表示的路径（匝道），带高度。采样点按 kCell 见方的网格分桶：只回答 kCell 以内的距离，更远时返回 kCell。</summary>
         private sealed class PathObstacle : Obstacle
         {
@@ -260,12 +273,23 @@ namespace InterchangeMod.Generation.Templates
             /// <summary>左转匝道两段直线在按坡度需要的长度之外加长了多少，以及按新的加长量重新生成。</summary>
             public float Ext1, Ext2;
             public Func<float, float, Ramp?>? Rebuild;
+            /// <summary>按弧长给定的高度（涡轮的左转匝道：按途中各处交叉要求求出的纵断面），给定时代替水平段 / 跨越段的升降。</summary>
+            public List<(float S, float H)>? Knots;
 
             public float Length => Path.Length;
 
             public float HeightAt(float s)
             {
                 float total = Length;
+                if (Knots != null)
+                {
+                    if (s <= Knots[0].S)
+                        return Knots[0].H;
+                    for (int i = 0; i + 1 < Knots.Count; i++)
+                        if (s <= Knots[i + 1].S)
+                            return Knots[i].H + (Knots[i + 1].H - Knots[i].H) * (s - Knots[i].S) / Math.Max(1e-3f, Knots[i + 1].S - Knots[i].S);
+                    return Knots[Knots.Count - 1].H;
+                }
                 if (!HasPlateau)
                 {
                     float from = FlatStart, to = total - FlatEnd;
@@ -284,8 +308,15 @@ namespace InterchangeMod.Generation.Templates
             private List<Vec3>? m_Samples;
             private PathObstacle? m_Obstacle;
 
-            /// <summary>作为障碍物（缓存；匝道生成后高度不再改变）。</summary>
+            /// <summary>作为障碍物（缓存；高度改了要调用 HeightsChanged）。</summary>
             public PathObstacle AsObstacle(float width) => m_Obstacle ??= new PathObstacle(Samples(), width);
+
+            /// <summary>纵断面改了（挪动转折点）：丢掉按旧高度缓存的采样点和障碍物。</summary>
+            public void HeightsChanged()
+            {
+                m_Samples = null;
+                m_Obstacle = null;
+            }
 
             public List<Vec3> Samples() => m_Samples ??= ComputeSamples();
 
@@ -328,7 +359,7 @@ namespace InterchangeMod.Generation.Templates
             public float At(Vec3 v) => Directions.Dot(Flat0(v) - Origin, Dir);
         }
 
-        private sealed class Plan
+        private sealed partial class Plan
         {
             private readonly InterchangeParams P;
             private readonly float hm, hc, g, rw, gap, grade, om, oc;
@@ -338,8 +369,12 @@ namespace InterchangeMod.Generation.Templates
             public readonly List<string> Errors = new List<string>();
             private readonly List<Ramp> rights = new List<Ramp>(), lefts = new List<Ramp>();
 
-            public Plan(InterchangeParams p)
+            /// <summary>涡轮立交（左转匝道绕中心旋转、高度逐处决定），否则定向式。</summary>
+            private readonly bool turbine;
+
+            public Plan(InterchangeParams p, bool turbine)
             {
+                this.turbine = turbine;
                 P = p;
                 var legs = p.Legs;
                 hm = p.ElevationOf(legs[0]);
@@ -350,7 +385,7 @@ namespace InterchangeMod.Generation.Templates
                 grade = p.MaxGrade * kGradeMargin;
                 Vec3 v = Flat(legs[0].Direction), c = Flat(legs[1].Direction);
                 // 立交范围内两条路的中央分隔带拉宽到能放左转匝道的立柱（两端 S 形接回原来的分隔带）
-                leftExit = p.StackLeftExit;
+                leftExit = p.StackLeftExit && !turbine;
                 // 左出左进：分隔带每侧并排走一条驶出、一条驶入的左转匝道（各离本幅 kParallelGap，两者之间也留 kParallelGap；
                 // 道路在地下时两条匝道都在路堑里，挡土墙之间再多留 kWallClearance）
                 float Median(float height)
@@ -370,6 +405,12 @@ namespace InterchangeMod.Generation.Templates
                     new Carriageway("CrossA", rc * oc, c, legs[1].RoadWidth, hc, false),
                     new Carriageway("CrossB", -rc * oc, -c, legs[1].RoadWidth, hc, false),
                 };
+
+                if (turbine)
+                {
+                    SolveTurbine();
+                    return;
+                }
 
                 // 先左转（只避开两条路），再右转：右转匝道在左转匝道外侧，比它早驶出、晚汇入，与它平行走到转角再转弯，两者不交叉。
                 // 右转匝道或立柱放不下时换一组左转匝道再试：每次排除第 4 层用的那组，每两次再排除第 3 层用的那组
@@ -394,7 +435,7 @@ namespace InterchangeMod.Generation.Templates
                         ? "右转匝道放不下：请加大最大坡度或把交角调得更接近 90°"
                         : leftExit && !SeparateAttachments()
                         ? "左转匝道与右转匝道的出入口放不开：请加大最大坡度或把交角调得更接近 90°"
-                        : !lefts.Concat(rights).All(PlanCuts)
+                        : !lefts.Concat(rights).All(PlanCuts) || !lines.All(l => LineCuts(l) != null)
                         ? "跨线桥的立柱无法避开下面的道路：请把交角调得更接近 90° 或改变层间高差"
                         : null;
                     if (failure == null)
@@ -899,6 +940,14 @@ namespace InterchangeMod.Generation.Templates
                     required.Add(ramp.PlateauStart);
                     required.Add(ramp.PlateauEnd);
                 }
+                // 纵断面的转折点（两点之间按直线升降）；落在挡立柱的位置上时先挪开
+                if (ramp.Knots != null && !ShiftKnots(ramp, lower))
+                {
+                    Fail("knots");
+                    return false;
+                }
+                if (ramp.Knots != null)
+                    required.AddRange(ramp.Knots.Select(k => k.S).Where(k => k > ramp.FlatStart + kMinSegment && k < total - ramp.FlatEnd - kMinSegment));
                 float offset = 0f;
                 for (int i = 0; i + 1 < ramp.Path.Arcs.Count; i++)
                 {
@@ -911,6 +960,12 @@ namespace InterchangeMod.Generation.Templates
                     bool inFlat = at < ramp.FlatStart + kMinSegment || at > total - ramp.FlatEnd - kMinSegment;
                     if (!inFlat && required.All(r => Math.Abs(r - at) >= kMinSegment) && !Forbidden(at))
                         required.Add(at);
+                }
+                // 涡轮：固定的断点（水平段起止、转折点）下面也不能有道路
+                if (turbine && required.Any(Forbidden))
+                {
+                    Fail("fixed cuts");
+                    return false;
                 }
                 var merged = new List<float>();
                 foreach (float s in required.Where(s => s >= 0f && s <= total).OrderBy(s => s))
@@ -975,10 +1030,7 @@ namespace InterchangeMod.Generation.Templates
 
                 // 每一幅上的节点：匝道接点、内端；被交道路（第 2 层）跨越主线处按立柱规划；高架时按长度加节点，避开匝道并行重叠段。
                 // 内端之外：S 形从拉宽的分隔带回到原来的位置，再接一段直线臂端
-                float mainEnd = ramps.SelectMany(r => new[] { (r.From, r.FromAt), (r.To, r.ToAt) }).Where(e => e.Item1.Main)
-                    .Max(e => Math.Abs(e.Item2)) + kEndGap;
-                float crossEnd = ramps.SelectMany(r => new[] { (r.From, r.FromAt), (r.To, r.ToAt) }).Where(e => !e.Item1.Main)
-                    .Max(e => Math.Abs(e.Item2)) + kEndGap;
+                float mainEnd = LineEnd(true), crossEnd = LineEnd(false);
                 var nodeOf = new Dictionary<(Carriageway, float), Vec3>();
                 // 每一幅外端（臂端）的节点：(幅, +1 下游 / −1 上游)
                 var outerOf = new Dictionary<(Carriageway, int), Vec3>();
@@ -990,34 +1042,8 @@ namespace InterchangeMod.Generation.Templates
                     var role = line.Main ? RoadRole.MainRoad : RoadRole.CrossRoad;
                     string? prefab = line.Main ? legs[0].RoadPrefab : legs[1].RoadPrefab;
                     bool elevated = LevelPlanner.BandOf(h) == ElevationBand.Elevated;
-                    var attaches = ramps.Where(r => r.From == line).Select(r => (r.FromAt, r.FromAt, r.FromAt + r.FlatStart))
-                        .Concat(ramps.Where(r => r.To == line).Select(r => (r.ToAt, r.ToAt - r.FlatEnd, r.ToAt))).ToList();
-                    var nodes = new List<float> { -end, end };
-                    nodes.AddRange(attaches.Select(a => a.Item1));
-                    if (!line.Main)
-                    {
-                        // 被交道路跨越主线：两端节点（立柱）避开主线两幅
-                        var mainLine = lines.First(l => l.Main);
-                        float sin = Math.Abs(DiamondTemplate.Cross2(line.Dir, mainLine.Dir));
-                        float center = -DiamondTemplate.Cross2(line.Origin, mainLine.Dir) / DiamondTemplate.Cross2(line.Dir, mainLine.Dir);
-                        var span = PillarPlanner.Plan(center, (om + legs[0].RoadWidth / 2f) / sin, (om - legs[0].RoadWidth / 2f) / sin,
-                            legs[1].MiddlePillarSpacing, legs[1].PillarWidth, legs[1].MaxElevatedEdgeLength);
-                        nodes.Add(span.Lo);
-                        nodes.Add(span.Hi);
-                    }
-                    var sorted = new List<float>();
-                    foreach (float t in nodes.OrderBy(t => t))
-                    {
-                        bool fixedNode = attaches.Any(a => Math.Abs(a.Item1 - t) < 1e-3f) || Math.Abs(Math.Abs(t) - end) < 1e-3f;
-                        int near = sorted.FindIndex(k => Math.Abs(k - t) < kMinSegment);
-                        if (near < 0)
-                            sorted.Add(t);
-                        else if (fixedNode)
-                            sorted[near] = t;
-                    }
-                    sorted.Sort();
-                    if (elevated)
-                        sorted = Subdivide(sorted, kMaxElevatedPiece, attaches.Select(a => (a.Item2, a.Item3)).ToList());
+                    var attaches = Attaches(line);
+                    var sorted = LineCuts(line)!;
 
                     // 车道平衡：右转匝道驶出点 ~ 汇入点之间用减车道的道路，节点向中央分隔带平移；两头的曲线端点平移、节点不动
                     float lo = rights.First(r => r.From == line).FromAt, hi = rights.First(r => r.To == line).ToAt;
@@ -1102,23 +1128,124 @@ namespace InterchangeMod.Generation.Templates
 
             private static Vec3 At(Vec3 v, float y) => new Vec3(v.X, y, v.Z);
 
-            /// <summary>在已有断点之间加断点，使每段不超过 maxLength；落在 keepWhole（并行重叠段）里的挪到它的边上。</summary>
-            private static List<float> Subdivide(List<float> cuts, float maxLength, IReadOnlyList<(float Lo, float Hi)> keepWhole)
+            /// <summary>主线 / 被交道路各幅的内端（最外侧匝道接点再往外 kEndGap）。</summary>
+            private float LineEnd(bool main) => lefts.Concat(rights).SelectMany(r => new[] { (r.From, r.FromAt), (r.To, r.ToAt) })
+                .Where(e => e.Item1.Main == main).Max(e => Math.Abs(e.Item2)) + kEndGap;
+
+            /// <summary>一幅上各匝道的接点，以及接点处与匝道并行重叠的范围（驶出：接点之后；汇入：接点之前）。</summary>
+            private List<(float, float, float)> Attaches(Carriageway line)
             {
+                var ramps = lefts.Concat(rights).ToList();
+                return ramps.Where(r => r.From == line).Select(r => (r.FromAt, r.FromAt, r.FromAt + r.FlatStart))
+                    .Concat(ramps.Where(r => r.To == line).Select(r => (r.ToAt, r.ToAt - r.FlatEnd, r.ToAt))).ToList();
+            }
+
+            /// <summary>
+            /// 一幅上的节点（沿该幅的位置）：匝道接点、两端；被交道路（第 2 层）跨越主线处按立柱规划；高架时按长度加节点，
+            /// 避开匝道并行重叠段和从下面穿过的匝道。高架段分不开（每段都要短于游戏切分长度）时返回 null。
+            /// allowInOverlap：避不开并行重叠段时允许节点落在里面（定向式左出左进时出现过，游戏里可以放置）。
+            /// </summary>
+            private List<float>? LineCuts(Carriageway line, bool allowInOverlap = true)
+            {
+                var legs = P.Legs;
+                var ramps = lefts.Concat(rights).ToList();
+                float end = LineEnd(line.Main);
+                var attaches = Attaches(line);
+                var nodes = new List<float> { -end, end };
+                nodes.AddRange(attaches.Select(a => a.Item1));
+                if (!line.Main)
+                {
+                    // 被交道路跨越主线：两端节点（立柱）避开主线两幅
+                    var mainLine = lines.First(l => l.Main);
+                    float sin = Math.Abs(DiamondTemplate.Cross2(line.Dir, mainLine.Dir));
+                    float center = -DiamondTemplate.Cross2(line.Origin, mainLine.Dir) / DiamondTemplate.Cross2(line.Dir, mainLine.Dir);
+                    var span = PillarPlanner.Plan(center, (om + legs[0].RoadWidth / 2f) / sin, (om - legs[0].RoadWidth / 2f) / sin,
+                        legs[1].MiddlePillarSpacing, legs[1].PillarWidth, legs[1].MaxElevatedEdgeLength);
+                    nodes.Add(span.Lo);
+                    nodes.Add(span.Hi);
+                }
+                var sorted = new List<float>();
+                foreach (float t in nodes.OrderBy(t => t))
+                {
+                    bool fixedNode = attaches.Any(a => Math.Abs(a.Item1 - t) < 1e-3f) || Math.Abs(Math.Abs(t) - end) < 1e-3f;
+                    int near = sorted.FindIndex(k => Math.Abs(k - t) < kMinSegment);
+                    if (near < 0)
+                        sorted.Add(t);
+                    else if (fixedNode)
+                        sorted[near] = t;
+                }
+                sorted.Sort();
+                if (LevelPlanner.BandOf(line.Height) != ElevationBand.Elevated)
+                    return sorted;
+                // 高架时按长度加节点（立柱），一定避开从下面穿过的匝道，尽量避开匝道并行重叠段
+                var under = new List<(float, float)>();
+                float reach = line.Width / 2f + rw / 2f + kPillarThickness;
+                foreach (var ramp in ramps)
+                    foreach (var v in ramp.Samples())
+                        if (v.Y < line.Height - 1f && Math.Abs(DiamondTemplate.Cross2(Flat0(v) - line.Origin, line.Dir)) < reach)
+                        {
+                            float at = line.At(v);
+                            under.Add((at - rw / 2f - kPillarThickness - kPillarMargin, at + rw / 2f + kPillarThickness + kPillarMargin));
+                        }
+                var cuts = Subdivide(sorted, kMaxElevatedPiece, under.Concat(attaches.Select(a => (a.Item2, a.Item3))).ToList())
+                    ?? (allowInOverlap ? Subdivide(sorted, kMaxElevatedPiece, under) : null);
+                // 固定的节点（两端、匝道接点、跨主线处）也不能落在从下面穿过的匝道上方
+                return cuts != null && cuts.All(c => !under.Any(z => c > z.Item1 && c < z.Item2)) ? cuts : null;
+            }
+
+            /// <summary>在已有断点之间加断点，使每段不超过 maxLength；落在 zones（并行重叠段、下面穿过的匝道）里的挪到它的边上。</summary>
+            private static List<float>? Subdivide(List<float> cuts, float maxLength, IReadOnlyList<(float Lo, float Hi)> zones)
+            {
+                // 相互重叠的范围先合并，挪到边上的断点才不会又落进相邻的范围
+                var keepWhole = new List<(float Lo, float Hi)>();
+                foreach (var z in zones.OrderBy(z => z.Lo))
+                {
+                    if (keepWhole.Count > 0 && z.Lo <= keepWhole[keepWhole.Count - 1].Hi)
+                        keepWhole[keepWhole.Count - 1] = (keepWhole[keepWhole.Count - 1].Lo, Math.Max(keepWhole[keepWhole.Count - 1].Hi, z.Hi));
+                    else
+                        keepWhole.Add(z);
+                }
+                bool Inside(float c) => keepWhole.Any(z => c > z.Lo && c < z.Hi);
+                // 每个间隔均匀分段；某个断点落在范围里时就近挪到范围外（前后两段都在 kMinPiece ~ maxLength 之间），
+                // 挪不开就多分一段再试；还不行返回 null
                 var result = new List<float> { cuts[0] };
                 for (int i = 0; i + 1 < cuts.Count; i++)
                 {
                     float lo = cuts[i], hi = cuts[i + 1];
                     int n = (int)Math.Ceiling((hi - lo) / maxLength);
-                    for (int k = 1; k < n; k++)
+                    List<float>? picks = null;
+                    for (int extra = 0; extra < 4 && picks == null; extra++)
                     {
-                        float c = lo + (hi - lo) * k / n;
-                        foreach (var (a, b) in keepWhole)
-                            if (c > a && c < b)
-                                c = c - a < b - c && a > lo + kMinSegment ? a : b < hi - kMinSegment ? b : a;
-                        if (c - result[result.Count - 1] >= kMinSegment && hi - c >= kMinSegment)
-                            result.Add(c);
+                        int m = n + extra;
+                        var trial = new List<float>();
+                        float prev = lo;
+                        bool ok = true;
+                        for (int k = 1; k < m && ok; k++)
+                        {
+                            float target = lo + (hi - lo) * k / m;
+                            float best = float.NaN;
+                            for (float d = 0f; d <= maxLength / 2f && float.IsNaN(best); d += 1f)
+                                foreach (float c in new[] { target - d, target + d })
+                                    if (!Inside(c) && c - prev >= kMinPiece && c - prev <= maxLength && hi - c >= kMinPiece
+                                        && (hi - c) <= maxLength * (m - k))
+                                    {
+                                        best = c;
+                                        break;
+                                    }
+                            if (float.IsNaN(best))
+                                ok = false;
+                            else
+                            {
+                                trial.Add(best);
+                                prev = best;
+                            }
+                        }
+                        if (ok && hi - prev <= maxLength)
+                            picks = trial;
                     }
+                    if (picks == null)
+                        return null;
+                    result.AddRange(picks);
                     result.Add(hi);
                 }
                 return result;

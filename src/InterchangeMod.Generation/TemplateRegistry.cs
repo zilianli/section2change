@@ -20,7 +20,7 @@ namespace InterchangeMod.Generation
             new DirectionalTTemplate(directional: false),
             new DirectionalTTemplate(directional: true),
             new StackTemplate(),
-            // TODO: Turbine
+            new StackTemplate(turbine: true),
         };
 
         public static IReadOnlyList<IInterchangeTemplate> All => Templates;

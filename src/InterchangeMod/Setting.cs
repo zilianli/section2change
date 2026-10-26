@@ -240,7 +240,7 @@ namespace InterchangeMod
                 case nameof(CrossRoadPrefab): CrossRoadPrefab = value ?? ""; return true;
                 case nameof(RampPrefab): RampPrefab = value ?? ""; return true;
                 case nameof(InterchangeType):
-                    InterchangeType = value == "ExpresswayNode" || value == "ExpresswayT" || value == "SinglePoint" || value == "Trumpet" || value == "Cloverleaf" || value == "PartialCloverleaf" || value == "Roundabout" || value == "DirectionalT" || value == "SemiDirectionalT" || value == "Stack" ? value : "Diamond";
+                    InterchangeType = value == "ExpresswayNode" || value == "ExpresswayT" || value == "SinglePoint" || value == "Trumpet" || value == "Cloverleaf" || value == "PartialCloverleaf" || value == "Roundabout" || value == "DirectionalT" || value == "SemiDirectionalT" || value == "Stack" || value == "Turbine" ? value : "Diamond";
                     return true;
                 case nameof(FrontageRoadPrefab): FrontageRoadPrefab = value ?? ""; return true;
                 case nameof(LaneBalance): LaneBalance = value == "true"; return true;

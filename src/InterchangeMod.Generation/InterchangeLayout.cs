@@ -91,6 +91,39 @@ namespace InterchangeMod.Generation
             }
         }
 
+        /// <summary>
+        /// 内部双向、外部双幅的臂（NeedsTwoWayToDualTransition）：双向道路的臂端节点分出两条单行道路，S 形平行接到外部双幅的位置。
+        /// 驶离立交的一幅在外指方向的右侧（右侧通行）。分出处两幅外缘对齐双向道路的两侧边缘（曲线端点横移、节点仍是双向道路的端点）。
+        /// 要在 AddApproachSlopes 之前调用（坡道接在分出后的两幅端点上）。
+        /// </summary>
+        public static void AddDualTails(List<RoadSegmentSpec> segments, InterchangeParams p)
+        {
+            for (int index = 0; index < p.Legs.Count; index++)
+            {
+                LegSpec leg = p.Legs[index];
+                if (!leg.NeedsTwoWayToDualTransition)
+                    continue;
+                RoadRole role = index % 2 == 0 ? RoadRole.MainRoad : RoadRole.CrossRoad;
+                Vec3 dir = leg.Direction;
+                // 这条臂的臂端：该道路未接其他路段、沿臂方向最远的端点
+                var ends = LegEnds(segments.Where(s => s.Role == role)).Where(e => Directions.Dot(e, dir) > 0f).ToList();
+                if (ends.Count == 0)
+                    continue;
+                Vec3 end = ends.OrderByDescending(e => Directions.Dot(e, dir)).First();
+                RoadSegmentSpec owner = segments.First(s => s.StartNode.Equals(end) || s.EndNode.Equals(end));
+                Vec3 right = Directions.RightOf(dir);
+                float width = leg.ExternalWidth > 0f ? leg.ExternalWidth : leg.RoadWidth / 2f;
+                float edge = System.Math.Max(0f, (leg.RoadWidth - width) / 2f);
+                float offset = (leg.ExternalMedian + width) / 2f;
+                float length = System.Math.Min(leg.StubLength, kMaxSlopePiece);
+                Vec3 outFar = end + dir * length + right * offset, inFar = end + dir * length - right * offset;
+                segments.Add(new RoadSegmentSpec($"{owner.Name}-out", role,
+                    Bezier3.FromTangents(end + right * edge, dir, outFar, dir, length / 3f), leg.ExternalPrefab, end, outFar));
+                segments.Add(new RoadSegmentSpec($"{owner.Name}-in", role,
+                    Bezier3.FromTangents(inFar, -dir, end - right * edge, -dir, length / 3f), leg.ExternalPrefab, inFar, end));
+            }
+        }
+
         public static List<string> ValidateGeometry(IEnumerable<RoadSegmentSpec> segments, InterchangeParams p)
         {
             var errors = new List<string>();

@@ -140,6 +140,8 @@ namespace InterchangeMod.Generation.Templates
                     segments.Add(new RoadSegmentSpec($"{dir}-on-shift", RoadRole.Ramp, Bezier3.FromTangents(r.Top, r.Travel, r.MainNode, r.Travel, r.ShiftLength / 3f), p.RampPrefab));
                 }
             }
+            // 外部被交道路是双幅时，两端从双向分回双幅
+            InterchangeLayout.AddDualTails(segments, p);
             return segments;
         }
 

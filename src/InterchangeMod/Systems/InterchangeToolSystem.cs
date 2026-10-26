@@ -61,6 +61,7 @@ namespace InterchangeMod.Systems
         private readonly IInterchangeTemplate m_Roundabout = new RoundaboutTemplate();
         private readonly IInterchangeTemplate m_DirectionalT = new DirectionalTTemplate(directional: true);
         private readonly IInterchangeTemplate m_Stack = new StackTemplate();
+        private readonly IInterchangeTemplate m_Turbine = new StackTemplate(turbine: true);
         private readonly IInterchangeTemplate m_SemiDirectionalT = new DirectionalTTemplate(directional: false);
 
         /// <summary>面板选的立交类型。</summary>
@@ -75,10 +76,13 @@ namespace InterchangeMod.Systems
         /// <summary>定向 T 型或半定向 T 型：支路与主线同层，左转匝道以跨线桥跨过主线。</summary>
         private bool IsDirectionalT => setting?.InterchangeType == "DirectionalT" || setting?.InterchangeType == "SemiDirectionalT";
 
-        private bool IsStack => setting?.InterchangeType == "Stack";
+        /// <summary>定向式和涡轮（同一个模板的两种造型：两条路都是双幅、匝道都在两条路之间升降）。</summary>
+        private bool IsStack => setting?.InterchangeType == "Stack" || IsTurbine;
+
+        private bool IsTurbine => setting?.InterchangeType == "Turbine";
         /// <summary>有环道的类型（喇叭形、苜蓿叶）：环道半径可自动；双向被交道路在立交内拆成双幅。</summary>
         private bool HasLoops => IsTrumpet || IsCloverleaf || IsParclo || IsRoundabout;
-        private IInterchangeTemplate CurrentTemplate => IsStack ? m_Stack : setting?.InterchangeType == "DirectionalT" ? m_DirectionalT
+        private IInterchangeTemplate CurrentTemplate => IsTurbine ? m_Turbine : IsStack ? m_Stack : setting?.InterchangeType == "DirectionalT" ? m_DirectionalT
             : setting?.InterchangeType == "SemiDirectionalT" ? m_SemiDirectionalT : IsRoundabout ? m_Roundabout : IsParclo ? m_Parclo : IsCloverleaf ? m_Cloverleaf : IsTrumpet ? m_Trumpet : IsExpresswayT ? m_ExpresswayT : IsExpressway ? m_Expressway : IsSinglePoint ? m_SinglePoint : m_Diamond;
 
         /// <summary>主线是否在上层：中式快速路节点和单点立交的主线总是高架。</summary>
@@ -935,6 +939,27 @@ namespace InterchangeMod.Systems
                         PlanLevels(p, snapshot);
                     }
                 }
+
+                // 单点立交、部分苜蓿叶的被交道路要求双向：是双幅时立交内部改用同车道数的双向道路，两端分回双幅
+                if ((IsSinglePoint || IsParclo) && crossForm == RoadForm.Dual && m_RoadsByName.TryGetValue(crossName, out RoadInfo dualCross))
+                {
+                    RoadInfo twoWay = RampMatcher.PickClosest(m_RoadCatalog, dualCross.IsHighway, dualCross.LanesPerDirection, oneWay: false);
+                    if (twoWay != null && m_PrefabResolver.TryResolve(crossName, m_SelectedRoad, out NetPrefab crossOneWayPrefab))
+                    {
+                        float oneWayWidth = m_PrefabResolver.GetWidth(crossOneWayPrefab);
+                        SetRoad(p, 1, crossOther, RoadForm.TwoWay, twoWay.Name, 0f, errors);
+                        foreach (int index in new[] { 1, crossOther })
+                        {
+                            p.Legs[index].ExternalForm = RoadForm.Dual;
+                            p.Legs[index].ExternalPrefab = crossName;
+                            p.Legs[index].ExternalWidth = oneWayWidth;
+                            p.Legs[index].ExternalMedian = crossMedian;
+                        }
+                        crossName = twoWay.Name;
+                        crossForm = RoadForm.TwoWay;
+                        PlanLevels(p, snapshot);
+                    }
+                }
             }
 
             // 原路口改造：已匹配的臂接回原有道路，不在原有道路高度的那层（如高架的上层）在臂端加坡道升降过去
@@ -1115,7 +1140,7 @@ namespace InterchangeMod.Systems
                 snapshot.MainReducedLanes = reduced.LanesPerDirection;
             }
 
-            // 定向式的被交道路两幅也接匝道：同样减车道
+            // 定向式、涡轮的被交道路两幅也接匝道：同样减车道
             if (IsStack && p.Legs[1].Form == RoadForm.Dual && m_RoadsByName.TryGetValue(crossName, out RoadInfo cross)
                 && FindOneWay(cross.IsHighway, cross.LanesPerDirection - rampLanes) is RoadInfo crossReduced
                 && m_PrefabResolver.TryResolve(crossReduced.Name, m_SelectedRoad, out NetPrefab crossReducedPrefab))
