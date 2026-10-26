@@ -22,6 +22,11 @@ namespace InterchangeMod.Generation.Junctions
         public bool IsHighway { get; set; }
         /// <summary>路口一侧节点的离地高度。</summary>
         public float Elevation { get; set; }
+        /// <summary>
+        /// 弯道适配：这一幅（或双向道路）从 Anchor 沿离开路口的方向往外追踪的俯视点（世界坐标，跟着同一条路接下去的路段走），
+        /// 没有时为 null（当直线）。
+        /// </summary>
+        public IReadOnlyList<Vec3>? Trace { get; set; }
     }
 
     /// <summary>匹配出的一条道路（两个相对的汇入臂）。</summary>
@@ -66,6 +71,25 @@ namespace InterchangeMod.Generation.Junctions
         public bool TeeSwapped { get; set; }
         /// <summary>无法匹配时的原因。</summary>
         public string? Error { get; set; }
+
+        /// <summary>
+        /// 弯道适配（docs/04）：从立交中心沿道路中心线往外的俯视点（世界坐标）。主线 Ahead 沿主线方向（MainAngle）、Behind 沿相反方向；
+        /// 被交道路 Ahead 沿 MainAngle + CrossingAngle、Behind 沿相反方向。没有那条臂（只对准一条道路时的被交道路、T 型的另一侧）时为 null。
+        /// </summary>
+        public IReadOnlyList<Vec3>? MainAheadTrace { get; set; }
+        public IReadOnlyList<Vec3>? MainBehindTrace { get; set; }
+        public IReadOnlyList<Vec3>? CrossAheadTrace { get; set; }
+        public IReadOnlyList<Vec3>? CrossBehindTrace { get; set; }
+
+        /// <summary>主线与被交道路对调时中心线跟着换（工具按上下层或面板换主线时用）：新被交道路方向是原主线的反方向。</summary>
+        public void SwapTraces()
+        {
+            (var mainAhead, var mainBehind) = (MainAheadTrace, MainBehindTrace);
+            MainAheadTrace = CrossAheadTrace;
+            MainBehindTrace = CrossBehindTrace;
+            CrossAheadTrace = mainBehind;
+            CrossBehindTrace = mainAhead;
+        }
     }
 
     /// <summary>
@@ -78,6 +102,8 @@ namespace InterchangeMod.Generation.Junctions
     {
         private const float kSameLegTolerance = 15f;
         private const float kOppositeTolerance = 20f;
+        /// <summary>同一条臂里两个路段在路口处横向相差不到这么多（米，至少；另按路宽的一半）时算同一幅。</summary>
+        private const float kSameLineMin = 2f;
 
         private sealed class Leg
         {
@@ -86,6 +112,8 @@ namespace InterchangeMod.Generation.Junctions
             public Vec3 Direction;
             public Vec3 CenterPoint;
             public MatchedRoad Road = new MatchedRoad();
+            /// <summary>这条臂的道路中心线（世界坐标，从臂的中心点往外）：取一幅的追踪点沿法向横移到中心线；没有追踪时为 null。</summary>
+            public List<Vec3>? Trace;
         }
 
         /// <param name="preferredAngle">当前朝向（度）：主线方向在两种可能里取离它近的那个。</param>
@@ -148,6 +176,10 @@ namespace InterchangeMod.Generation.Junctions
             result.Main = mainLeg.Road;
             result.Cross = crossLeg.Road;
             result.Center = Intersect(Midpoint(mainA, mainB), mainLeg.Direction, Midpoint(crossA, crossB), crossLeg.Direction);
+            result.MainAheadTrace = FromCenter(mainLeg, result.Center);
+            result.MainBehindTrace = FromCenter(mainLeg == mainA ? mainB : mainA, result.Center);
+            result.CrossAheadTrace = FromCenter(crossLeg, result.Center);
+            result.CrossBehindTrace = FromCenter(crossLeg == crossA ? crossB : crossA, result.Center);
             return result;
         }
 
@@ -178,7 +210,12 @@ namespace InterchangeMod.Generation.Junctions
                 var outward = leg.Edges.Concat(other.Edges).First(e => e.TravelOutward);
                 Vec3 travel = outward.Direction;
                 Vec3 driveSide = Directions.RightOf(travel) * (rightHandTraffic ? 1f : -1f);
-                linePoint = linePoint - driveSide * ((dualMedian + outward.Width) / 2f);
+                float half = (dualMedian + outward.Width) / 2f;
+                linePoint = linePoint - driveSide * half;
+                // 两条臂的追踪都是这一幅本身：同样挪到中心线（在行驶方向的另一侧；对每条臂按它自己的方向换算左右）
+                foreach (var l in new[] { leg, other })
+                    if (l.Trace != null)
+                        l.Trace = Shift(l.Trace, half * (rightHandTraffic ? 1f : -1f) * (Directions.Dot(l.Direction, travel) > 0f ? 1f : -1f));
                 result.Main = new MatchedRoad
                 {
                     Prefab = outward.Road, Form = RoadForm.Dual, Width = outward.Width, MedianWidth = dualMedian,
@@ -191,6 +228,20 @@ namespace InterchangeMod.Generation.Junctions
             Vec3 d = leg.Direction;
             float t = Directions.Dot(new Vec3(cursor.X - linePoint.X, 0f, cursor.Z - linePoint.Z), d);
             result.Center = new Vec3(linePoint.X + d.X * t, 0f, linePoint.Z + d.Z * t);
+            // 弯道：中心改取鼠标在实际道路中心线（两条臂的追踪接起来）上的最近点，主线方向取那里的切线，前后各从那里切开
+            if (leg.Trace != null && other.Trace != null)
+            {
+                var road = new List<Vec3>(other.Trace);
+                road.Reverse();
+                road.AddRange(leg.Trace.Skip(1));
+                if (SplitAt(road, cursor, out Vec3 center, out Vec3 direction, out var ahead, out var behind))
+                {
+                    result.Center = center;
+                    result.MainAngle = AngleOf(direction);
+                    result.MainAheadTrace = ahead;
+                    result.MainBehindTrace = behind;
+                }
+            }
             return result;
         }
 
@@ -222,6 +273,9 @@ namespace InterchangeMod.Generation.Junctions
             result.Main = mainLeg.Road;
             result.Cross = branch.Road;
             result.Center = Intersect(Midpoint(mainA, mainB), mainLeg.Direction, branch.CenterPoint, branch.Direction);
+            result.MainAheadTrace = FromCenter(mainLeg, result.Center);
+            result.MainBehindTrace = FromCenter(mainLeg == mainA ? mainB : mainA, result.Center);
+            result.CrossAheadTrace = FromCenter(branch, result.Center);
             return result;
         }
 
@@ -249,13 +303,33 @@ namespace InterchangeMod.Generation.Junctions
             foreach (var leg in legs)
             {
                 // 臂方向取各路段方向的平均；臂的中心点取各路段在路口一侧节点的平均
-                var sum = leg.Edges.Aggregate(Vec3.Zero, (acc, e) => acc + e.Direction);
-                leg.Direction = Vec3.Normalize(new Vec3(sum.X, 0f, sum.Z));
+                leg.Direction = MeanDirection(leg.Edges);
+                // 同一幅读出了不止一半（立体交叉时交叉点附近有节点，从节点开始的那一半也被收进来）：只留离路口最近的那一半，
+                // 否则臂的中心点偏向这一幅（双幅时偏几米），中心线从立交中心出发先横跨一下，读出几十米的假半径
+                Vec3 right = Directions.RightOf(leg.Direction);
+                var kept = new List<ExternalEdge>();
+                foreach (var e in leg.Edges.OrderBy(e => Directions.Dot(e.Anchor, leg.Direction)))
+                    if (!kept.Any(k => k.OneWay == e.OneWay && k.TravelOutward == e.TravelOutward
+                        && Math.Abs(Directions.Dot(e.Anchor - k.Anchor, right)) < Math.Max(kSameLineMin, Math.Min(e.Width, k.Width) / 2f)))
+                        kept.Add(e);
+                leg.Edges.Clear();
+                leg.Edges.AddRange(kept);
+                leg.Direction = MeanDirection(leg.Edges);
                 leg.Angle = AngleOf(leg.Direction);
                 var anchors = leg.Edges.Aggregate(Vec3.Zero, (acc, e) => acc + e.Anchor);
                 leg.CenterPoint = anchors * (1f / leg.Edges.Count);
+                // 中心线：取有追踪的一幅，沿它自己的法向横移它在路口处离臂中心点的横距（平行曲线，弯道上也准）
+                var traced = leg.Edges.FirstOrDefault(e => e.Trace != null && e.Trace.Count >= 2);
+                if (traced != null)
+                    leg.Trace = Shift(traced.Trace!, Directions.Dot(traced.Anchor - leg.CenterPoint, Directions.RightOf(leg.Direction)));
             }
             return legs;
+        }
+
+        private static Vec3 MeanDirection(IEnumerable<ExternalEdge> edges)
+        {
+            var sum = edges.Aggregate(Vec3.Zero, (acc, e) => acc + e.Direction);
+            return Vec3.Normalize(new Vec3(sum.X, 0f, sum.Z));
         }
 
         /// <summary>判断一条臂是双向还是双幅，填好道路信息。返回错误原因或 null。</summary>
@@ -298,6 +372,94 @@ namespace InterchangeMod.Generation.Junctions
         }
 
         private static Vec3 Midpoint(Leg a, Leg b) => (a.CenterPoint + b.CenterPoint) * 0.5f;
+
+        /// <summary>折线每个点沿该处法向（右侧）往回挪 offset：右侧 offset 米的一幅挪到中心线上。</summary>
+        private static List<Vec3> Shift(IReadOnlyList<Vec3> points, float offset)
+        {
+            var result = new List<Vec3>(points.Count);
+            for (int i = 0; i < points.Count; i++)
+            {
+                Vec3 d = points[Math.Min(points.Count - 1, i + 1)] - points[Math.Max(0, i - 1)];
+                float length = (float)Math.Sqrt(d.X * d.X + d.Z * d.Z);
+                Vec3 right = length > 1e-4f ? Directions.RightOf(new Vec3(d.X / length, 0f, d.Z / length)) : Vec3.Zero;
+                result.Add(new Vec3(points[i].X, 0f, points[i].Z) - right * offset);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// 从立交中心出发的这条臂的中心线：中心点在前，接臂的中心线（路口内那一小段当直线）；没有追踪时为 null。
+        /// 追踪的起点可能在中心后面（立体交叉时交叉点附近有节点，离开路口那一半从节点开始）：跳过没有超过中心 1 米的点，
+        /// 否则中心线先往回走再折返，读出来半径只有几米。追踪和中心横向对不上（臂的中心点、交点估得有偏差）时整条平移到
+        /// 过中心的位置：形状不变，中心线从中心出发时不先横跨一下（横差 2 米就读出二三十米的假半径）。
+        /// </summary>
+        private static List<Vec3>? FromCenter(Leg leg, Vec3 center)
+        {
+            if (leg.Trace == null)
+                return null;
+            var trace = Shift(leg.Trace, -Lateral(leg.Trace, center));
+            int start = 0;
+            while (start < trace.Count - 1 && Directions.Dot(trace[start] - center, leg.Direction) < 1f)
+                start++;
+            var result = new List<Vec3> { new Vec3(center.X, 0f, center.Z) };
+            result.AddRange(trace.Skip(start));
+            return result;
+        }
+
+        /// <summary>point 在折线 line 右侧多远（米）：取 point 沿线的投影落在的那一段（在起点之前时用第一段的延长线）。</summary>
+        private static float Lateral(IReadOnlyList<Vec3> line, Vec3 point)
+        {
+            for (int i = 0; i + 1 < line.Count; i++)
+            {
+                Vec3 d = line[i + 1] - line[i];
+                float length = (float)Math.Sqrt(d.X * d.X + d.Z * d.Z);
+                if (length < 1e-4f)
+                    continue;
+                Vec3 dir = new Vec3(d.X / length, 0f, d.Z / length);
+                Vec3 offset = new Vec3(point.X - line[i].X, 0f, point.Z - line[i].Z);
+                if (Directions.Dot(offset, dir) <= length || i + 2 == line.Count)
+                    return Directions.Dot(offset, Directions.RightOf(dir));
+            }
+            return 0f;
+        }
+
+        /// <summary>
+        /// 在折线 road 上找离 cursor 最近的点，从那里切成前后两段（都从切点往外）；direction 是那里沿折线方向的切线。
+        /// 折线太短时返回 false。
+        /// </summary>
+        private static bool SplitAt(List<Vec3> road, Vec3 cursor, out Vec3 center, out Vec3 direction, out List<Vec3> ahead, out List<Vec3> behind)
+        {
+            center = direction = Vec3.Zero;
+            ahead = behind = null!;
+            int best = -1;
+            float bestDistance = float.MaxValue, bestT = 0f;
+            for (int i = 0; i + 1 < road.Count; i++)
+            {
+                Vec3 a = road[i], b = road[i + 1];
+                float dx = b.X - a.X, dz = b.Z - a.Z, length2 = dx * dx + dz * dz;
+                if (length2 < 1e-6f)
+                    continue;
+                float t = Math.Max(0f, Math.Min(1f, ((cursor.X - a.X) * dx + (cursor.Z - a.Z) * dz) / length2));
+                float px = a.X + dx * t - cursor.X, pz = a.Z + dz * t - cursor.Z, distance = px * px + pz * pz;
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = i;
+                    bestT = t;
+                }
+            }
+            if (best < 0)
+                return false;
+            Vec3 p0 = road[best], p1 = road[best + 1];
+            center = Vec3.Lerp(p0, p1, bestT);
+            direction = Vec3.Normalize(new Vec3(p1.X - p0.X, 0f, p1.Z - p0.Z));
+            ahead = new List<Vec3> { center };
+            ahead.AddRange(road.Skip(best + 1));
+            behind = new List<Vec3> { center };
+            for (int i = best; i >= 0; i--)
+                behind.Add(road[i]);
+            return true;
+        }
 
         /// <summary>两条水平直线的交点（经过点 p1 方向 d1，经过点 p2 方向 d2）。</summary>
         private static Vec3 Intersect(Vec3 p1, Vec3 d1, Vec3 p2, Vec3 d2)

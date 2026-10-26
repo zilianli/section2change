@@ -26,6 +26,8 @@ export interface PanelSettings {
   RampPrefab: string;
   /** 鼠标指着已有道路时对准它所在的路口。 */
   MatchJunctions: boolean;
+  /** 弯道适配：对准弯道时立交整体顺着道路弯曲。 */
+  CurveFollow: boolean;
   /** 立交类型。 */
   InterchangeType: InterchangeType;
   /** 中式快速路节点的辅路预制体名，"" = 默认。 */
@@ -77,6 +79,11 @@ export interface MatchInfo {
   connected: number;
   /** 主线外部双向道路名：立交内部改用双幅并在臂端过渡时非空。 */
   mainTransition: string;
+  /** 弯道适配：主线 / 被交道路中心前后两侧的半径（米），0 = 直线。 */
+  mainRadii: [number, number];
+  crossRadii: [number, number];
+  /** 弯道内侧坡度超限、收紧后实际求解用的最大坡度；0 = 没收紧。 */
+  curveGrade: number;
 }
 
 /** 离地高度分段（与 C# ElevationBand 一致）。 */
@@ -128,6 +135,8 @@ export interface PanelState {
   anarchy?: boolean;
   /** 预览已固定（左键），等待在面板确认放置。 */
   pinned?: boolean;
+  /** 游戏已暂停（速度为 0）。 */
+  paused?: boolean;
   /** 空地放置时的朝向（度）；headingFree 为 true 时朝向由旋转键决定（没对准已有道路）。 */
   heading?: number;
   headingFree?: boolean;
@@ -174,6 +183,11 @@ export function confirmPlacement() {
 /** 取消固定：预览重新跟随鼠标。 */
 export function unpinPreview() {
   trigger(GROUP, "unpin");
+}
+
+/** 暂停游戏（游戏速度设为 0）。 */
+export function pauseGame() {
+  trigger(GROUP, "pause");
 }
 
 export function parseJson<T>(text: string, fallback: T): T {

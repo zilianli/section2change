@@ -30,7 +30,37 @@ namespace InterchangeMod.Generation
             return p;
         }
 
-        /// <summary>所有模板共用的校验：每条路段的最大坡度不能超过限制。</summary>
+        /// <summary>弯道上坡度超限时收紧最大坡度重新求解的次数上限。</summary>
+        private const int kCurveRetries = 3;
+
+        /// <summary>
+        /// 弯道上的立交（docs/04）：按直线生成后整体弯曲。弯道内侧的匝道被压短、坡度变陡，弯曲后检查坡度：超限时把求解用的
+        /// 最大坡度按超出比例收紧（再留 3%），重新配匝道长度、生成、弯曲，最多 kCurveRetries 次——这就是弯道求解较慢的原因。
+        /// used 是最后实际求解用的参数；仍超限的路段交给调用方用原来的上限 ValidateGeometry 报出来。
+        /// </summary>
+        public static List<RoadSegmentSpec> Bend(IInterchangeTemplate template, InterchangeParams p, CurveWarp warp, out InterchangeParams used)
+        {
+            used = p;
+            var segments = warp.Apply(template.Generate(p));
+            for (int attempt = 0; attempt < kCurveRetries && !warp.IsIdentity; attempt++)
+            {
+                float worst = segments.Max(s => s.Curve.MaxGrade());
+                if (worst <= p.MaxGrade + kGradeTolerance)
+                    break;
+                var tighter = used.Clone();
+                tighter.MaxGrade = used.MaxGrade * p.MaxGrade / worst * 0.97f;
+                tighter = FitRampLength(template, tighter);
+                if (template.ValidateParams(tighter).Count > 0)
+                    break;
+                used = tighter;
+                segments = warp.Apply(template.Generate(used));
+            }
+            return segments;
+        }
+
+        /// <summary>坡度检查留的余量（采样误差）。</summary>
+        private const float kGradeTolerance = 0.005f;
+
         /// <summary>
         /// 臂端：主线和被交道路上只属于一条路段的端点（匝道两端都接在别的路段上，不算）。
         /// 原路口改造时，保留下来的原有道路从这里接回立交。
@@ -131,7 +161,7 @@ namespace InterchangeMod.Generation
             {
                 float grade = s.Curve.MaxGrade();
                 // 留 0.5% 余量，避免采样误差误报
-                if (grade > p.MaxGrade + 0.005f)
+                if (grade > p.MaxGrade + kGradeTolerance)
                     errors.Add($"{s.Name} 坡度 {grade:P1} 超过上限 {p.MaxGrade:P1}");
             }
             return errors;

@@ -38,6 +38,8 @@ namespace InterchangeMod.Generation.Templates
         private const float kFlatMargin = 15f;
         /// <summary>右转匝道并行段之后再保持同高的长度（米）：贴角的右转匝道短，升降要尽早开始。</summary>
         private const float kRightFlatMargin = 5f;
+        /// <summary>道路上的节点离匝道真正并行重叠段末端的最小距离（米）：节点本身有大小。</summary>
+        private const float kNodeClearance = 5f;
         /// <summary>平行走的匝道与旁边道路（主路或另一条匝道）的净距（米）。</summary>
         private const float kParallelGap = 4f;
         /// <summary>右转匝道在转角处的最小转弯半径（米）。</summary>
@@ -171,9 +173,8 @@ namespace InterchangeMod.Generation.Templates
             var watch = System.Diagnostics.Stopwatch.StartNew();
             var plan = new Plan(p, m_Turbine);
             Trace?.Invoke($"solved in {watch.ElapsedMilliseconds} ms: {(plan.Fits ? "ok " + plan.Summary : plan.Errors[0])}");
-            // 失败时记下完整参数，便于在测试里还原
-            if (!plan.Fits)
-                Trace?.Invoke($"params: {key}");
+            // 记下完整参数（只在调试日志打开时），便于在测试里还原游戏里的情形
+            Trace?.Invoke($"params: {key}");
             m_Plans.Add((key, plan));
             if (m_Plans.Count > kPlanCache)
                 m_Plans.RemoveAt(0);
@@ -263,6 +264,8 @@ namespace InterchangeMod.Generation.Templates
             public string Name = "";
             public RampPath Path;
             public float FlatStart, FlatEnd, Level, H0, H1, PlateauStart, PlateauEnd;
+            /// <summary>两头水平段在真正并行重叠（横向分不开）之外多留的长度（米）。</summary>
+            public float FlatMargin = kFlatMargin;
             public bool HasPlateau;
             public List<float> Cuts = new List<float>();
             /// <summary>两头所接的那一幅和接点位置（沿该幅）。</summary>
@@ -764,7 +767,7 @@ namespace InterchangeMod.Generation.Templates
                             continue;
                         var ramp = new Ramp
                         {
-                            Path = path, FlatStart = flatS, FlatEnd = flatE, H0 = x.Height, H1 = t.Height,
+                            Path = path, FlatStart = flatS, FlatEnd = flatE, FlatMargin = kRightFlatMargin, H0 = x.Height, H1 = t.Height,
                             From = x, To = t, FromAt = x.At(path.Start), ToAt = t.At(path.End), Name = $"Right{x.Name}",
                         };
                         if (lefts.All(l => Clear(ramp, l)))
@@ -797,21 +800,25 @@ namespace InterchangeMod.Generation.Templates
                     for (int i = 0; i < lefts.Count; i++)
                     {
                         var left = lefts[i];
-                        // 驶出：往上游让，直到并行范围之后留 kMinSegment 也碰不到别的接点，接点也不在别的并行范围里
+                        // 驶出：往上游让，直到并行范围之后留 kMinSegment 也碰不到别的接点，接点也不在别的并行范围里。
+                        // 高架时两个接点相距超过一段的最大长度，中间要加节点（立柱）：它要落在并行范围之后、离下一个接点至少 kMinPiece
+                        float Apart(Carriageway line, float span) => Elevated(line.Height) > 0f && span > kMaxElevatedPiece ? kMinPiece : kMinSegment;
                         float e1 = 0f, e2 = 0f;
                         foreach (var other in Attaches(left.From).Where(a => a.Ramp != left))
                         {
                             float lo = left.FromAt, hi = left.FromAt + left.FlatStart;
-                            if (other.Node > lo - kMinSegment && other.Node < hi + kMinSegment)
-                                e1 = Math.Max(e1, hi + kMinSegment - other.Node);
+                            float apart = Apart(left.From, other.Node - lo);
+                            if (other.Node > lo - kMinSegment && other.Node < hi + apart)
+                                e1 = Math.Max(e1, hi + apart - other.Node);
                             if (lo > other.Lo - kMinSegment && lo < other.Hi + kMinSegment)
                                 e1 = Math.Max(e1, lo - other.Lo + kMinSegment);
                         }
                         foreach (var other in Attaches(left.To).Where(a => a.Ramp != left))
                         {
                             float lo = left.ToAt - left.FlatEnd, hi = left.ToAt;
-                            if (other.Node > lo - kMinSegment && other.Node < hi + kMinSegment)
-                                e2 = Math.Max(e2, other.Node + kMinSegment - lo);
+                            float apart = Apart(left.To, hi - other.Node);
+                            if (other.Node > lo - apart && other.Node < hi + kMinSegment)
+                                e2 = Math.Max(e2, other.Node + apart - lo);
                             if (hi > other.Lo - kMinSegment && hi < other.Hi + kMinSegment)
                                 e2 = Math.Max(e2, other.Hi + kMinSegment - hi);
                         }
@@ -868,7 +875,7 @@ namespace InterchangeMod.Generation.Templates
                     var path = Path(run, run);
                     rights.Add(new Ramp
                     {
-                        Path = path, FlatStart = flatS, FlatEnd = flatE, H0 = x.Height, H1 = t.Height,
+                        Path = path, FlatStart = flatS, FlatEnd = flatE, FlatMargin = kRightFlatMargin, H0 = x.Height, H1 = t.Height,
                         From = x, To = t, FromAt = x.At(path.Start), ToAt = t.At(path.End), Name = $"Right{x.Name}",
                     });
                 }
@@ -1187,8 +1194,17 @@ namespace InterchangeMod.Generation.Templates
                             float at = line.At(v);
                             under.Add((at - rw / 2f - kPillarThickness - kPillarMargin, at + rw / 2f + kPillarThickness + kPillarMargin));
                         }
+                // 放不开时节点可以落在水平段多留的余量里，但不能落在真正并行重叠（横向还没分开）的那段：
+                // 那里的节点之后的路段与匝道第一段不共用节点却相互重叠，游戏报“与现有物体重叠”
+                var strict = ramps.Where(r => r.From == line).Select(r => (r.FromAt, r.FromAt + r.FlatStart - r.FlatMargin + kNodeClearance))
+                    .Concat(ramps.Where(r => r.To == line).Select(r => (r.ToAt - r.FlatEnd + r.FlatMargin - kNodeClearance, r.ToAt)));
                 var cuts = Subdivide(sorted, kMaxElevatedPiece, under.Concat(attaches.Select(a => (a.Item2, a.Item3))).ToList())
-                    ?? (allowInOverlap ? Subdivide(sorted, kMaxElevatedPiece, under) : null);
+                    ?? (allowInOverlap ? Subdivide(sorted, kMaxElevatedPiece, under.Concat(strict).ToList()) : null);
+                if (cuts == null && allowInOverlap)
+                {
+                    cuts = Subdivide(sorted, kMaxElevatedPiece, under);
+                    Trace?.Invoke($"{line.Name}: elevated nodes fall inside a ramp overlap");
+                }
                 // 固定的节点（两端、匝道接点、跨主线处）也不能落在从下面穿过的匝道上方
                 return cuts != null && cuts.All(c => !under.Any(z => c > z.Item1 && c < z.Item2)) ? cuts : null;
             }

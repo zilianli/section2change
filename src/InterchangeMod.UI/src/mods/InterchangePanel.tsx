@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useValue } from "cs2/api";
 import { Button, Panel, Scrollable } from "cs2/ui";
-import { anarchyEnabled$, closeTool, confirmPlacement, ElevationBand, MatchInfo, PanelSettings, PanelState, parseJson, Resolved, RoadForm, roads$, RoadRow, setValue, state$, toggleAnarchy, unpinPreview } from "./bindings";
+import { anarchyEnabled$, closeTool, confirmPlacement, ElevationBand, pauseGame, MatchInfo, PanelSettings, PanelState, parseJson, Resolved, RoadForm, roads$, RoadRow, setValue, state$, toggleAnarchy, unpinPreview } from "./bindings";
 import { errorName, getStrings, Strings } from "./i18n";
 import { RoadPicker } from "./RoadPicker";
 import { Choice, SpacingStepper, Stepper } from "./Stepper";
@@ -83,6 +83,20 @@ export const InterchangePanel = () => {
       (r.rampAuto ? `（${t.target} ${r.rampTarget}，${t.mainRoad} ${r.mainLanes} ${t.lanesPerDirection}）` : "") +
       (straightRamps ? ` · ${Math.round(r.rampLength)} m` + (r.rampLength > s.RampLength ? `（${t.extended}）` : "") : "")
     : "";
+
+  // 游戏没暂停：整个面板挡住，只给暂停提示和按钮（人口多时求解容易卡死，工具这时也不预览）
+  if (state.paused === false)
+    return (
+      <div className={styles.container}>
+        <Panel header={`${t.title} · ${typeName}`} onClose={closeTool} className={styles.panel}>
+          <div className={styles.pauseBlock}>
+            <div className={styles.pauseTitle}>{t.pauseTitle}</div>
+            <div>{t.pauseHint}</div>
+            <Button variant="flat" className={styles.confirmButton} onSelect={pauseGame}>{t.pauseGame}</Button>
+          </div>
+        </Panel>
+      </div>
+    );
 
   return (
     <div className={styles.container}>
@@ -201,7 +215,13 @@ export const InterchangePanel = () => {
             <Choice label={t.matchSwitch} value={s.MatchJunctions ? "on" : "off"}
               options={[{ value: "on", text: t.on }, { value: "off", text: t.off }]}
               onChange={(v) => setValue("MatchJunctions", v === "on")} />
-            {s.MatchJunctions && <MatchDetails strings={t} match={match} />}
+            {/* 弯道适配：对准弯道时立交整体顺着道路弯曲；关掉时按直线放置 */}
+            {s.MatchJunctions && (
+              <Choice label={t.curveFollow} value={s.CurveFollow ? "on" : "off"}
+                options={[{ value: "on", text: t.on }, { value: "off", text: t.off }]}
+                onChange={(v) => setValue("CurveFollow", v === "on")} />
+            )}
+            {s.MatchJunctions && <MatchDetails strings={t} match={match} blocked={!!r && r.gameErrors.some((error) => error.blocking)} curveFollow={s.CurveFollow} />}
             {/* 三向立交对准立体交叉（十字当 T 型）：哪条路是主线 */}
             {s.MatchJunctions && tee && matched && match?.crossing && (
               <Choice label={t.teeMainRoad} value={s.TeeMainRoad === "upper" || s.TeeMainRoad === "lower" ? s.TeeMainRoad : "auto"}
@@ -466,7 +486,8 @@ const describeRoad = (t: Strings, encoded: string) => {
 };
 
 /** 路口匹配结果：没指着道路时给提示，无法匹配时说原因，已对准时列出道路和改造/叠建提示。 */
-const MatchDetails = ({ strings: t, match }: { strings: Strings; match?: MatchInfo }) => {
+/** blocked：游戏报了阻止放置的错误（弯道上时提示先把道路调整平直）。 */
+const MatchDetails = ({ strings: t, match, blocked, curveFollow }: { strings: Strings; match?: MatchInfo; blocked?: boolean; curveFollow: boolean }) => {
   if (!match || match.state === "none")
     return <div className={styles.note}>{t.matchHint}</div>;
   if (match.state === "error")
@@ -476,6 +497,7 @@ const MatchDetails = ({ strings: t, match }: { strings: Strings; match?: MatchIn
       <>
         <div className={styles.resolved}>{`${t.alignedRoad}：${describeRoad(t, match.main)}`}</div>
         <div className={styles.note}>{t.alignedRoadNote}</div>
+        <CurveNote strings={t} match={match} blocked={blocked} enabled={curveFollow} />
         <LevelNote strings={t} match={match} />
       </>
     );
@@ -487,8 +509,32 @@ const MatchDetails = ({ strings: t, match }: { strings: Strings; match?: MatchIn
       {match.mainTransition && <div className={styles.note}>{t.matchTransition}</div>}
       {match.crossing && <div className={styles.infoBox}>{t.matchCrossing}</div>}
       {match.dropsLeg && <div className={styles.infoBox}>{t.matchDropsLeg}</div>}
+      <CurveNote strings={t} match={match} blocked={blocked} enabled={curveFollow} />
       <LevelNote strings={t} match={match} />
     </>
+  );
+};
+
+/** 一条路的弯道半径：两侧都直 → 直线；两侧差不多 → 一个半径；否则两侧分别写。 */
+const describeRadii = (t: Strings, [ahead, behind]: [number, number]) => {
+  const one = (r: number) => (r > 0 ? `${Math.round(r)} ${t.meters}` : t.straight);
+  if (ahead === 0 && behind === 0) return t.straight;
+  if (ahead > 0 && behind > 0 && Math.abs(ahead - behind) < 0.05 * Math.max(ahead, behind)) return `${t.radius} ${one(ahead)}`;
+  return `${t.radius} ${one(ahead)} / ${one(behind)}`;
+};
+
+/** 弯道：显示两条路的半径，提示整体弯曲、求解较慢；坡度收紧时显示实际用的坡度。 */
+const CurveNote = ({ strings: t, match, blocked, enabled }: { strings: Strings; match: MatchInfo; blocked?: boolean; enabled: boolean }) => {
+  const curved = [...(match.mainRadii ?? [0, 0]), ...(match.crossRadii ?? [0, 0])].some((r) => r > 0);
+  if (!curved) return null;
+  return (
+    <div className={styles.warnings}>
+      <div>{`${t.curveRoads}：${t.mainRoad} ${describeRadii(t, match.mainRadii)} · ${t.crossRoad} ${describeRadii(t, match.crossRadii)}`}</div>
+      {!enabled && <div>{t.curveOff}</div>}
+      {enabled && <div>{t.curveNote}</div>}
+      {match.curveGrade > 0 && <div>{t.curveGrade.replace("{grade}", (match.curveGrade * 100).toFixed(1))}</div>}
+      {blocked && <div>{t.curveBlocked}</div>}
+    </div>
   );
 };
 

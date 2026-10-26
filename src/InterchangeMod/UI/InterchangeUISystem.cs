@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Colossal.UI.Binding;
 using Game.SceneFlow;
+using Game.Simulation;
 using Game.UI;
 using InterchangeMod.Generation;
 using InterchangeMod.Generation.Roads;
@@ -22,6 +23,8 @@ namespace InterchangeMod.UI
         public const string kGroup = "interchangeMod";
 
         private InterchangeToolSystem m_ToolSystem;
+        /// <summary>游戏速度（selectedSpeed 为 0 = 暂停）：面板在游戏运行时提示先暂停，人口多时求解不容易卡死。</summary>
+        private SimulationSystem m_SimulationSystem;
         private ValueBinding<string> m_State;
         private ValueBinding<string> m_Roads;
         private IReadOnlyList<RoadInfo> m_RoadsSource;
@@ -34,12 +37,14 @@ namespace InterchangeMod.UI
         {
             base.OnCreate();
             m_ToolSystem = World.GetOrCreateSystemManaged<InterchangeToolSystem>();
+            m_SimulationSystem = World.GetOrCreateSystemManaged<SimulationSystem>();
             AddBinding(m_State = new ValueBinding<string>(kGroup, "state", "{\"active\":false}"));
             AddBinding(m_Roads = new ValueBinding<string>(kGroup, "roads", "[]"));
             AddBinding(new TriggerBinding<string, string>(kGroup, "set", OnSet));
             AddBinding(new TriggerBinding(kGroup, "close", OnClose));
             AddBinding(new TriggerBinding(kGroup, "confirm", () => m_ToolSystem.RequestConfirm()));
             AddBinding(new TriggerBinding(kGroup, "unpin", () => m_ToolSystem.Unpin()));
+            AddBinding(new TriggerBinding(kGroup, "pause", () => m_SimulationSystem.selectedSpeed = 0f));
         }
 
         protected override void OnUpdate()
@@ -84,6 +89,7 @@ namespace InterchangeMod.UI
                 .Field("selectedRoad", m_ToolSystem.selectedRoadName)
                 .Field("anarchy", m_ToolSystem.anarchyAvailable)
                 .Field("pinned", m_ToolSystem.pinned)
+                .Field("paused", m_SimulationSystem.selectedSpeed == 0f)
                 .Field("heading", m_ToolSystem.headingDegrees)
                 .Field("headingFree", m_ToolSystem.headingFree)
                 .BeginObject("settings")
@@ -101,6 +107,7 @@ namespace InterchangeMod.UI
                 .Field(nameof(s.RampLanes), s.RampLanes)
                 .Field(nameof(s.RampPrefab), s.RampPrefab)
                 .Field(nameof(s.MatchJunctions), s.MatchJunctions)
+                .Field(nameof(s.CurveFollow), s.CurveFollow)
                 .Field(nameof(s.InterchangeType), s.InterchangeType ?? "Diamond")
                 .Field(nameof(s.FrontageRoadPrefab), s.FrontageRoadPrefab ?? "")
                 .Field(nameof(s.LaneBalance), s.LaneBalance)
@@ -129,6 +136,9 @@ namespace InterchangeMod.UI
                     .Field("state", snap.MatchState).Field("error", snap.MatchError).Field("legs", snap.MatchLegs)
                     .Field("angle", snap.MatchAngle).Field("main", snap.MatchMain).Field("cross", snap.MatchCross)
                     .Field("stacked", snap.MatchStacked).Field("crossing", snap.MatchCrossing).Field("dropsLeg", snap.MatchDropsLeg).Field("removed", snap.RemovedRoads).Field("connected", snap.ConnectedEnds).Field("baseFollows", snap.BaseFollows).Field("baseElevation", snap.BaseElevation).Field("mainTransition", snap.MainTransition)
+                    .BeginArray("mainRadii").Item(snap.MainRadiusAhead).Item(snap.MainRadiusBehind).EndArray()
+                    .BeginArray("crossRadii").Item(snap.CrossRadiusAhead).Item(snap.CrossRadiusBehind).EndArray()
+                    .Field("curveGrade", snap.CurveGrade)
                     .EndObject();
                 json.BeginObject("resolved")
                     .Field("mainElevation", snap.MainElevation).Field("crossElevation", snap.CrossElevation)

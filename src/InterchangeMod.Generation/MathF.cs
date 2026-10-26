@@ -16,6 +16,7 @@ namespace InterchangeMod.Generation
         public static float Sin(float x) => (float)Math.Sin(x);
         public static float Cos(float x) => (float)Math.Cos(x);
         public static float Tan(float x) => (float)Math.Tan(x);
+        public static float Atan2(float y, float x) => (float)Math.Atan2(y, x);
         public static float Ceiling(float x) => (float)Math.Ceiling(x);
     }
 }

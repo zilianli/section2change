@@ -19,6 +19,7 @@ namespace InterchangeMod.Placement
     /// 原路口改造：拆掉立交范围（Footprint）内的原有道路，范围外的部分保留并接回原来的节点。
     ///   每条和范围相交的原有道路写一个删除定义（和推土机一样），
     ///   范围外的每一段再写一个新建定义：在原有节点那一端接回原节点，在范围边界那一端新建节点。
+    ///   臂端压着的原有道路在臂端处切开，朝外的一侧（连同再往外经过普通路中节点、仍在范围里的几段）保留并接回立交。
     /// 这些定义和立交本身一起预览、一起确认，可以用游戏的撤销恢复。
     /// </summary>
     public static class RoadRemover
@@ -35,6 +36,15 @@ namespace InterchangeMod.Placement
         private const float kConnectElevation = 3f;
         /// <summary>臂端离原有道路中心线的最大距离（米）。</summary>
         private const float kConnectLateral = 6f;
+        /// <summary>
+        /// 臂端落在切掉的那部分里时，最多离切断点多远（米）也接：弯道上立交范围（凸包）横跨弯道内侧，原有道路在臂端之外
+        /// 还会在范围里走一段，切断点离臂端远了接不上；这时改在臂端处切，臂端之外那段保留并接回。
+        /// </summary>
+        private const float kConnectInside = 300f;
+        /// <summary>判断臂端哪一侧朝外时，沿原有道路前后各取多远（米）比较离立交中心的距离。</summary>
+        private const float kOutwardProbe = 10f;
+        /// <summary>臂端之外沿原路整段保留的路段数上限。</summary>
+        private const int kMaxKeptEdges = 32;
         /// <summary>接不上臂端的切断端再往外退的距离（米），另加这条路的半宽：宽路斜着穿出范围时，端头两角不伸进立交。</summary>
         private const float kUnconnectedGap = 10f;
 
@@ -77,7 +87,8 @@ namespace InterchangeMod.Placement
 
         /// <summary>
         /// 为每条要拆的道路写删除定义，并为范围外的部分写新建定义。
-        /// 保留部分在范围边界那一端如果附近有同一高度的臂端（legEnds，局部坐标），就直接从臂端开始，接回立交。
+        /// 每个臂端（legEnds，局部坐标）先找它压着的那段原有道路，在臂端处切开、保留朝外的一侧接回立交，再往外经过普通路中节点的
+        /// 路段整段保留（从 edges 里去掉，不拆）；其余保留部分在范围边界那一端如果附近有同一高度的臂端，也直接从臂端开始。
         /// 返回接上的臂端数。
         /// </summary>
         public static int CreateDefinitions(EntityCommandBuffer commandBuffer, EntityManager entityManager, List<Entity> edges,
@@ -90,70 +101,94 @@ namespace InterchangeMod.Placement
             var used = new bool[ends.Count];
             int connected = 0;
 
+            // 只按范围切的话，臂端压在整段都在范围里的路段上、或弯道上范围横跨弯道内侧（原有道路出了臂端还在范围里走一段）时，
+            // 切断点离臂端远，接不上：所以先按臂端切，保留离立交中心远的一侧
+            var attached = new Dictionary<Entity, List<(float T, bool KeepAfter, int End)>>();
+            for (int i = 0; i < ends.Count; i++)
+            {
+                Entity onEdge = Attach(entityManager, edges, ends[i], origin, ref terrain, out float t, out bool keepAfter);
+                if (onEdge == Entity.Null)
+                    continue;
+                if (!attached.TryGetValue(onEdge, out var list))
+                    attached[onEdge] = list = new List<(float T, bool KeepAfter, int End)>();
+                // 同一段上两处保留部分重叠（两个臂端朝外的方向相对）说明判断错了，只接先找到的
+                if (list.Any(a => keepAfter ? a.KeepAfter || a.T > t : !a.KeepAfter || a.T < t))
+                    continue;
+                list.Add((t, keepAfter, i));
+                used[i] = true;
+            }
+            var whole = KeepBeyond(entityManager, edges, attached);
+            edges.RemoveAll(whole.Contains);
+            if (Debug && whole.Count > 0)
+                Mod.log.Info($"[debug] kept {whole.Count} edges beyond the leg ends");
+
             foreach (Entity entity in edges)
             {
                 Edge edge = entityManager.GetComponentData<Edge>(entity);
                 Bezier4x3 curve = entityManager.GetComponentData<Curve>(entity).m_Bezier;
                 Entity prefab = entityManager.GetComponentData<PrefabRef>(entity).m_Prefab;
-                float halfWidth = entityManager.TryGetComponent(prefab, out NetGeometryData prefabGeometry) ? prefabGeometry.m_DefaultWidth / 2f : 0f;
+                float width = entityManager.TryGetComponent(prefab, out NetGeometryData geometry) ? geometry.m_DefaultWidth : 0f;
 
                 CreateDelete(commandBuffer, entity, edge, curve);
 
-                // 保留部分沿用原来的方向（单行道路的行驶方向不变）
+                // 保留部分沿用原来的方向（单行道路的行驶方向不变）：臂端压着的段保留臂端外侧，范围外另有和它不重叠的部分照常保留
                 float edgeLength = MathUtils.Length(curve);
+                var parts = new List<(float Start, float End, int StartTarget, int EndTarget)>();
+                attached.TryGetValue(entity, out var mine);
+                if (mine != null)
+                    foreach (var a in mine)
+                        parts.Add(a.KeepAfter ? (a.T, 1f, a.End, -1) : (0f, a.T, -1, a.End));
                 foreach (var (outsideStart, outsideEnd) in footprint.OutsideIntervals(ToLocal(curve, origin, yaw)))
                 {
+                    if (mine != null && parts.Any(q => q.Start < outsideEnd && outsideStart < q.End))
+                        continue;
                     float start = outsideStart, end = outsideEnd;
                     // 切断端：附近有同一高度的臂端就接上；接不上（比如在高架的臂端下面）就再退 kUnconnectedGap，避开臂端节点和立柱
-                    int startTarget = start > 0f ? FindEnd(ends, used, curve, edgeLength, ref start, ref terrain) : -1;
+                    int startTarget = start > 0f ? FindEnd(ends, used, curve, edgeLength, ref start, keepAfter: true, ref terrain) : -1;
                     if (startTarget >= 0)
                         used[startTarget] = true;
-                    int endTarget = end < 1f ? FindEnd(ends, used, curve, edgeLength, ref end, ref terrain) : -1;
+                    int endTarget = end < 1f ? FindEnd(ends, used, curve, edgeLength, ref end, keepAfter: false, ref terrain) : -1;
                     if (endTarget >= 0)
                         used[endTarget] = true;
                     // 高架的切断端还要多退一些：末端节点下有立柱，不能落在立交新建的道路上
                     if (start > 0f && startTarget < 0)
-                        start += (kUnconnectedGap + halfWidth + ElevatedExtra(MathUtils.Position(curve, start), ref terrain)) / edgeLength;
+                        start += (kUnconnectedGap + width / 2f + ElevatedExtra(MathUtils.Position(curve, start), ref terrain)) / edgeLength;
                     if (end < 1f && endTarget < 0)
-                        end -= (kUnconnectedGap + halfWidth + ElevatedExtra(MathUtils.Position(curve, end), ref terrain)) / edgeLength;
+                        end -= (kUnconnectedGap + width / 2f + ElevatedExtra(MathUtils.Position(curve, end), ref terrain)) / edgeLength;
+                    parts.Add((start, end, startTarget, endTarget));
+                }
 
+                foreach (var (start, end, startTarget, endTarget) in parts)
+                {
                     Bezier4x3 part = MathUtils.Cut(curve, new float2(start, end));
-                    if (end <= start || MathUtils.Length(part) < kMinRemainderLength)
+                    float length = end > start ? MathUtils.Length(part) : 0f;
+                    // 保留部分太短（比路宽还短）时游戏会报“形状无效”。如果它另一端是普通的路中节点（只接着同一种道路的下一段），
+                    // 就把下一段也拆掉，从臂端直接重建到下一段的另一端，两段合成一段（臂端就在节点上、保留部分为零时也这样接上）
+                    bool merged = false;
+                    if (length < width && (startTarget >= 0) != (endTarget >= 0) && (startTarget >= 0 ? end >= 1f : start <= 0f))
+                    {
+                        Entity node = startTarget >= 0 ? edge.m_End : edge.m_Start;
+                        var legEnd = startTarget >= 0 ? ends[startTarget] : ends[endTarget];
+                        merged = TryMergeThroughNode(commandBuffer, entityManager, node, entity, prefab, edges, legEnd, ref terrain, randomSeed++);
+                    }
+                    if (!merged && length < kMinRemainderLength)
                     {
                         if (startTarget >= 0) used[startTarget] = false;
                         if (endTarget >= 0) used[endTarget] = false;
                         continue;
                     }
-                    float startElevation = ElevationAt(part.a, ref terrain), endElevation = ElevationAt(part.d, ref terrain);
-                    if (startTarget >= 0)
-                    {
-                        Snap(ends[startTarget], ref part.a, ref part.b, ref startElevation);
-                        connected++;
-                    }
-                    if (endTarget >= 0)
-                    {
-                        Snap(ends[endTarget], ref part.d, ref part.c, ref endElevation);
-                        connected++;
-                    }
-
-                    // 保留部分太短（比路宽还短）时游戏会报“形状无效”。如果它另一端是普通的路中节点（只接着同一种道路的下一段），
-                    // 就把下一段也拆掉，从臂端直接重建到下一段的另一端，两段合成一段
-                    float length = MathUtils.Length(part);
-                    float width = entityManager.TryGetComponent(prefab, out NetGeometryData geometry) ? geometry.m_DefaultWidth : 0f;
-                    bool merged = false;
-                    if (length < width && (startTarget >= 0) != (endTarget >= 0))
-                    {
-                        Entity node = startTarget >= 0 ? edge.m_End : edge.m_Start;
-                        var legEnd = startTarget >= 0 ? ends[startTarget] : ends[endTarget];
-                        merged = (startTarget >= 0 ? end >= 1f : start <= 0f)
-                            && TryMergeThroughNode(commandBuffer, entityManager, node, entity, prefab, edges, legEnd, ref terrain, randomSeed++);
-                    }
+                    connected += (startTarget >= 0 ? 1 : 0) + (endTarget >= 0 ? 1 : 0);
                     if (Debug)
                         Mod.log.Info($"[debug] remainder of edge {entity.Index}: {length:F1} m (road {width:F0} m), " +
                             $"start {(startTarget >= 0 ? "leg end" : start <= 0f ? "original node" : "cut")}, " +
                             $"end {(endTarget >= 0 ? "leg end" : end >= 1f ? "original node" : "cut")}{(merged ? ", merged with the next edge" : "")}");
                     if (merged)
                         continue;
+                    float startElevation = ElevationAt(part.a, ref terrain), endElevation = ElevationAt(part.d, ref terrain);
+                    if (startTarget >= 0)
+                        Snap(ends[startTarget], ref part.a, ref part.b, ref startElevation);
+                    if (endTarget >= 0)
+                        Snap(ends[endTarget], ref part.d, ref part.c, ref endElevation);
                     NetCourseBuilder.CreateSegment(commandBuffer, prefab, part, startElevation, endElevation, randomSeed++,
                         start <= 0f ? edge.m_Start : Entity.Null,
                         end >= 1f ? edge.m_End : Entity.Null);
@@ -163,11 +198,102 @@ namespace InterchangeMod.Placement
         }
 
         /// <summary>
-        /// 切断点 t 附近、同一高度、还没接过的臂端：臂端在原有道路上的投影离切断点不超过 kConnectDistance，
-        /// 离道路中心线不超过 kConnectLateral。找到时把 t 改成投影位置（在那里重新切，保留部分不会折回），返回臂端序号；没有时返回 -1。
+        /// 臂端压着的那段要拆的原有道路（离中心线不超过 kConnectLateral、同一高度）：投影位置 t，保留离立交中心远的一侧
+        /// （keepAfter：t 之后）。那一侧短到不成一段（臂端就在节点上）的段排在后面，节点另一边那段也在 edges 里时用那段。
+        /// 没有时返回 Entity.Null。
+        /// </summary>
+        private static Entity Attach(EntityManager entityManager, List<Entity> edges, (float3 World, float Elevation) end, float3 origin,
+            ref TerrainHeightData terrain, out float t, out bool keepAfter)
+        {
+            Entity best = Entity.Null;
+            float bestScore = float.MaxValue;
+            t = 0f;
+            keepAfter = false;
+            // 调试：离臂端最近的原有道路（不论能不能接）
+            float nearest = float.MaxValue, nearestRise = 0f;
+            foreach (Entity entity in edges)
+            {
+                Bezier4x3 curve = entityManager.GetComponentData<Curve>(entity).m_Bezier;
+                float projected = NearestT(curve, end.World);
+                float3 onRoad = MathUtils.Position(curve, projected);
+                float lateral = math.distance(onRoad.xz, end.World.xz);
+                float rise = end.Elevation - ElevationAt(onRoad, ref terrain);
+                if (lateral < nearest)
+                {
+                    nearest = lateral;
+                    nearestRise = rise;
+                }
+                if (lateral > kConnectLateral || math.abs(rise) > kConnectElevation)
+                    continue;
+                float length = MathUtils.Length(curve);
+                float step = math.min(1f, kOutwardProbe / math.max(1f, length));
+                bool after = math.distancesq(MathUtils.Position(curve, math.min(1f, projected + step)).xz, origin.xz)
+                    > math.distancesq(MathUtils.Position(curve, math.max(0f, projected - step)).xz, origin.xz);
+                float score = lateral + ((after ? 1f - projected : projected) * length < kMinRemainderLength ? kConnectLateral : 0f);
+                if (score >= bestScore)
+                    continue;
+                best = entity;
+                bestScore = score;
+                t = projected;
+                keepAfter = after;
+            }
+            if (Debug)
+                Mod.log.Info($"[debug] leg end ({end.World.x:F1}, {end.World.z:F1}) elevation {end.Elevation:F1}: nearest old road {nearest:F1} m sideways, " +
+                    $"leg end {nearestRise:F1} m above it{(best == Entity.Null ? ", not connected" : "")}");
+            return best;
+        }
+
+        /// <summary>
+        /// 臂端之外沿原路往外：经过普通路中节点的下一段如果也在要拆的路段里（弯道上范围横跨弯道内侧），整段保留，直到路口、
+        /// 路的尽头或范围外。返回这些路段。
+        /// </summary>
+        private static HashSet<Entity> KeepBeyond(EntityManager entityManager, List<Entity> edges,
+            Dictionary<Entity, List<(float T, bool KeepAfter, int End)>> attached)
+        {
+            var whole = new HashSet<Entity>();
+            foreach (var pair in attached)
+                foreach (var a in pair.Value)
+                {
+                    Entity current = pair.Key;
+                    Edge edge = entityManager.GetComponentData<Edge>(current);
+                    Entity node = a.KeepAfter ? edge.m_End : edge.m_Start;
+                    for (int step = 0; step < kMaxKeptEdges; step++)
+                    {
+                        Entity next = NextAlongRoad(entityManager, node, current);
+                        if (next == Entity.Null || !edges.Contains(next) || attached.ContainsKey(next) || !whole.Add(next))
+                            break;
+                        Edge nextEdge = entityManager.GetComponentData<Edge>(next);
+                        node = nextEdge.m_Start == node ? nextEdge.m_End : nextEdge.m_Start;
+                        current = next;
+                    }
+                }
+            return whole;
+        }
+
+        /// <summary>普通路中节点 node 上除 self 外唯一的另一段道路；node 是路口（接着不止一段）或路的尽头时返回 Entity.Null。</summary>
+        private static Entity NextAlongRoad(EntityManager entityManager, Entity node, Entity self)
+        {
+            if (node == Entity.Null || !entityManager.HasBuffer<ConnectedEdge>(node))
+                return Entity.Null;
+            Entity next = Entity.Null;
+            foreach (ConnectedEdge connected in entityManager.GetBuffer<ConnectedEdge>(node, true))
+            {
+                if (connected.m_Edge == self || !IsRemovableRoad(entityManager, connected.m_Edge))
+                    continue;
+                if (next != Entity.Null)
+                    return Entity.Null;
+                next = connected.m_Edge;
+            }
+            return next;
+        }
+
+        /// <summary>
+        /// 切断点 t 附近、同一高度、还没接过的臂端：臂端在原有道路上的投影离切断点不超过 kConnectDistance（落在切掉的那部分里时
+        /// 放宽到 kConnectInside），离道路中心线不超过 kConnectLateral。keepAfter：保留部分在 t 之后（切断点是保留部分的起点）。
+        /// 找到时把 t 改成投影位置（在那里重新切，保留部分不会折回），返回臂端序号；没有时返回 -1。
         /// </summary>
         private static int FindEnd(List<(float3 World, float Elevation)> ends, bool[] used, Bezier4x3 curve, float edgeLength,
-            ref float t, ref TerrainHeightData terrain)
+            ref float t, bool keepAfter, ref TerrainHeightData terrain)
         {
             int best = -1;
             float bestLateral = kConnectLateral, bestT = t;
@@ -178,7 +304,9 @@ namespace InterchangeMod.Placement
                 float projected = NearestT(curve, ends[i].World);
                 float3 onRoad = MathUtils.Position(curve, projected);
                 float lateral = math.distance(onRoad.xz, ends[i].World.xz);
-                if (lateral > bestLateral || math.abs(projected - t) * edgeLength > kConnectDistance
+                // 沿路离切断点的距离：往切掉的那部分里为正
+                float inward = (keepAfter ? t - projected : projected - t) * edgeLength;
+                if (lateral > bestLateral || inward > kConnectInside || inward < -kConnectDistance
                     || math.abs(ends[i].Elevation - ElevationAt(onRoad, ref terrain)) > kConnectElevation)
                     continue;
                 best = i;
@@ -234,17 +362,8 @@ namespace InterchangeMod.Placement
         private static bool TryMergeThroughNode(EntityCommandBuffer commandBuffer, EntityManager entityManager, Entity node, Entity self,
             Entity prefab, List<Entity> removing, (float3 World, float Elevation) legEnd, ref TerrainHeightData terrain, int randomSeed)
         {
-            if (node == Entity.Null || !entityManager.HasBuffer<ConnectedEdge>(node))
-                return false;
-            Entity next = Entity.Null;
-            foreach (ConnectedEdge connected in entityManager.GetBuffer<ConnectedEdge>(node, true))
-            {
-                if (connected.m_Edge == self || !IsRemovableRoad(entityManager, connected.m_Edge))
-                    continue;
-                if (next != Entity.Null)
-                    return false;   // 节点是路口（接着不止一段），不能合并
-                next = connected.m_Edge;
-            }
+            // 节点是路口（接着不止一段）时不能合并
+            Entity next = NextAlongRoad(entityManager, node, self);
             if (next == Entity.Null || removing.Contains(next) || entityManager.GetComponentData<PrefabRef>(next).m_Prefab != prefab)
                 return false;
 

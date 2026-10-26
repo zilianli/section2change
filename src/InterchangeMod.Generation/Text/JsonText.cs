@@ -59,6 +59,15 @@ namespace InterchangeMod.Generation.Text
             return this;
         }
 
+        /// <summary>数组里的数字元素。</summary>
+        public JsonText Item(float value)
+        {
+            Comma();
+            m_Builder.Append(value.ToString("0.###", CultureInfo.InvariantCulture));
+            m_NeedComma = true;
+            return this;
+        }
+
         public override string ToString() => m_Builder.ToString();
 
         private JsonText Open(string? name, char bracket)

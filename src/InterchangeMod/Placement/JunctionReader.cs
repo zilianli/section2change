@@ -135,6 +135,8 @@ namespace InterchangeMod.Placement
                         LanesPerDirection = info.LanesPerDirection,
                         IsHighway = info.IsHighway,
                         Elevation = nodePosition.y - TerrainUtils.SampleHeight(ref terrain, nodePosition),
+                        // 弯道适配：沿这条路往外追踪中心线
+                        Trace = Trace(entityManager, atStart ? curve.m_Bezier : Reverse(curve.m_Bezier), other, edgeEntity),
                     });
                 }
             }
@@ -260,7 +262,14 @@ namespace InterchangeMod.Placement
                 bool backward = lengthBefore > 0.5f && !(lengthBefore < kTeeReach && IsDeadEnd(entityManager, edge.m_Start));
                 if (!forward && !backward)
                     continue;
-                result.AddRange(CrossingReader.Split(ToCrossingRoad(curve, info), t, elevation, forward, backward));
+                var halves = CrossingReader.Split(ToCrossingRoad(curve, info), t, elevation, forward, backward).ToList();
+                // 弯道适配：两半各自往外追踪（Split 先给沿曲线方向的一半）
+                int half = 0;
+                if (forward)
+                    halves[half++].Trace = Trace(entityManager, MathUtils.Cut(curve, new float2(t, 1f)), edge.m_End, candidate);
+                if (backward)
+                    halves[half].Trace = Trace(entityManager, Reverse(MathUtils.Cut(curve, new float2(0f, t))), edge.m_Start, candidate);
+                result.AddRange(halves);
                 matched.Add(candidate);
             }
             return result;
@@ -495,6 +504,62 @@ namespace InterchangeMod.Placement
             float2 db = math.normalizesafe(MathUtils.Tangent(entityManager.GetComponentData<Curve>(b).m_Bezier, 0.5f).xz);
             return math.abs(math.dot(da, db)) >= math.cos(math.radians(25f));
         }
+
+        /// <summary>弯道适配：沿道路往外追踪中心线的长度（米，大型立交缓坡时臂端离中心可达一千多米）和取点间距。</summary>
+        private const float kTraceLength = 2000f, kTraceStep = 4f;
+
+        /// <summary>
+        /// 弯道适配（docs/04）：从 first（已按离开路口的方向）出发往外取俯视点，到头的节点上接着走与当前方向最一致
+        /// （夹角 30° 内）的道路路段，直到 kTraceLength 米或没有路可走（之后按直线延伸，见 Centerline）。
+        /// </summary>
+        private static List<Vec3> Trace(EntityManager entityManager, Bezier4x3 first, Entity farNode, Entity fromEdge)
+        {
+            var points = new List<Vec3>();
+            var visited = new HashSet<Entity> { fromEdge };
+            float length = 0f, alignedEnough = math.cos(math.radians(30f));
+            Bezier4x3 curve = first;
+            Entity node = farNode;
+            while (true)
+            {
+                float curveLength = MathUtils.Length(curve.xz);
+                int n = math.max(1, (int)math.ceil(curveLength / kTraceStep));
+                for (int i = points.Count == 0 ? 0 : 1; i <= n; i++)
+                {
+                    float3 p = MathUtils.Position(curve, (float)i / n);
+                    points.Add(new Vec3(p.x, 0f, p.z));
+                }
+                length += curveLength;
+                if (length >= kTraceLength || node == Entity.Null || !entityManager.HasBuffer<ConnectedEdge>(node))
+                    break;
+                float2 direction = math.normalizesafe(MathUtils.EndTangent(curve).xz);
+                Entity next = Entity.Null, nextNode = Entity.Null;
+                Bezier4x3 nextCurve = default;
+                float best = alignedEnough;
+                foreach (ConnectedEdge connected in entityManager.GetBuffer<ConnectedEdge>(node, true))
+                {
+                    if (visited.Contains(connected.m_Edge) || !TryGetRoadEdge(entityManager, connected.m_Edge, out Edge edge, out Curve c))
+                        continue;
+                    bool atStart = edge.m_Start == node;
+                    Bezier4x3 oriented = atStart ? c.m_Bezier : Reverse(c.m_Bezier);
+                    float alignment = math.dot(direction, math.normalizesafe(MathUtils.StartTangent(oriented).xz));
+                    if (alignment > best)
+                    {
+                        best = alignment;
+                        next = connected.m_Edge;
+                        nextCurve = oriented;
+                        nextNode = atStart ? edge.m_End : edge.m_Start;
+                    }
+                }
+                if (next == Entity.Null)
+                    break;
+                visited.Add(next);
+                curve = nextCurve;
+                node = nextNode;
+            }
+            return points;
+        }
+
+        private static Bezier4x3 Reverse(Bezier4x3 c) => new Bezier4x3(c.d, c.c, c.b, c.a);
 
         private static Bezier3 Flat(Bezier4x3 curve) => new Bezier3(
             new Vec3(curve.a.x, 0f, curve.a.z), new Vec3(curve.b.x, 0f, curve.b.z),

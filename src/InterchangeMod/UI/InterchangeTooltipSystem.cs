@@ -28,6 +28,12 @@ namespace InterchangeMod.UI
                 return;
             string locale = GameManager.instance.localizationManager.activeLocaleId ?? "";
             bool zh = locale.StartsWith("zh");
+            if (!m_ToolSystem.paused)
+            {
+                m_Tooltip.value = LocalizedString.Value(zh ? "请先暂停游戏（人口多时求解可能卡死）· 右键退出" : "Pause the game first (solving can freeze large cities) · Right click to exit");
+                AddMouseTooltip(m_Tooltip);
+                return;
+            }
             string text = m_ToolSystem.pinned
                 ? zh ? "已固定：在面板确认放置 · 右键取消固定" : "Pinned: confirm in the panel · Right click to unpin"
                 : zh ? "左键固定预览 · 右键退出" : "Left click to pin · Right click to exit";

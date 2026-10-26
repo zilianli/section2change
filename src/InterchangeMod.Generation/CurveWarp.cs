@@ -6,38 +6,60 @@ using InterchangeMod.Generation.Geometry;
 namespace InterchangeMod.Generation
 {
     /// <summary>
-    /// 弯道适配：立交按直线生成后整体沿弧线弯曲（方案见 docs/04）。局部坐标里主线沿 ê_m = FromAngle(0)、被交道路沿
+    /// 弯道适配：立交按直线生成后整体沿实际道路的中心线弯曲（方案见 docs/04）。局部坐标里主线沿 ê_m = FromAngle(0)、被交道路沿
     /// ê_c = FromAngle(交角)，中心在原点；斜坐标 p = a·ê_m + b·ê_c。
-    ///   沿主线弯 W_M(p) = A_m(a) + Rot(φ_m(a))·(b·ê_c)：主线中心线和与它平行的各幅精确落在平行弧上；
-    ///   沿被交道路弯 W_C(p) = A_c(b) + Rot(φ_c(b))·(a·ê_m)：对被交道路同样精确（被交道路中心线上 t = 1，W_M 不用管它）；
-    ///   混合 W = (1 − t)·W_M + t·W_C，t = smoothstep(0.35, 0.65, |b| / (|a| + |b|))：离主线近用 W_M、离被交道路近用 W_C，
-    ///   两条路和各自的平行各幅都精确，象限里的匝道被平滑拉伸 / 压缩。
-    /// A(s) 是弧长 s 处的弧上点，曲率 κ 为正时向前进方向的右侧弯（右 = Directions.RightOf）；φ(s) = κ·s。
+    ///   沿主线弯 W_M(p) = A_m(a) + Rot(φ_m(a))·A_c(b)：主线中心线和与它平行的各幅精确落在平行线上（被交道路中心线也在）；
+    ///   沿被交道路弯 W_C(p) = A_c(b) + Rot(φ_c(b))·A_m(a)：对被交道路和它的平行各幅同样精确（主线中心线也在）；
+    ///   混合 W = (1 − t)·W_M + t·W_C。每条路中心线两侧 kCorridor 米是它的“走廊”（各幅、拉宽的分隔带、贴着走的匝道），
+    ///   距离按扣掉走廊算：d_m = max(0, 离主线距离 − kCorridor)，d_c 同理，t = smoothstep(0.1, 0.9, d_m / (d_m + d_c + kSoftness))。
+    ///   走廊里横向各处 t 相同，平行的各幅和匝道一起弯、相对位置不变（分流、汇入处不会被扭出“形状无效”）；
+    ///   两条走廊重叠的中心区主线优先（t = 0），被交道路的两幅在那里略有偏转，离开主线走廊约 kSoftness × 9 米后完全精确；
+    ///   象限里的匝道被平滑拉伸 / 压缩（两条路都弯时这是必然的）。
+    /// A(s) 是这条路中心线上离中心弧长 s 处的点，φ(s) 是那里切线相对中心处转过的角度（Centerline，不必是圆弧）；
+    /// 每条路中心前后两侧各一条中心线（例如一侧直、一侧弯），两侧在中心处都与原方向相切。
     /// 高度（Y）不变。同一个局部点总是得到同一个结果，共用的节点照样精确相等。
     /// </summary>
     public sealed class CurveWarp
     {
         /// <summary>数值求雅可比矩阵（变换控制点的切线）的差分步长（米）。</summary>
         private const float kStep = 0.5f;
+        /// <summary>每条路中心线两侧算作它的走廊的宽度（米）：各幅、拉宽的分隔带、贴着走的匝道都在里面。</summary>
+        private const float kCorridor = 60f;
+        /// <summary>离开走廊后两种弯法过渡的快慢（米）：被交道路走廊里离开主线走廊 9 倍这么远后完全按被交道路弯；再小时象限里的苜蓿叶环道被压得太陡，再大时立交两端对不准原有道路。</summary>
+        private const float kSoftness = 20f;
 
         private readonly Vec3 m_Main, m_Cross;
-        private readonly float m_MainCurvature, m_CrossCurvature;
+        private readonly Centerline m_MainAhead, m_MainBehind, m_CrossAhead, m_CrossBehind;
+        private readonly float m_MainYaw, m_CrossYaw;
         private readonly float m_Det;
 
-        /// <param name="crossingAngle">被交道路方向（度，相对主线顺时针），即 Legs[1].Angle。</param>
-        /// <param name="mainCurvature">主线曲率 1/R（沿 ê_m 前进向右弯为正；0 = 直线）。</param>
-        /// <param name="crossCurvature">被交道路曲率（沿 ê_c 前进向右弯为正）。</param>
+        /// <summary>两条路各是一段圆弧：曲率 κ（沿 ê 前进向右弯为正，0 = 直线），中心前后是同一个圆。</summary>
         public CurveWarp(float crossingAngle, float mainCurvature, float crossCurvature)
+            : this(crossingAngle, ArcFrom(mainCurvature), ArcFrom(-mainCurvature), ArcFrom(crossCurvature), ArcFrom(-crossCurvature))
+        {
+        }
+
+        /// <param name="crossingAngle">被交道路方向（度，相对主线顺时针），即 Legs[1].Angle。</param>
+        /// <param name="mainAhead">主线从中心沿 ê_m 往前的中心线；mainBehind 是沿 −ê_m 往后的（都按“离开中心”的方向记）。</param>
+        /// <param name="crossAhead">被交道路沿 ê_c 往前的中心线；crossBehind 是沿 −ê_c 的。</param>
+        public CurveWarp(float crossingAngle, Centerline mainAhead, Centerline mainBehind, Centerline crossAhead, Centerline crossBehind)
         {
             m_Main = Directions.FromAngle(0f);
             m_Cross = Directions.FromAngle(crossingAngle);
-            m_MainCurvature = mainCurvature;
-            m_CrossCurvature = crossCurvature;
+            m_MainYaw = 0f;
+            m_CrossYaw = crossingAngle * Directions.DegToRad;
+            m_MainAhead = mainAhead;
+            m_MainBehind = mainBehind;
+            m_CrossAhead = crossAhead;
+            m_CrossBehind = crossBehind;
             m_Det = Cross2(m_Main, m_Cross);
+            IsIdentity = mainAhead.IsStraight && mainBehind.IsStraight && crossAhead.IsStraight && crossBehind.IsStraight;
         }
 
+        private static Centerline ArcFrom(float curvature) => curvature == 0f ? Centerline.Straight : Centerline.Arc(curvature);
+
         /// <summary>两条路都是直线：不用弯。</summary>
-        public bool IsIdentity => m_MainCurvature == 0f && m_CrossCurvature == 0f;
+        public bool IsIdentity { get; }
 
         /// <summary>局部点弯曲后的位置（Y 不变）。</summary>
         public Vec3 Apply(Vec3 p)
@@ -46,18 +68,21 @@ namespace InterchangeMod.Generation
                 return p;
             // 斜坐标：p = a·ê_m + b·ê_c
             float a = Cross2(p, m_Cross) / m_Det, b = Cross2(m_Main, p) / m_Det;
-            Vec3 arcMain = Arc(m_Main, m_MainCurvature, a), arcCross = Arc(m_Cross, m_CrossCurvature, b);
-            Vec3 alongMain = arcMain + (m_Cross * b).RotateY(m_MainCurvature * a);
-            Vec3 alongCross = arcCross + (m_Main * a).RotateY(m_CrossCurvature * b);
-            float sum = Math.Abs(a) + Math.Abs(b);
-            float t = sum < 1e-3f ? 0.5f : SmoothStep(0.35f, 0.65f, Math.Abs(b) / sum);
+            var (arcMain, turnMain) = Along(m_MainAhead, m_MainBehind, m_MainYaw, a);
+            var (arcCross, turnCross) = Along(m_CrossAhead, m_CrossBehind, m_CrossYaw, b);
+            Vec3 alongMain = arcMain + arcCross.RotateY(turnMain);
+            Vec3 alongCross = arcCross + arcMain.RotateY(turnCross);
+            // 到两条中心线的垂直距离扣掉走廊：走廊里横向各处 t 相同；中心区（都在走廊里）主线优先
+            float sin = Math.Abs(m_Det);
+            float dm = Math.Max(0f, Math.Abs(b) * sin - kCorridor), dc = Math.Max(0f, Math.Abs(a) * sin - kCorridor);
+            float t = SmoothStep(0.1f, 0.9f, dm / (dm + dc + kSoftness));
             Vec3 flat = alongMain * (1f - t) + alongCross * t;
             return new Vec3(flat.X, p.Y, flat.Z);
         }
 
         /// <summary>
         /// 路段弯曲：端点和节点按 Apply 变换；两头切线方向按端点处的雅可比矩阵变换（相邻路段在共用节点处仍相切），
-        /// 两个控制柄的长度按最小二乘贴合逐点弯曲的原曲线。高度方向的控制柄不变。
+        /// 两个控制柄的长度按最小二乘贴合逐点弯曲的原曲线（控制柄连同高度方向一起缩放，两端坡度不变）。
         /// </summary>
         public RoadSegmentSpec Apply(RoadSegmentSpec segment)
         {
@@ -67,7 +92,8 @@ namespace InterchangeMod.Generation
             Vec3 p0 = Apply(c.P0), p3 = Apply(c.P3);
             Vec3 d0 = Jacobian(c.P0, c.P1 - c.P0), d3 = Jacobian(c.P3, c.P2 - c.P3);
             var (k0, k3) = FitHandles(c, p0, p3, d0, d3);
-            var curve = new Bezier3(p0, p0 + Flat(d0) * k0 + Vertical(d0), p3 + Flat(d3) * k3 + Vertical(d3), p3);
+            // 控制柄整体缩放（连同高度方向）：两端的坡度与弯曲前相同
+            var curve = new Bezier3(p0, p0 + d0 * k0, p3 + d3 * k3, p3);
             return new RoadSegmentSpec(segment.Name, segment.Role, curve, segment.Prefab, Apply(segment.StartNode), Apply(segment.EndNode));
         }
 
@@ -98,10 +124,6 @@ namespace InterchangeMod.Generation
             return k0 > 0.3f && k0 < 3f && k3 > 0.3f && k3 < 3f ? (k0, k3) : (1f, 1f);
         }
 
-        private static Vec3 Flat(Vec3 v) => new Vec3(v.X, 0f, v.Z);
-
-        private static Vec3 Vertical(Vec3 v) => new Vec3(0f, v.Y, 0f);
-
         public List<RoadSegmentSpec> Apply(IEnumerable<RoadSegmentSpec> segments) => segments.Select(Apply).ToList();
 
         /// <summary>切线 v（在 p 处）弯曲后的样子：水平分量按数值雅可比矩阵变换，竖直分量不变。</summary>
@@ -116,15 +138,13 @@ namespace InterchangeMod.Generation
             return new Vec3(d.X, v.Y, d.Z);
         }
 
-        /// <summary>沿 dir 方向、曲率 κ 的弧上弧长 s 处的点（相对弧起点），κ 为正时向 dir 的右侧弯。</summary>
-        private static Vec3 Arc(Vec3 dir, float curvature, float s)
-        {
-            if (Math.Abs(curvature) < 1e-7f)
-                return dir * s;
-            float angle = curvature * s;
-            float half = MathF.Sin(angle / 2f);
-            return dir * (MathF.Sin(angle) / curvature) + Directions.RightOf(dir) * (2f * half * half / curvature);
-        }
+        /// <summary>
+        /// 一条路中心线上离中心弧长 s（正 = 前方、负 = 后方）处的点，以及那里沿前进方向的切线相对中心处转过的角度。
+        /// 后方那条按“离开中心”记：转到 −ê 方向；反过来走时切线反向，转角不变号（向它左边弯 = 沿前进方向往右弯的另一半）。
+        /// </summary>
+        private static (Vec3, float) Along(Centerline ahead, Centerline behind, float yaw, float s) => s >= 0f
+            ? (ahead.Point(s).RotateY(yaw), ahead.Angle(s))
+            : (behind.Point(-s).RotateY(yaw + MathF.PI), behind.Angle(-s));
 
         private static float Cross2(Vec3 u, Vec3 v) => u.X * v.Z - u.Z * v.X;
 

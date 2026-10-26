@@ -260,7 +260,7 @@ namespace InterchangeMod.Generation.Templates
                                 continue;
                             var ramp = new Ramp
                             {
-                                Path = path, FlatStart = flatS, FlatEnd = flatE, H0 = x.Height, H1 = t.Height,
+                                Path = path, FlatStart = flatS, FlatEnd = flatE, FlatMargin = kRightFlatMargin, H0 = x.Height, H1 = t.Height,
                                 From = x, To = t, FromAt = x.At(path.Start), ToAt = t.At(path.End), Name = $"Right{x.Name}",
                             };
                             if (ramp.FromAt + ramp.FlatStart > latestExit || ramp.ToAt - ramp.FlatEnd < earliestEntry)

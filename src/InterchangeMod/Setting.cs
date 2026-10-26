@@ -140,6 +140,9 @@ namespace InterchangeMod
         /// <summary>鼠标指着已有道路时，对准它所在的路口（方向、道路、分隔带都跟随路口）。</summary>
         [SettingsUIHidden] public bool MatchJunctions { get; set; }
 
+        /// <summary>弯道适配：对准弯道时立交整体顺着道路弯曲（关掉时按直线放置）。</summary>
+        [SettingsUIHidden] public bool CurveFollow { get; set; }
+
         /// <summary>最近使用的道路（RecentList 序列化）。</summary>
         [SettingsUIHidden] public string RecentRoads { get; set; }
 
@@ -203,6 +206,7 @@ namespace InterchangeMod
             RampLanes = 0;
             RampPrefab = "";
             MatchJunctions = true;
+            CurveFollow = true;
             RecentRoads = "";
             DebugLogging = false;
         }
@@ -229,6 +233,7 @@ namespace InterchangeMod
                     CloverleafCollectorMode = value == "auto" || value == "main" || value == "both" ? value : "none";
                     return true;
                 case nameof(MatchJunctions): MatchJunctions = value == "true"; return true;
+                case nameof(CurveFollow): CurveFollow = value == "true"; return true;
                 case nameof(CrossingAngle): CrossingAngle = Clamp(number, 45f, 135f); return true;
                 case nameof(RampLength): RampLength = Clamp(number, 60f, 500f); return true;
                 case nameof(MedianWidth): MedianWidth = Clamp(number, 0f, 96f); return true;

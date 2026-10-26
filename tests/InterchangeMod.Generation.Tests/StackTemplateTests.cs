@@ -287,6 +287,57 @@ namespace InterchangeMod.Generation.Tests
                 }
         }
 
+        [Theory]
+        // 游戏内实测参数（调试日志 stack: params）：坡度 6% 以上时被交道路高架段（每段短于 70 米）在左转匝道分流的并行段里加了节点，
+        // 节点之后那段与匝道第一段不共用节点却重叠，游戏报“与现有物体重叠”“形状无效”
+        [InlineData(88.5f, 0.23f, 10.13f, 20f, 8f, "Highway Oneway - 2 lanes", 0.06f)]
+        [InlineData(88.5f, 0.23f, 10.13f, 20f, 8f, "Highway Oneway - 2 lanes", 0.07f)]
+        [InlineData(76.6f, 21.26f, 30f, 20f, 8f, "Highway Oneway - 2 lanes", 0.06f)]
+        [InlineData(90f, 10f, 17.5f, 16f, 4f, "Highway Oneway - 1 lane", 0.07f)]
+        public void LeftExitSteepGradeNodesClearOfRamps(float angle, float mainElevation, float crossElevation, float crossWidth, float crossMedian,
+            string crossReduced, float grade)
+        {
+            var p = new InterchangeParams
+            {
+                Legs = InterchangeParams.CrossLegs(angle, 0, 1), RampPrefab = "Highway Oneway - 2 lanes", RampWidth = 12f, RampSideGap = 2f,
+                MainReducedPrefab = "Highway Oneway - 2 lanes", MainReducedWidth = 12f, CrossReducedPrefab = crossReduced, CrossReducedWidth = GameWidth(crossReduced),
+                StackLeftExit = true, MaxGrade = grade,
+            };
+            p.SetRoad(0, 2, RoadForm.Dual, 20f, 8f, "Highway Oneway - 4 lanes");
+            p.SetRoad(1, 3, RoadForm.Dual, crossWidth, crossMedian, crossWidth > 16f ? "Highway Oneway - 4 lanes" : "Highway Oneway - 3 lanes");
+            p.Levels[0].Elevation = mainElevation;
+            p.Levels[1].Elevation = crossElevation;
+            foreach (var leg in p.Legs)
+                leg.StubLength = 80f;
+            Assert.Empty(_template.ValidateParams(p));
+            var segments = _template.Generate(p);
+            Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
+            // 同一高度（2 米内）、不共用节点的两段路面不重叠（同一条路 / 匝道相隔一段的两段在弯道上挨着，游戏不报，不查）
+            string Chain(RoadSegmentSpec s) => s.Name.Substring(0, s.Name.LastIndexOf('-'));
+            var samples = segments.Select(s => Enumerable.Range(0, 41).Select(i => s.Curve.Evaluate(i / 40f)).ToArray()).ToArray();
+            for (int i = 0; i < segments.Count; i++)
+                for (int j = i + 1; j < segments.Count; j++)
+                {
+                    var a = segments[i];
+                    var b = segments[j];
+                    var nodesA = new[] { a.StartNode, a.EndNode };
+                    if (nodesA.Contains(b.StartNode) || nodesA.Contains(b.EndNode) || Chain(a) == Chain(b))
+                        continue;
+                    float reach = (GameWidth(a.Prefab) + GameWidth(b.Prefab)) / 2f - 0.5f;
+                    foreach (var u in samples[i])
+                        foreach (var v in samples[j])
+                        {
+                            float dx = u.X - v.X, dz = u.Z - v.Z;
+                            Assert.False(dx * dx + dz * dz < reach * reach && System.Math.Abs(u.Y - v.Y) < 2f,
+                                $"{a.Name} and {b.Name} overlap near ({u.X:F0}, {u.Y:F1}, {u.Z:F0})");
+                        }
+                }
+        }
+
+        /// <summary>游戏里公路单行道路的宽度（米）。</summary>
+        private static float GameWidth(string? prefab) =>
+            prefab == null ? 12f : prefab.EndsWith("4 lanes") ? 20f : prefab.EndsWith("3 lanes") ? 16f : prefab.EndsWith("2 lanes") ? 12f : 8f;
+
         [Fact]
         public void CrossRoadMustBeAboveMain()
         {

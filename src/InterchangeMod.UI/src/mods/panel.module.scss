@@ -213,6 +213,22 @@
   margin-bottom: 3rem;
 }
 
+// 没暂停时挡住整个面板的提示
+.pauseBlock {
+  margin: 8rem 0;
+  padding: 10rem 12rem;
+  font-size: 13rem;
+  color: rgb(255, 215, 140);
+  background-color: rgba(200, 140, 30, 0.2);
+  border-radius: 4rem;
+}
+
+.pauseTitle {
+  font-size: 16rem;
+  font-weight: bold;
+  margin-bottom: 6rem;
+}
+
 // 两步放置：确认放置 / 取消固定
 .confirmRow {
   display: flex;

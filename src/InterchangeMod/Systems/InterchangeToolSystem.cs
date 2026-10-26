@@ -52,6 +52,8 @@ namespace InterchangeMod.Systems
         private TerrainSystem m_TerrainSystem;
         private CityConfigurationSystem m_CityConfigurationSystem;
         private Game.Net.SearchSystem m_NetSearchSystem;
+        /// <summary>游戏速度：没暂停时不求解、不预览（人口多的城市里求解容易让游戏卡死），面板只显示暂停提示。</summary>
+        private SimulationSystem m_SimulationSystem;
         private EntityQuery m_DefinitionQuery;
         private PrefabResolver m_PrefabResolver;
         private readonly IInterchangeTemplate m_Diamond = new DiamondTemplate();
@@ -167,6 +169,9 @@ namespace InterchangeMod.Systems
         /// <summary>预览已固定，等待确认放置。</summary>
         public bool pinned => m_Pinned;
 
+        /// <summary>游戏已暂停（速度为 0）：只有暂停时才求解、预览。</summary>
+        public bool paused => m_SimulationSystem.selectedSpeed == 0f;
+
         /// <summary>空地放置时的朝向（度，0–360）。</summary>
         public float headingDegrees => ((m_Yaw / Directions.DegToRad) % 360f + 360f) % 360f;
 
@@ -191,6 +196,7 @@ namespace InterchangeMod.Systems
             m_TerrainSystem = World.GetOrCreateSystemManaged<TerrainSystem>();
             m_CityConfigurationSystem = World.GetOrCreateSystemManaged<CityConfigurationSystem>();
             m_NetSearchSystem = World.GetOrCreateSystemManaged<Game.Net.SearchSystem>();
+            m_SimulationSystem = World.GetOrCreateSystemManaged<SimulationSystem>();
             m_DefinitionQuery = GetDefinitionQuery();
             m_IconQuery = GetEntityQuery(ComponentType.ReadOnly<Icon>(), ComponentType.ReadOnly<Owner>(), ComponentType.ReadOnly<PrefabRef>());
             m_PrefabResolver = new PrefabResolver(m_PrefabSystem);
@@ -354,6 +360,18 @@ namespace InterchangeMod.Systems
                     m_HasPreview = false;
                     return Clear(inputDeps);
                 }
+            }
+
+            // 游戏没暂停：不求解、不预览（人口多时求解容易卡死），清掉已有预览；暂停后在原处（固定的话在固定处）重建
+            if (!paused)
+            {
+                if (m_HasPreview)
+                {
+                    m_HasPreview = false;
+                    return Clear(inputDeps);
+                }
+                applyMode = ApplyMode.None;
+                return inputDeps;
             }
 
             // 旋转只在没固定时有效（固定的预览不动）
@@ -561,6 +579,7 @@ namespace InterchangeMod.Systems
             // 新主线 = 原被交道路（在原主线顺时针 CrossingAngle 处）；原主线的另一条臂在新主线顺时针 180° − CrossingAngle 处
             float crossing = match.CrossingAngle;
             (match.Main, match.Cross) = (match.Cross, match.Main);
+            match.SwapTraces();
             match.MainAngle = (match.MainAngle + crossing) % 360f;
             match.CrossingAngle = 180f - crossing;
             m_SettingsVersion++;
@@ -668,11 +687,33 @@ namespace InterchangeMod.Systems
             m_Match = MatchEdges(new Vec3(hitPosition.x, 0f, hitPosition.z));
             m_Match.Crossing = true;
             if (setting.DebugLogging)
+            {
                 Mod.log.Info($"[debug] crossing: {matched.Count} edges, {m_Match.LegCount} legs, " +
                     (m_Match.Error ?? $"main '{m_Match.Main.Prefab}' {m_Match.Main.Form} at {m_Match.Main.Elevation:F1} m, " +
                         $"cross '{m_Match.Cross.Prefab}' {m_Match.Cross.Form} at {m_Match.Cross.Elevation:F1} m, angle {m_Match.CrossingAngle:F0}°"));
+                LogCrossingEdges(edges, hitPosition);
+            }
             m_SettingsVersion++;
             return true;
+        }
+
+        /// <summary>
+        /// 调试：把立体交叉读出的各半段原样写进日志（锚点、方向、行驶方向、宽度、高度、追踪点每 8 米一个、到 800 米），
+        /// 便于在测试里一比一还原匹配和弯曲。
+        /// </summary>
+        private void LogCrossingEdges(List<ExternalEdge> edges, float3 hitPosition)
+        {
+            var c = System.Globalization.CultureInfo.InvariantCulture;
+            string P(Vec3 v) => v.X.ToString("F2", c) + "," + v.Z.ToString("F2", c);
+            Mod.log.Info($"[debug] crossing dump: cursor {P(new Vec3(hitPosition.x, 0f, hitPosition.z))} yaw {(m_Yaw / Directions.DegToRad).ToString("F2", c)} " +
+                $"center {P(m_Match.Center)} main {m_Match.MainAngle.ToString("F2", c)} crossing {m_Match.CrossingAngle.ToString("F2", c)}");
+            for (int i = 0; i < edges.Count; i++)
+            {
+                var e = edges[i];
+                var trace = e.Trace == null ? "" : string.Join(";", e.Trace.Where((_, k) => k % 2 == 0).Take(100).Select(P));
+                Mod.log.Info($"[debug] crossing edge {i}: anchor {P(e.Anchor)} dir {P(e.Direction)} road '{e.Road}' oneway {e.OneWay} out {e.TravelOutward} " +
+                    $"width {e.Width.ToString("F1", c)} lanes {e.LanesPerDirection} highway {e.IsHighway} elev {e.Elevation.ToString("F2", c)} trace {trace}");
+            }
         }
 
         /// <summary>
@@ -817,11 +858,26 @@ namespace InterchangeMod.Systems
 
             IReadOnlyList<RoadSegmentSpec> segments = null;
             m_LastSegments = null;
+            CurveWarp warp = BuildWarp(p, errors, snapshot);
             if (errors.Count == 0)
             {
-                segments = CurrentTemplate.Generate(p);
+                if (warp.IsIdentity)
+                    segments = CurrentTemplate.Generate(p);
+                else
+                {
+                    // 弯道：按直线生成后整体弯曲，内侧坡度超限时收紧坡度重新求解（较慢）
+                    var watch = System.Diagnostics.Stopwatch.StartNew();
+                    segments = InterchangeLayout.Bend(CurrentTemplate, p, warp, out InterchangeParams used);
+                    if (used.MaxGrade < p.MaxGrade - 1e-4f)
+                        snapshot.CurveGrade = used.MaxGrade;
+                    if (setting.DebugLogging)
+                        Mod.log.Info($"[debug] curve: bent in {watch.ElapsedMilliseconds} ms, grade {p.MaxGrade:P1} -> {used.MaxGrade:P1}");
+                }
                 m_LastSegments = segments;
-                errors.AddRange(InterchangeLayout.ValidateGeometry(segments, p));
+                var geometryErrors = InterchangeLayout.ValidateGeometry(segments, p);
+                if (geometryErrors.Count > 0 && !warp.IsIdentity)
+                    errors.Add("弯道上放不下（弯道内侧的匝道坡度超限）：请先把立交范围内的道路调整得平直一些，或加大最大坡度、换一种立交类型");
+                errors.AddRange(geometryErrors);
             }
 
             // 匹配到路口时：基层是高架桥或隧道 → 在原有道路上方/下方叠建；否则是原路口改造，拆掉范围内的原有道路
@@ -864,6 +920,65 @@ namespace InterchangeMod.Systems
             this.snapshot = snapshot;
             ReportErrors(errors);
             return inputDeps;
+        }
+
+        /// <summary>追踪出的中心线离起点切线最远不到这个距离（米）时当直线（不弯）。</summary>
+        private const float kStraightOffset = 0.5f;
+        /// <summary>弯道半径下限（米）：再小时立交两端会转过很大角度，匝道变形太大。</summary>
+        private const float kMinCurveRadius = 150f;
+        /// <summary>检查弯道急缓、算显示半径时看离中心多远（米，约一座立交的范围）。</summary>
+        private const float kCurveCheckLength = 600f;
+
+        /// <summary>
+        /// 弯道适配（docs/04）：对准已有道路时按追踪出的道路中心线建弯曲变换（主线、被交道路中心前后各一条）；没对准或都是直线时不弯。
+        /// 模板的被交道路方向（Legs[1]）与匹配的被交道路方向相反时（如十字路口当 T 型、支路取另一侧）前后对调。
+        /// 立交范围内最急处半径太小时报错，请玩家先把道路调整得平直一些。
+        /// </summary>
+        private CurveWarp BuildWarp(InterchangeParams p, List<string> errors, PanelSnapshot snapshot)
+        {
+            float crossAngle = p.Legs[1].Angle;
+            var straight = Centerline.Straight;
+            if (m_Match == null || m_Match.Error != null)
+                return new CurveWarp(crossAngle, straight, straight, straight, straight);
+            // 每条中心线按它在中心处离开的方向（世界角度）摆正
+            Centerline Line(IReadOnlyList<Vec3> trace, float angle)
+            {
+                if (trace == null)
+                    return straight;
+                var line = Centerline.FromPoints(trace, Directions.FromAngle(angle));
+                return line.NearlyStraight(kStraightOffset) ? straight : line;
+            }
+            float main = m_Match.MainAngle, cross = m_Match.MainAngle + m_Match.CrossingAngle;
+            Centerline mainAhead = Line(m_Match.MainAheadTrace, main), mainBehind = Line(m_Match.MainBehindTrace, main + 180f);
+            Centerline crossAhead = straight, crossBehind = straight;
+            if (!m_Match.RoadOnly)
+            {
+                crossAhead = Line(m_Match.CrossAheadTrace, cross);
+                crossBehind = Line(m_Match.CrossBehindTrace, cross + 180f);
+                if (Directions.AngleBetween(crossAngle, m_Match.CrossingAngle) > 90f)
+                    (crossAhead, crossBehind) = (crossBehind, crossAhead);
+            }
+            // 面板显示的半径：直线（或只是整体转了一点、没有弯）显示为 0
+            float Radius(Centerline line)
+            {
+                float r = line.IsStraight ? 0f : line.MinRadius(kCurveCheckLength);
+                return float.IsInfinity(r) ? 0f : r;
+            }
+            snapshot.MainRadiusAhead = Radius(mainAhead);
+            snapshot.MainRadiusBehind = Radius(mainBehind);
+            snapshot.CrossRadiusAhead = Radius(crossAhead);
+            snapshot.CrossRadiusBehind = Radius(crossBehind);
+            // 面板关了弯道适配：半径照样显示（让玩家知道是弯道），立交按直线放置
+            if (!setting.CurveFollow)
+                return new CurveWarp(crossAngle, straight, straight, straight, straight);
+            float sharpest = new[] { snapshot.MainRadiusAhead, snapshot.MainRadiusBehind, snapshot.CrossRadiusAhead, snapshot.CrossRadiusBehind }
+                .Where(r => r > 0f).DefaultIfEmpty(float.PositiveInfinity).Min();
+            if (sharpest < kMinCurveRadius)
+            {
+                errors.Add($"道路在立交范围内最急处半径只有 {sharpest:F0} 米：请先把道路调整得平直一些（弯道半径至少 {kMinCurveRadius:F0} 米）再放置");
+                return new CurveWarp(crossAngle, straight, straight, straight, straight);
+            }
+            return new CurveWarp(crossAngle, mainAhead, mainBehind, crossAhead, crossBehind);
         }
 
         /// <summary>
@@ -1437,5 +1552,9 @@ namespace InterchangeMod.Systems
         public bool MatchDropsLeg;
         /// <summary>实际用的环道半径（米）；不用环道时为 0。</summary>
         public float LoopRadius;
+        /// <summary>弯道适配：主线 / 被交道路中心前后两侧的半径（米），0 = 直线。</summary>
+        public float MainRadiusAhead, MainRadiusBehind, CrossRadiusAhead, CrossRadiusBehind;
+        /// <summary>弯道内侧坡度超限、收紧后实际求解用的最大坡度；没收紧时为 0。</summary>
+        public float CurveGrade;
     }
 }
