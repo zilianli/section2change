@@ -21,8 +21,9 @@ using Unity.Mathematics;
 namespace InterchangeMod.Systems
 {
     /// <summary>
-    /// 立交工具：整座立交跟随鼠标预览，, / . 旋转，右键退出。两步放置：左键只把预览固定在原处（固定后改设置、旋转都在原处重建，
-    /// 左键点别处换位置，右键取消固定），在面板点“确认放置”才真正放置——求解慢时不会因为鼠标一动就重算。
+    /// 立交工具：整座立交跟随鼠标预览，滚轮或 , / . 旋转（Shift + 滚轮精确），右键退出。两步放置：左键只把预览固定在原处
+    /// （固定后不能旋转、滚轮还给镜头缩放；改设置在原处重建，左键点别处换位置，右键取消固定），在面板点“确认放置”才真正放置
+    /// ——求解慢时不会因为鼠标一动就重算。
     ///
     /// 每帧流程（与原版 NetToolSystem 相同）：
     ///   预览变化：applyMode = Clear（清掉旧临时道路）→ 销毁旧定义实体 → 重新创建
@@ -169,8 +170,8 @@ namespace InterchangeMod.Systems
         /// <summary>空地放置时的朝向（度，0–360）。</summary>
         public float headingDegrees => ((m_Yaw / Directions.DegToRad) % 360f + 360f) % 360f;
 
-        /// <summary>朝向由旋转键决定（没有对准已有道路）：面板显示朝向。</summary>
-        public bool headingFree => m_Pinned ? !m_PinnedOnMatch : m_Match == null || m_Match.Error != null;
+        /// <summary>可以旋转（没固定、没对准已有道路）：面板和鼠标旁显示朝向和旋转按键。固定后不能旋转，滚轮还给镜头缩放。</summary>
+        public bool headingFree => !m_Pinned && (m_Match == null || m_Match.Error != null);
 
         /// <summary>面板“确认放置”：下一次更新时放置固定的预览（游戏报错阻止放置时不放）。</summary>
         public void RequestConfirm() => m_ConfirmRequested = true;
@@ -355,12 +356,13 @@ namespace InterchangeMod.Systems
                 }
             }
 
+            // 旋转只在没固定时有效（固定的预览不动）
             float turn = 0f;
-            if (m_RotateLeftAction.WasPressedThisFrame())
+            if (!m_Pinned && m_RotateLeftAction.WasPressedThisFrame())
                 turn -= kRotationStep;
-            if (m_RotateRightAction.WasPressedThisFrame())
+            if (!m_Pinned && m_RotateRightAction.WasPressedThisFrame())
                 turn += kRotationStep;
-            // 滚轮：朝向由旋转决定（没对准已有道路）、鼠标不在面板上时旋转，并挡住镜头缩放；否则滚轮照常缩放镜头、滚动面板
+            // 滚轮：能旋转（没固定、没对准已有道路）且鼠标不在面板上时旋转，并挡住镜头缩放；否则滚轮照常缩放镜头、滚动面板
             bool wheelRotates = headingFree && !InputManager.instance.mouseOverUI;
             if (m_ZoomBarrier != null)
                 m_ZoomBarrier.blocked = wheelRotates;
