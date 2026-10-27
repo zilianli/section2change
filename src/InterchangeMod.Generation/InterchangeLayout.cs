@@ -123,7 +123,7 @@ namespace InterchangeMod.Generation
 
         /// <summary>
         /// 内部双向、外部双幅的臂（NeedsTwoWayToDualTransition）：双向道路的臂端节点分出两条单行道路，S 形平行接到外部双幅的位置。
-        /// 驶离立交的一幅在外指方向的右侧（右侧通行）。分出处两幅外缘对齐双向道路的两侧边缘（曲线端点横移、节点仍是双向道路的端点）。
+        /// 驶离立交的一幅在外指方向的行驶一侧（右侧通行在右、左侧通行在左）。分出处两幅外缘对齐双向道路的两侧边缘（曲线端点横移、节点仍是双向道路的端点）。
         /// 要在 AddApproachSlopes 之前调用（坡道接在分出后的两幅端点上）。
         /// </summary>
         public static void AddDualTails(List<RoadSegmentSpec> segments, InterchangeParams p)
@@ -141,7 +141,8 @@ namespace InterchangeMod.Generation
                     continue;
                 Vec3 end = ends.OrderByDescending(e => Directions.Dot(e, dir)).First();
                 RoadSegmentSpec owner = segments.First(s => s.StartNode.Equals(end) || s.EndNode.Equals(end));
-                Vec3 right = Directions.RightOf(dir);
+                // 驶离那一幅所在的一侧
+                Vec3 right = Directions.RightOf(dir) * (p.RightHandTraffic ? 1f : -1f);
                 float width = leg.ExternalWidth > 0f ? leg.ExternalWidth : leg.RoadWidth / 2f;
                 float edge = System.Math.Max(0f, (leg.RoadWidth - width) / 2f);
                 float offset = (leg.ExternalMedian + width) / 2f;

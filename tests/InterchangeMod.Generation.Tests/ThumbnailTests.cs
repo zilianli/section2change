@@ -14,7 +14,7 @@ namespace InterchangeMod.Generation.Tests
         public static IEnumerable<object[]> Types() => TemplateRegistry.All.Select(t => new object[] { t.Type });
 
         /// <summary>每种类型的典型参数：与各模板测试的默认参数一致。</summary>
-        private static InterchangeParams Params(InterchangeType type)
+        internal static InterchangeParams Params(InterchangeType type)
         {
             if (type == InterchangeType.Wye)
             {

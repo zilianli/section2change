@@ -16,7 +16,10 @@ using Unity.Mathematics;
 namespace InterchangeMod.Placement
 {
     /// <summary>
-    /// 原路口改造：拆掉立交范围（Footprint）内的原有道路，范围外的部分保留并接回原来的节点。
+    /// 原路口改造：拆掉立交范围内的原有道路，范围外的部分保留并接回原来的节点。
+    ///   被改造的道路（匹配到的路口 / 立体交叉的路段，沿路往外的各段）按凸包范围拆；其他道路只拆被新路压到的部分——
+    ///   平面上挨着新路且高度上没有净空、或落在新路的立柱上（弯道上凸包会把弯道内侧几百米外的街道也包进去；
+    ///   从高架匝道下面、净空够的地方穿过的地面道路保留）。
     ///   每条和范围相交的原有道路写一个删除定义（和推土机一样），
     ///   范围外的每一段再写一个新建定义：在原有节点那一端接回原节点，在范围边界那一端新建节点。
     ///   臂端压着的原有道路在臂端处切开，朝外的一侧（连同再往外经过普通路中节点、仍在范围里的几段）保留并接回立交。
@@ -47,21 +50,29 @@ namespace InterchangeMod.Placement
         private const int kMaxKeptEdges = 32;
         /// <summary>接不上臂端的切断端再往外退的距离（米），另加这条路的半宽：宽路斜着穿出范围时，端头两角不伸进立交。</summary>
         private const float kUnconnectedGap = 10f;
+        /// <summary>被改造的道路沿路往外最多认多少段（防止沿很长的路一直走下去）。</summary>
+        private const int kMaxConvertedEdges = 64;
 
         /// <summary>
-        /// 找出要拆的原有道路：和范围相交、离某一层高度（levels：普通改造只有基层，立体交叉还有被替换高架的高度）不远、
-        /// 不属于建筑等其他对象的普通道路路段。
-        /// footprint 是立交局部坐标（origin 为原点、yaw 旋转前）。
+        /// 找出要拆的原有道路（不属于建筑等其他对象的普通道路路段，离某一层高度不远：levels 普通改造是立交各层，立体交叉还有
+        /// 两条原有道路原来的高度）：
+        ///   被改造的道路（convertedSeeds 匹配到的路段，以及沿路经过普通路中节点往外、仍和凸包相交的各段）：和凸包 hull 相交就拆，
+        ///   立体交叉匹配到的路段（alwaysRemove，如被替换的高架）不论高度都拆；
+        ///   其他道路：被新路压到时才拆——中心线离新路不到（新路半宽 + 余量 + 自己的半宽）且高度上没有净空，或落在新路的立柱上
+        ///   （corridor.Collides，按这条路和那里新路的实际离地高度）。
+        /// converted 收到被改造道路的路段（CreateDefinitions 按它选切断的范围）。范围都是立交局部坐标（origin 为原点、yaw 旋转前）。
         /// </summary>
         public static List<Entity> FindEdges(EntityManager entityManager, NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree,
-            Footprint footprint, float3 origin, float yaw, IReadOnlyList<float> levels, ref TerrainHeightData terrain,
-            ICollection<Entity> alwaysRemove = null)
+            Footprint hull, Footprint corridor, float3 origin, float yaw, IReadOnlyList<float> levels, ref TerrainHeightData terrain,
+            IEnumerable<Entity> convertedSeeds, ICollection<Entity> alwaysRemove, out HashSet<Entity> converted)
         {
+            converted = Converted(entityManager, convertedSeeds, hull, origin, yaw);
             var candidates = new NativeList<Entity>(64, Allocator.Temp);
             var result = new List<Entity>();
             try
             {
-                var iterator = new BoundsIterator { m_Bounds = WorldBounds(footprint, origin, yaw), m_Result = candidates };
+                var bounds = WorldBounds(hull, origin, yaw) | WorldBounds(corridor, origin, yaw);
+                var iterator = new BoundsIterator { m_Bounds = bounds, m_Result = candidates };
                 netTree.Iterate(ref iterator);
 
                 var seen = new HashSet<Entity>();
@@ -70,10 +81,10 @@ namespace InterchangeMod.Placement
                     if (!seen.Add(entity) || !IsRemovableRoad(entityManager, entity))
                         continue;
                     Bezier4x3 world = entityManager.GetComponentData<Curve>(entity).m_Bezier;
-                    // 立体交叉匹配到的路段（如被替换的高架）不论高度都拆，其余只拆基层附近的
-                    bool overlaps = alwaysRemove != null && alwaysRemove.Contains(entity)
-                        ? footprint.Intersects(ToLocal(world, origin, yaw))
-                        : OverlapsAtBaseLevel(ToLocal(world, origin, yaw), world, footprint, levels, ref terrain);
+                    Bezier3 local = ToLocal(world, origin, yaw);
+                    bool overlaps = alwaysRemove != null && alwaysRemove.Contains(entity) ? hull.Intersects(local)
+                        : converted.Contains(entity) ? OverlapsAtLevels(local, world, hull, levels, ref terrain)
+                        : CollidesWithNewRoads(local, world, corridor, HalfWidth(entityManager, entity), ref terrain);
                     if (overlaps)
                         result.Add(entity);
                 }
@@ -86,13 +97,49 @@ namespace InterchangeMod.Placement
         }
 
         /// <summary>
+        /// 被改造的道路：seeds 里的路段，再从它们两端沿路经过普通路中节点往外，仍和凸包相交的各段（到路口、路的尽头或凸包外为止）。
+        /// </summary>
+        private static HashSet<Entity> Converted(EntityManager entityManager, IEnumerable<Entity> seeds, Footprint hull, float3 origin, float yaw)
+        {
+            var result = new HashSet<Entity>();
+            var queue = new Queue<Entity>();
+            foreach (Entity seed in seeds ?? Enumerable.Empty<Entity>())
+                if (entityManager.Exists(seed) && IsRemovableRoad(entityManager, seed) && result.Add(seed))
+                    queue.Enqueue(seed);
+            while (queue.Count > 0 && result.Count < kMaxConvertedEdges)
+            {
+                Entity current = queue.Dequeue();
+                Edge edge = entityManager.GetComponentData<Edge>(current);
+                foreach (Entity node in new[] { edge.m_Start, edge.m_End })
+                {
+                    Entity next = NextAlongRoad(entityManager, node, current);
+                    if (next == Entity.Null || result.Contains(next)
+                        || !hull.Intersects(ToLocal(entityManager.GetComponentData<Curve>(next).m_Bezier, origin, yaw)))
+                        continue;
+                    result.Add(next);
+                    queue.Enqueue(next);
+                }
+            }
+            return result;
+        }
+
+        /// <summary>原有道路的半宽（米，按它的预制体）。</summary>
+        private static float HalfWidth(EntityManager entityManager, Entity entity)
+        {
+            Entity prefab = entityManager.GetComponentData<PrefabRef>(entity).m_Prefab;
+            return entityManager.TryGetComponent(prefab, out NetGeometryData geometry) ? geometry.m_DefaultWidth / 2f : 0f;
+        }
+
+        /// <summary>
         /// 为每条要拆的道路写删除定义，并为范围外的部分写新建定义。
         /// 每个臂端（legEnds，局部坐标）先找它压着的那段原有道路，在臂端处切开、保留朝外的一侧接回立交，再往外经过普通路中节点的
         /// 路段整段保留（从 edges 里去掉，不拆）；其余保留部分在范围边界那一端如果附近有同一高度的臂端，也直接从臂端开始。
+        /// 范围边界：被改造的道路（converted）是凸包 hull，其他道路是被新路压到的部分（corridor.Collides，加上自己的半宽）。
         /// 返回接上的臂端数。
         /// </summary>
         public static int CreateDefinitions(EntityCommandBuffer commandBuffer, EntityManager entityManager, List<Entity> edges,
-            Footprint footprint, IReadOnlyList<Vec3> legEnds, float3 origin, float yaw, ref TerrainHeightData terrain, int randomSeed)
+            Footprint hull, Footprint corridor, HashSet<Entity> converted, IReadOnlyList<Vec3> legEnds, float3 origin, float yaw,
+            ref TerrainHeightData terrain, int randomSeed)
         {
             // 和立交路段用同一个换算，得到完全相同的世界坐标，游戏才会把两个节点合并
             var ends = new List<(float3 World, float Elevation)>();
@@ -138,7 +185,11 @@ namespace InterchangeMod.Placement
                 if (mine != null)
                     foreach (var a in mine)
                         parts.Add(a.KeepAfter ? (a.T, 1f, a.End, -1) : (0f, a.T, -1, a.End));
-                foreach (var (outsideStart, outsideEnd) in footprint.OutsideIntervals(ToLocal(curve, origin, yaw)))
+                Bezier3 local = ToLocal(curve, origin, yaw);
+                TerrainHeightData heights = terrain;
+                var outside = converted.Contains(entity) ? hull.OutsideIntervals(local)
+                    : Footprint.OutsideIntervals(t => corridor.Collides(local.Evaluate(t), ElevationAt(MathUtils.Position(curve, t), ref heights), width / 2f));
+                foreach (var (outsideStart, outsideEnd) in outside)
                 {
                     if (mine != null && parts.Any(q => q.Start < outsideEnd && outsideStart < q.End))
                         continue;
@@ -415,8 +466,21 @@ namespace InterchangeMod.Placement
             return entityManager.HasComponent<RoadData>(entityManager.GetComponentData<PrefabRef>(entity).m_Prefab);
         }
 
+        /// <summary>其他原有道路有没有一点被新路压到（见 Footprint.Collides）；halfWidth 是它自己的半宽。</summary>
+        private static bool CollidesWithNewRoads(Bezier3 local, Bezier4x3 world, Footprint corridor, float halfWidth, ref TerrainHeightData terrain)
+        {
+            const int samples = 32;
+            for (int i = 0; i <= samples; i++)
+            {
+                float t = i / (float)samples;
+                if (corridor.Collides(local.Evaluate(t), ElevationAt(MathUtils.Position(world, t), ref terrain), halfWidth))
+                    return true;
+            }
+            return false;
+        }
+
         /// <summary>道路在范围内的部分里，有没有一点离某一层高度不远。</summary>
-        private static bool OverlapsAtBaseLevel(Bezier3 local, Bezier4x3 world, Footprint footprint, IReadOnlyList<float> levels,
+        private static bool OverlapsAtLevels(Bezier3 local, Bezier4x3 world, Footprint footprint, IReadOnlyList<float> levels,
             ref TerrainHeightData terrain)
         {
             const int samples = 32;

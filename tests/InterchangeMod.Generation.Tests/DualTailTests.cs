@@ -37,14 +37,26 @@ namespace InterchangeMod.Generation.Tests
             var crossNodes = segments.Where(s => s.Role == RoadRole.CrossRoad && s.Prefab != "Highway Oneway - 1 lane")
                 .SelectMany(s => new[] { s.StartNode, s.EndNode }).ToHashSet();
             Assert.All(tails, t => Assert.True(crossNodes.Contains(t.StartNode) || crossNodes.Contains(t.EndNode), t.Name));
+            // 驶离立交的一幅（-out）在外指方向的行驶一侧：右侧通行在右、左侧通行在左；驶入的一幅（-in）在另一侧
+            foreach (var t in tails)
+            {
+                bool outbound = t.Name.EndsWith("-out");
+                Vec3 far = outbound ? t.EndNode : t.StartNode;
+                Vec3 dir = new[] { p.Legs[1].Direction, p.Legs[3].Direction }.OrderByDescending(d => Directions.Dot(far, d)).First();
+                float lateral = Directions.Dot(far, Directions.RightOf(dir));
+                Assert.True(outbound == p.RightHandTraffic ? lateral > 0f : lateral < 0f,
+                    $"{t.Name} is on the {(lateral > 0f ? "right" : "left")} ({(p.RightHandTraffic ? "right" : "left")}-hand traffic)");
+            }
         }
 
         [Theory]
-        [InlineData(90f)]
-        [InlineData(70f)]
-        public void SinglePoint(float angle)
+        [InlineData(90f, true)]
+        [InlineData(70f, true)]
+        [InlineData(90f, false)]
+        [InlineData(70f, false)]
+        public void SinglePoint(float angle, bool rightHand)
         {
-            var p = new InterchangeParams { Legs = InterchangeParams.CrossLegs(angle, 0, 1), RampWidth = 8f };
+            var p = new InterchangeParams { Legs = InterchangeParams.CrossLegs(angle, 0, 1), RampWidth = 8f, RightHandTraffic = rightHand };
             p.SetRoad(0, 2, RoadForm.Dual, 16f, 4f, "Highway Oneway");
             p.SetRoad(1, 3, RoadForm.TwoWay, 20f, 0f, "Cross");
             p.Levels[0].Elevation = 10f;
@@ -58,15 +70,18 @@ namespace InterchangeMod.Generation.Tests
         }
 
         [Theory]
-        [InlineData(90f, true)]
-        [InlineData(90f, false)]
-        [InlineData(75f, true)]
-        public void PartialCloverleaf(float angle, bool loopsForExit)
+        [InlineData(90f, true, true)]
+        [InlineData(90f, false, true)]
+        [InlineData(75f, true, true)]
+        [InlineData(90f, true, false)]
+        [InlineData(75f, false, false)]
+        public void PartialCloverleaf(float angle, bool loopsForExit, bool rightHand)
         {
             var p = new InterchangeParams
             {
                 Legs = InterchangeParams.CrossLegs(angle, 0, 1),
                 RampWidth = 8f,
+                RightHandTraffic = rightHand,
                 ParcloLoopsForExit = loopsForExit,
                 SharedRampPrefab = "Highway Twoway",
                 SharedRampWidth = 16f,

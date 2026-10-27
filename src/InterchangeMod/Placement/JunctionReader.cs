@@ -74,8 +74,9 @@ namespace InterchangeMod.Placement
             return roads >= 3;
         }
 
+        /// <param name="roadEdges">收到路口的全部道路路段（离开路口的和路口内部的短路段；原路口改造时按凸包拆）。</param>
         public static List<ExternalEdge> Read(EntityManager entityManager, PrefabSystem prefabSystem, Entity seed,
-            IReadOnlyDictionary<string, RoadInfo> roads, ref TerrainHeightData terrain)
+            IReadOnlyDictionary<string, RoadInfo> roads, ref TerrainHeightData terrain, ICollection<Entity> roadEdges = null)
         {
             float3 seedPosition = entityManager.GetComponentData<Node>(seed).m_Position;
 
@@ -112,6 +113,7 @@ namespace InterchangeMod.Placement
                     Entity edgeEntity = connected.m_Edge;
                     if (!seen.Add(edgeEntity) || !TryGetRoadEdge(entityManager, edgeEntity, out Edge edge, out Curve curve))
                         continue;
+                    roadEdges?.Add(edgeEntity);
                     bool atStart = edge.m_Start == node;
                     Entity other = atStart ? edge.m_End : edge.m_Start;
                     if (cluster.Contains(other) && curve.m_Length < kClusterRadius)

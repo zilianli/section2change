@@ -54,6 +54,7 @@ export const InterchangePanel = () => {
   const [picker, setPicker] = useState<PickerSlot>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const anarchyOn = useValue(anarchyEnabled$);
 
   if (!state.active || !state.settings) return null;
@@ -76,6 +77,33 @@ export const InterchangePanel = () => {
       </Button>
     </div>
   );
+
+  // 使用指南：第一次打开工具时（没看过）首页先显示它，之后从首页的“使用指南”按钮再看
+  if (state.browsing && (showGuide || settings.GuideSeen !== true)) {
+    const done = () => {
+      if (settings.GuideSeen !== true) setValue("GuideSeen", true);
+      setShowGuide(false);
+    };
+    return (
+      <div className={styles.container}>
+        <Panel className={styles.panel}>
+          {titleBar(`${t.title} · ${t.guide}`, false)}
+          <Scrollable className={styles.homeContent} vertical trackVisibility="scrollable">
+            <div className={styles.homeHint}>{t.guideIntro}</div>
+            {t.guideSections.map((section) => (
+              <div key={section.title} className={styles.section}>
+                <div className={styles.sectionTitle}>{section.title}</div>
+                {section.items.map((item) => <div key={item} className={styles.guideItem}>{item}</div>)}
+              </div>
+            ))}
+          </Scrollable>
+          <div className={styles.confirmRow}>
+            <Button variant="flat" className={styles.confirmButton} onSelect={done}>{t.guideDone}</Button>
+          </div>
+        </Panel>
+      </div>
+    );
+  }
 
   // 首页：只选类型，工具不求解
   if (state.browsing) {
@@ -100,7 +128,10 @@ export const InterchangePanel = () => {
         <Panel className={styles.panel}>
           {titleBar(t.title, false)}
           <Scrollable className={styles.homeContent} vertical trackVisibility="scrollable">
-            <div className={styles.homeHint}>{t.chooseType}</div>
+            <div className={styles.homeHintRow}>
+              <div className={styles.homeHint}>{t.chooseType}</div>
+              <Button variant="flat" className={styles.guideButton} onSelect={() => setShowGuide(true)}>{t.guide}</Button>
+            </div>
             <div className={styles.groupTitle}>{t.fourWay}</div>
             {grid(fourWayTypes)}
             <div className={styles.groupTitle}>{t.threeWay}</div>

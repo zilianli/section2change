@@ -56,6 +56,8 @@ export interface PanelSettings {
   TrumpetNearRampRadius: number;
   /** 设置页模式：false = 自动（只显示提示、结果和报错，参数全部用默认值），true = 手动（显示全部设置）。 */
   ManualMode: boolean;
+  /** 看过使用指南（第一次打开时首页先显示使用指南）。 */
+  GuideSeen: boolean;
 }
 
 /** 自动模式下求解用的设置：与 C# Setting.SetDefaults 一致，只照搬立交类型（自动模式的结果行按它显示）。 */

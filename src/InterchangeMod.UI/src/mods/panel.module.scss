@@ -461,3 +461,31 @@
   width: 24rem;
   height: 24rem;
 }
+
+/* 使用指南：首页右上的按钮和指南里的条目 */
+.homeHintRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.homeHintRow .homeHint {
+  flex: 1;
+}
+
+.guideButton {
+  margin-left: 8rem;
+  padding: 3rem 10rem;
+  font-size: 12rem;
+  color: rgb(140, 205, 255);
+  background-color: rgba(140, 205, 255, 0.12);
+  border-radius: 4rem;
+}
+
+.guideItem {
+  font-size: 12rem;
+  color: rgba(255, 255, 255, 0.8);
+  margin-bottom: 4rem;
+  padding-left: 8rem;
+  border-left: 2rem solid rgba(140, 205, 255, 0.35);
+}

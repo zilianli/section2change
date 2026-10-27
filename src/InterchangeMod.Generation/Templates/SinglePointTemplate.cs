@@ -142,6 +142,8 @@ namespace InterchangeMod.Generation.Templates
             }
             // 外部被交道路是双幅时，两端从双向分回双幅
             InterchangeLayout.AddDualTails(segments, p);
+            // 原路口改造：高架主线的臂端加坡道降到原有道路的高度
+            InterchangeLayout.AddApproachSlopes(segments, p);
             return segments;
         }
 

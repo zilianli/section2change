@@ -133,6 +133,7 @@ namespace InterchangeMod.UI
                 .Field(nameof(s.RampPrefab), s.RampPrefab)
                 .Field(nameof(s.MatchJunctions), s.MatchJunctions)
                 .Field(nameof(s.ManualMode), s.ManualMode)
+                .Field(nameof(s.GuideSeen), s.GuideSeen)
                 .Field(nameof(s.CurveFollow), s.CurveFollow)
                 .Field(nameof(s.InterchangeType), s.InterchangeType ?? "Diamond")
                 .Field(nameof(s.FrontageRoadPrefab), s.FrontageRoadPrefab ?? "")

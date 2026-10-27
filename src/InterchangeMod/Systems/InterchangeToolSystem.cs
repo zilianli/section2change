@@ -140,6 +140,8 @@ namespace InterchangeMod.Systems
         private (Entity, Entity) m_CrossingKey;
         /// <summary>参与当前立体交叉的所有已有路段：改造时在立交范围内都要拆掉（不论高度）。</summary>
         private List<Entity> m_CrossingEdges = new List<Entity>();
+        /// <summary>匹配到的普通路口 / 道路的全部路段（原路口改造时这些道路按凸包拆，其他道路只拆压到新路的部分）。</summary>
+        private readonly List<Entity> m_MatchRoadEdges = new List<Entity>();
         /// <summary>指着双幅道路的一幅时量出的实际分隔带；没有对向一幅时为 null。</summary>
         private float? m_PartnerMedian;
         /// <summary>最近一次鼠标位置（只对齐一条道路时，T 型支路放在鼠标所在的一侧）。</summary>
@@ -667,6 +669,7 @@ namespace InterchangeMod.Systems
                 m_CrossingEdges.Clear();
                 m_Match = null;
                 m_MatchEdges = null;
+                m_MatchRoadEdges.Clear();
                 m_MatchSeed = Entity.Null;
                 m_SettingsVersion++;
             }
@@ -680,10 +683,11 @@ namespace InterchangeMod.Systems
             m_MatchSeed = seed;
             m_Match = null;
             m_MatchEdges = null;
+            m_MatchRoadEdges.Clear();
             if (seed != Entity.Null)
             {
                 TerrainHeightData terrain = m_TerrainSystem.GetHeightData();
-                m_MatchEdges = JunctionReader.Read(EntityManager, m_PrefabSystem, seed, m_RoadsByName, ref terrain);
+                m_MatchEdges = JunctionReader.Read(EntityManager, m_PrefabSystem, seed, m_RoadsByName, ref terrain, m_MatchRoadEdges);
                 // 指着双幅的一幅时，量出对向那一幅的实际分隔带（没有时用面板的分隔带估算）
                 var netTree = m_NetSearchSystem.GetNetSearchTree(readOnly: true, out JobHandle treeDeps);
                 treeDeps.Complete();
@@ -722,6 +726,7 @@ namespace InterchangeMod.Systems
             m_CrossingEdges = matched;
             m_MatchSeed = Entity.Null;
             m_MatchEdges = edges;
+            m_MatchRoadEdges.Clear();
             m_Match = MatchEdges(new Vec3(hitPosition.x, 0f, hitPosition.z));
             m_Match.Crossing = true;
             if (setting.DebugLogging)
@@ -941,6 +946,7 @@ namespace InterchangeMod.Systems
                 if (errors.Count == 0 && retrofit)
                 {
                     m_RemovalFootprint = new Footprint(segments.Select(s => s.Curve), kRemovalMargin);
+                    var corridor = Footprint.Corridor(segments.Select(s => (s.Curve, HalfWidthOf(s.Prefab))), kRemovalMargin);
                     var netTree = m_NetSearchSystem.GetNetSearchTree(readOnly: true, out JobHandle treeDeps);
                     treeDeps.Complete();
                     // 新立交两层所在的高度都清理：被替换的高架（或下穿道路）和地面道路。
@@ -949,11 +955,12 @@ namespace InterchangeMod.Systems
                     var levels = new List<float> { p.Levels[0].Elevation, p.Levels[1].Elevation };
                     if (m_Match.Crossing)
                         levels.AddRange(new[] { m_Match.Main.Elevation, m_Match.Cross.Elevation });
-                    List<Entity> removed = RoadRemover.FindEdges(EntityManager, netTree, m_RemovalFootprint, origin, yaw,
-                        levels, ref terrain, m_Match.Crossing ? m_CrossingEdges : null);
+                    List<Entity> removed = RoadRemover.FindEdges(EntityManager, netTree, m_RemovalFootprint, corridor, origin, yaw,
+                        levels, ref terrain, m_Match.Crossing ? m_CrossingEdges : m_MatchRoadEdges, m_Match.Crossing ? m_CrossingEdges : null,
+                        out HashSet<Entity> converted);
                     RoadRemover.Debug = setting.DebugLogging;
-                    snapshot.ConnectedEnds = RoadRemover.CreateDefinitions(commandBuffer, EntityManager, removed, m_RemovalFootprint,
-                        InterchangeLayout.LegEnds(segments), origin, yaw, ref terrain, m_RandomSeed + segments.Count);
+                    snapshot.ConnectedEnds = RoadRemover.CreateDefinitions(commandBuffer, EntityManager, removed, m_RemovalFootprint, corridor,
+                        converted, InterchangeLayout.LegEnds(segments), origin, yaw, ref terrain, m_RandomSeed + segments.Count);
                     snapshot.RemovedRoads = removed.Count;
                 }
             }
@@ -964,6 +971,14 @@ namespace InterchangeMod.Systems
             ReportErrors(errors);
             return inputDeps;
         }
+
+        /// <summary>立交路段查不到预制体宽度时按这个半宽（米）算拆除走廊。</summary>
+        private const float kFallbackHalfWidth = 10f;
+
+        /// <summary>立交路段的半宽（米，按预制体）：原路口改造时其他原有道路只拆压到这个走廊的部分。</summary>
+        private float HalfWidthOf(string prefab) =>
+            !string.IsNullOrEmpty(prefab) && m_PrefabResolver.TryResolve(prefab, m_SelectedRoad, out NetPrefab net)
+                ? m_PrefabResolver.GetWidth(net) / 2f : kFallbackHalfWidth;
 
         /// <summary>追踪出的中心线离起点切线最远不到这个距离（米）时当直线（不弯）。</summary>
         private const float kStraightOffset = 0.5f;

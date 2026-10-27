@@ -5,6 +5,56 @@ const zh = {
   interchangeType: "立交类型",
   chooseType: "选择立交类型：点开后再调整设置、预览和放置（首页不求解）",
   notes: "注意事项",
+  guide: "使用指南",
+  guideIntro: "第一次使用请先看一下：这个工具能做什么、支持哪些道路组合和角度。看完点下面的“知道了”，以后可以从首页右上的“使用指南”再打开",
+  guideDone: "知道了，开始使用",
+  guideSections: [
+    {
+      title: "三种用法",
+      items: [
+        "空地摆放：鼠标在空地上，道路、交角、分层按面板设置（自动模式用默认值）。左键固定预览，在面板点“确认放置”",
+        "已有道路升级：鼠标指着一条普通道路，立交主线顺着这条路摆（弯道上整体顺着弯曲），被交道路按面板设置；放置时拆掉范围内的这段路，两端接回",
+        "已有路口升级为立交（平改立）：对准已有的平面路口，或高架跨过地面道路的立体交叉，自动匹配道路、层高和交角，拆掉原路口并把各臂接回。范围内的其他道路只拆被新路压到的，从桥下净空够的地方穿过的保留",
+        "放置后可以用游戏的撤销恢复",
+      ],
+    },
+    {
+      title: "道路组合",
+      items: [
+        "两条路可以是不同类型的道路，例如高架双幅公路跨过地面双向道路",
+        "同一条路在路口两侧要是同一种形式（都是双向，或都是双幅两条单行道路）；两侧不同时立交按其中一侧建，另一侧放置后请自行连接",
+        "苜蓿叶类、环岛式、定向式、涡轮、定向 / 半定向 T 型、Y 型分向的道路在立交内用双幅：外部是双向道路时自动拆成双幅，臂端接回双向",
+        "单点立交、部分苜蓿叶的被交道路在立交内是双向：外部是双幅时两端分回两幅",
+        "喇叭形、半定向 / 定向 T 型、定向式、涡轮、Y 型分向目前只支持右侧通行",
+      ],
+    },
+    {
+      title: "交角范围",
+      items: [
+        "菱形、中式快速路节点、快速路 T 型：45°–135°",
+        "单点立交：55°–125°",
+        "苜蓿叶、喇叭形：35°–145°",
+        "部分苜蓿叶、环岛式、定向式、涡轮、半定向 / 定向 T 型：60°–120°",
+        "Y 型分向：三条路相邻夹角 90°–150°",
+      ],
+    },
+    {
+      title: "使用注意",
+      items: [
+        "升级范围内的道路类型、曲率不要突变：不要在立交范围里中途换道路，弯道的弯曲程度要平缓变化",
+        "道路间距保持稳定：两层之间的高差不超过 15 米；双幅道路两幅之间的间距（分隔带）保持不变",
+        "不支持短距离内的 S 形曲线：立交范围内的道路最好是直线或同一方向的弯道",
+      ],
+    },
+    {
+      title: "其他",
+      items: [
+        "弯道：立交范围内道路的半径至少 150 米，立交整体顺着弯道弯曲；太弯时请先把道路调直一些",
+        "定向式、涡轮和弯道上的立交求解较慢，人口多时建议先暂停游戏",
+        "打开工具：左上角按钮或快捷键（默认 Shift + I）；右键退出",
+      ],
+    },
+  ],
   typeOptions: "立交选项",
   modeAuto: "自动",
   modeManual: "手动",
@@ -228,6 +278,56 @@ const en: typeof zh = {
   interchangeType: "Interchange type",
   chooseType: "Choose an interchange type: open it to adjust the settings, preview and place (nothing is solved on this page)",
   notes: "Notes",
+  guide: "Guide",
+  guideIntro: "Please read this first: what the tool does and which road combinations and angles it supports. Click the button below when done; you can open it again from the Guide button on the home page",
+  guideDone: "Got it",
+  guideSections: [
+    {
+      title: "Three ways to use it",
+      items: [
+        "On empty ground: roads, crossing angle and levels follow the panel (defaults in Auto mode). Left-click to pin the preview, then click Confirm in the panel",
+        "Upgrade an existing road: point at a plain road; the main road follows it (bending along curves) and the crossing road follows the panel. The road inside the footprint is removed and both ends are reconnected",
+        "Upgrade an existing junction: aim at an at-grade junction, or a crossing where an elevated road passes over a ground road. Roads, levels and angle are matched automatically, the old junction is removed and every leg is reconnected. Other roads are removed only where the new roads hit them; roads passing under bridges with enough clearance are kept",
+        "You can undo a placement with the game's undo",
+      ],
+    },
+    {
+      title: "Road combinations",
+      items: [
+        "The two roads may be different road types, e.g. an elevated divided highway over a two-way ground road",
+        "Each road should have the same form on both sides of the junction (two-way on both sides, or two one-way roads on both sides). If they differ, the interchange is built for one side and you connect the other side afterwards",
+        "Cloverleaf types, roundabout, stack, turbine, directional / semi-directional T and wye use divided roads inside: two-way roads outside are split automatically and joined back at the ends",
+        "Single-point and partial cloverleaf keep the crossing road two-way inside: divided roads outside are split back at both ends",
+        "Trumpet, semi-directional / directional T, stack, turbine and wye support right-hand traffic only for now",
+      ],
+    },
+    {
+      title: "Crossing angles",
+      items: [
+        "Diamond, Chinese expressway node, expressway T: 45–135 degrees",
+        "Single-point: 55–125 degrees",
+        "Cloverleaf, trumpet: 35–145 degrees",
+        "Partial cloverleaf, roundabout, stack, turbine, semi-directional / directional T: 60–120 degrees",
+        "Wye: 90–150 degrees between neighbouring roads",
+      ],
+    },
+    {
+      title: "Before you upgrade",
+      items: [
+        "Keep road type and curvature steady within the upgrade area: don't switch roads halfway through, and let curves change gradually",
+        "Keep spacing steady: no more than 15 m height difference between the two levels, and a constant median between the two carriageways of a divided road",
+        "S-curves over a short distance are not supported: roads within the interchange should be straight or curve one way",
+      ],
+    },
+    {
+      title: "Other",
+      items: [
+        "Curves: roads within the interchange need a radius of at least 150 m; the interchange bends along them. Straighten sharper curves first",
+        "Stack, turbine and curved interchanges take longer to solve; pause the game in large cities",
+        "Open the tool with the button at the top left or the shortcut (Shift + I by default); right-click to exit",
+      ],
+    },
+  ],
   typeOptions: "Options",
   modeAuto: "Auto",
   modeManual: "Manual",
