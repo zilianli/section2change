@@ -544,7 +544,7 @@ export const InterchangePanel = () => {
               <div className={styles.note}>{t.maxGradeNote}</div>
               {/* 中式快速路节点、单点立交：匝道与主线（和辅路）的间距，越小占地越窄 */}
               {(mainForcedTop || loops) && (
-                <SpacingStepper label={t.rampGap} meters={s.RampGap} stepMeters={0.5} minMeters={0.5} maxMeters={16}
+                <SpacingStepper label={t.rampGap} meters={s.RampGap} stepMeters={0.5} minMeters={3} maxMeters={16}
                   inCells={s.SpacingInCells} cellUnit={t.cellUnit} onChange={(v) => setValue("RampGap", v)} />
               )}
             </Section>

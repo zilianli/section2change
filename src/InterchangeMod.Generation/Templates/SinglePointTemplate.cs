@@ -127,7 +127,7 @@ namespace InterchangeMod.Generation.Templates
                 string dir = r.Sign > 0 ? "NB" : "SB";
                 if (r.IsOff)
                 {
-                    segments.Add(new RoadSegmentSpec($"{dir}-off-shift", RoadRole.Ramp, Bezier3.FromTangents(r.MainNode, r.Travel, r.Top, r.Travel, r.ShiftLength / 3f), p.RampPrefab));
+                    DiamondTemplate.AddElevatedRamp(segments, p, $"{dir}-off-shift", Bezier3.FromTangents(r.MainNode, r.Travel, r.Top, r.Travel, r.ShiftLength / 3f), nodeAtEnd: false);
                     segments.Add(new RoadSegmentSpec($"{dir}-off-down", RoadRole.Ramp, Bezier3.SmoothSlope(r.Top, r.Bottom), p.RampPrefab));
                     segments.Add(new RoadSegmentSpec($"{dir}-off-turn", RoadRole.Ramp, r.Turn, p.RampPrefab));
                     segments.Add(new RoadSegmentSpec($"{dir}-off-center", RoadRole.Ramp, r.Straight, p.RampPrefab));
@@ -137,7 +137,7 @@ namespace InterchangeMod.Generation.Templates
                     segments.Add(new RoadSegmentSpec($"{dir}-on-center", RoadRole.Ramp, r.Straight, p.RampPrefab));
                     segments.Add(new RoadSegmentSpec($"{dir}-on-turn", RoadRole.Ramp, r.Turn, p.RampPrefab));
                     segments.Add(new RoadSegmentSpec($"{dir}-on-up", RoadRole.Ramp, Bezier3.SmoothSlope(r.Bottom, r.Top), p.RampPrefab));
-                    segments.Add(new RoadSegmentSpec($"{dir}-on-shift", RoadRole.Ramp, Bezier3.FromTangents(r.Top, r.Travel, r.MainNode, r.Travel, r.ShiftLength / 3f), p.RampPrefab));
+                    DiamondTemplate.AddElevatedRamp(segments, p, $"{dir}-on-shift", Bezier3.FromTangents(r.Top, r.Travel, r.MainNode, r.Travel, r.ShiftLength / 3f), nodeAtEnd: true);
                 }
             }
             // 外部被交道路是双幅时，两端从双向分回双幅

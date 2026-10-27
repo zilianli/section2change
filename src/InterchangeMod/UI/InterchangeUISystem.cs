@@ -138,7 +138,7 @@ namespace InterchangeMod.UI
                 .Field(nameof(s.InterchangeType), s.InterchangeType ?? "Diamond")
                 .Field(nameof(s.FrontageRoadPrefab), s.FrontageRoadPrefab ?? "")
                 .Field(nameof(s.LaneBalance), s.LaneBalance)
-                .Field(nameof(s.RampGap), s.RampGap)
+                .Field(nameof(s.RampGap), s.RampGapOrDefault)
                 .Field(nameof(s.SpacingInCells), s.SpacingInCells)
                 .Field(nameof(s.BaseFollowsMatch), s.BaseFollowsMatch)
                 .Field(nameof(s.BranchOnLeft), s.BranchOnLeft)

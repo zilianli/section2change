@@ -199,19 +199,87 @@ namespace InterchangeMod.Generation
         }
 
         /// <summary>
-        /// 弯曲前把长于这个长度（米）的地面路段等分：一段三次贝塞尔贴不住长距离的弯曲（游戏内：定向式一千多米的地面主线穿过中心，
+        /// 弯曲前把长于这个长度（米）的地面路段分开：一段三次贝塞尔贴不住长距离的弯曲（游戏内：定向式一千多米的地面主线穿过中心，
         /// 主线一侧弯、一侧直，中间偏出近 8 米，压到分隔带里的立柱）。
         /// </summary>
         private const float kMaxBentPiece = 100f;
+        /// <summary>
+        /// 新加的节点离接在这段两端节点上的别的路段（同一高度，高差 kNearHeight 内）至少这么远（米，中心线之间）：匝道汇入 / 分出前
+        /// 贴着道路走的那段里加节点，游戏报“形状无效”（涡轮弯曲后汇入点报错）。双幅道路的另一幅、不相连的道路不算。
+        /// </summary>
+        private const float kNodeClearance = 24f;
+        private const float kNearHeight = 5f;
+        /// <summary>候选断点的间距、离两端的最小距离（米）。</summary>
+        private const float kCutStep = 10f, kMinPiece = 20f;
 
-        public List<RoadSegmentSpec> Apply(IEnumerable<RoadSegmentSpec> segments) =>
-            IsIdentity ? segments.ToList() : segments.SelectMany(Split).Select(Apply).ToList();
+        public List<RoadSegmentSpec> Apply(IEnumerable<RoadSegmentSpec> segments)
+        {
+            var list = segments.ToList();
+            if (IsIdentity)
+                return list;
+            var nearby = new SampleGrid(list);
+            // 每个节点上接着哪些路段
+            var byNode = new Dictionary<Vec3, List<int>>();
+            for (int i = 0; i < list.Count; i++)
+                foreach (Vec3 node in new[] { list[i].StartNode, list[i].EndNode })
+                {
+                    if (!byNode.TryGetValue(node, out var owners))
+                        byNode[node] = owners = new List<int>();
+                    owners.Add(i);
+                }
+            return list.SelectMany((segment, index) =>
+            {
+                var connected = new HashSet<int>(byNode[segment.StartNode].Concat(byNode[segment.EndNode]));
+                connected.Remove(index);
+                return Split(segment, connected, nearby);
+            }).Select(Apply).ToList();
+        }
+
+        /// <summary>所有路段每隔几米的采样点，按网格分桶：查某点附近同一高度有没有别的路段。</summary>
+        private sealed class SampleGrid
+        {
+            private const float kCell = 32f, kSpacing = 5f;
+            private readonly Dictionary<(int, int), List<(int Owner, Vec3 P)>> m_Cells = new Dictionary<(int, int), List<(int Owner, Vec3 P)>>();
+
+            public SampleGrid(IReadOnlyList<RoadSegmentSpec> segments)
+            {
+                for (int i = 0; i < segments.Count; i++)
+                {
+                    var c = segments[i].Curve;
+                    int n = Math.Max(1, (int)Math.Ceiling(c.Length() / kSpacing));
+                    for (int k = 0; k <= n; k++)
+                    {
+                        Vec3 p = c.Evaluate(k / (float)n);
+                        var key = ((int)Math.Floor(p.X / kCell), (int)Math.Floor(p.Z / kCell));
+                        if (!m_Cells.TryGetValue(key, out var list))
+                            m_Cells[key] = list = new List<(int Owner, Vec3 P)>();
+                        list.Add((i, p));
+                    }
+                }
+            }
+
+            /// <summary>p 附近 radius 米内、高差 kNearHeight 内有没有 owners 里路段的采样点。</summary>
+            public bool Near(Vec3 p, HashSet<int> owners, float radius)
+            {
+                int x0 = (int)Math.Floor((p.X - radius) / kCell), x1 = (int)Math.Floor((p.X + radius) / kCell);
+                int z0 = (int)Math.Floor((p.Z - radius) / kCell), z1 = (int)Math.Floor((p.Z + radius) / kCell);
+                for (int x = x0; x <= x1; x++)
+                    for (int z = z0; z <= z1; z++)
+                        if (m_Cells.TryGetValue((x, z), out var list))
+                            foreach (var (owner, q) in list)
+                                if (owners.Contains(owner) && Math.Abs(q.Y - p.Y) < kNearHeight
+                                    && (q.X - p.X) * (q.X - p.X) + (q.Z - p.Z) * (q.Z - p.Z) < radius * radius)
+                                    return true;
+                return false;
+            }
+        }
 
         /// <summary>
-        /// 长于 kMaxBentPiece 的地面路段按参数等分：中间的节点在原曲线上取一次，相邻两段共用，弯曲后照样相接。
+        /// 长于 kMaxBentPiece 的地面路段分成几段：断点每隔 kCutStep 取候选，离接在两端节点上的路段（connected）不到 kNodeClearance 的不用，
+        /// 从起点起尽量隔 kMaxBentPiece 取一个（附近没有能用的就往后找）。中间的节点在原曲线上取一次，相邻两段共用，弯曲后照样相接。
         /// 高架路段不分（多出来的节点下面会多出立柱，模板已把高架段分得够短）。
         /// </summary>
-        private static IEnumerable<RoadSegmentSpec> Split(RoadSegmentSpec segment)
+        private static IEnumerable<RoadSegmentSpec> Split(RoadSegmentSpec segment, HashSet<int> connected, SampleGrid nearby)
         {
             var c = segment.Curve;
             float length = c.Length();
@@ -220,14 +288,42 @@ namespace InterchangeMod.Generation
                 yield return segment;
                 yield break;
             }
-            int n = (int)Math.Ceiling(length / kMaxBentPiece);
-            var points = Enumerable.Range(0, n + 1).Select(k => k == 0 ? c.P0 : k == n ? c.P3 : c.Evaluate(k / (float)n)).ToArray();
-            for (int k = 0; k < n; k++)
+            // 候选断点（按参数均匀取，长度按比例近似）
+            int m = (int)Math.Floor(length / kCutStep);
+            var candidates = new List<(float T, float S)>();
+            for (int j = 1; j < m; j++)
             {
-                var piece = c.Slice(k / (float)n, (k + 1) / (float)n);
-                yield return new RoadSegmentSpec(k == 0 ? segment.Name : $"{segment.Name}.{k + 1}", segment.Role,
+                float t = j / (float)m, along = length * t;
+                if (along >= kMinPiece && length - along >= kMinPiece && !nearby.Near(c.Evaluate(t), connected, kNodeClearance))
+                    candidates.Add((t, along));
+            }
+            var cuts = new List<float>();
+            float last = 0f;
+            while (length - last > kMaxBentPiece)
+            {
+                var within = candidates.Where(k => k.S > last + kMinPiece && k.S <= last + kMaxBentPiece).ToList();
+                var pick = within.Count > 0 ? within[within.Count - 1] : candidates.FirstOrDefault(k => k.S > last + kMaxBentPiece);
+                if (pick.T <= 0f)
+                    break;
+                cuts.Add(pick.T);
+                last = pick.S;
+            }
+            if (cuts.Count == 0)
+            {
+                yield return segment;
+                yield break;
+            }
+            var ts = new List<float> { 0f };
+            ts.AddRange(cuts);
+            ts.Add(1f);
+            var points = ts.Select((t, k) => k == 0 ? c.P0 : k == ts.Count - 1 ? c.P3 : c.Evaluate(t)).ToArray();
+            for (int k = 0; k + 1 < ts.Count; k++)
+            {
+                var piece = c.Slice(ts[k], ts[k + 1]);
+                bool first = k == 0, final = k + 2 == ts.Count;
+                yield return new RoadSegmentSpec(first ? segment.Name : $"{segment.Name}.{k + 1}", segment.Role,
                     new Bezier3(points[k], piece.P1, piece.P2, points[k + 1]), segment.Prefab,
-                    k == 0 ? segment.StartNode : points[k], k == n - 1 ? segment.EndNode : points[k + 1]);
+                    first ? segment.StartNode : points[k], final ? segment.EndNode : points[k + 1]);
             }
         }
 

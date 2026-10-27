@@ -215,18 +215,22 @@ namespace InterchangeMod.Generation.Templates
                 Vec3 offTop = At(-L.MainNode + L.MainShift, L.Cl, L.Main);
                 Vec3 offBottom = At(-L.Landing - L.GroundShift, L.Cl, L.Ground);
                 Vec3 offFront = At(-L.Landing, L.Og, L.Ground);
-                segments.Add(new RoadSegmentSpec($"{dir}-off-shift", RoadRole.Ramp, Bezier3.FromTangents(offMain, travel, offTop, travel, L.MainShift / 3f), p.RampPrefab));
+                Vec3 offLane = At(-L.Landing, L.RampLane, L.Ground);
+                DiamondTemplate.AddElevatedRamp(segments, p, $"{dir}-off-shift", Bezier3.FromTangents(offMain, travel, offTop, travel, L.MainShift / 3f), nodeAtEnd: false);
                 segments.Add(new RoadSegmentSpec($"{dir}-off-down", RoadRole.Ramp, Bezier3.SmoothSlope(offTop, offBottom), p.RampPrefab));
-                segments.Add(new RoadSegmentSpec($"{dir}-off-merge", RoadRole.Ramp, Bezier3.FromTangents(offBottom, travel, offFront, travel, L.GroundShift / 3f), p.RampPrefab));
+                segments.Add(new RoadSegmentSpec($"{dir}-off-merge", RoadRole.Ramp, Bezier3.FromTangents(offBottom, travel, offLane, travel, L.GroundShift / 3f), p.RampPrefab,
+                    endNode: offFront));
 
                 // 上匝道（路口后）：辅路 → 平移 → 爬升 → 平移 → 主线
                 Vec3 onFront = At(L.Landing, L.Og, L.Ground);
+                Vec3 onLane = At(L.Landing, L.RampLane, L.Ground);
                 Vec3 onBottom = At(L.Landing + L.GroundShift, L.Cl, L.Ground);
                 Vec3 onTop = At(L.MainNode - L.MainShift, L.Cl, L.Main);
                 Vec3 onMain = At(L.MainNode, L.Om, L.Main);
-                segments.Add(new RoadSegmentSpec($"{dir}-on-diverge", RoadRole.Ramp, Bezier3.FromTangents(onFront, travel, onBottom, travel, L.GroundShift / 3f), p.RampPrefab));
+                segments.Add(new RoadSegmentSpec($"{dir}-on-diverge", RoadRole.Ramp, Bezier3.FromTangents(onLane, travel, onBottom, travel, L.GroundShift / 3f), p.RampPrefab,
+                    startNode: onFront));
                 segments.Add(new RoadSegmentSpec($"{dir}-on-up", RoadRole.Ramp, Bezier3.SmoothSlope(onBottom, onTop), p.RampPrefab));
-                segments.Add(new RoadSegmentSpec($"{dir}-on-shift", RoadRole.Ramp, Bezier3.FromTangents(onTop, travel, onMain, travel, L.MainShift / 3f), p.RampPrefab));
+                DiamondTemplate.AddElevatedRamp(segments, p, $"{dir}-on-shift", Bezier3.FromTangents(onTop, travel, onMain, travel, L.MainShift / 3f), nodeAtEnd: true);
             }
             return segments;
         }
@@ -292,6 +296,11 @@ namespace InterchangeMod.Generation.Templates
             public readonly float Om, Cl, Og;
             /// <summary>辅路加宽段（含平交口）的横向偏移：加宽时向内平移，保持外侧边缘不变。</summary>
             public readonly float FrontInner;
+            /// <summary>
+            /// 匝道在落地节点（辅路中心线上）处的曲线端点横向位置：辅路加宽时匝道就是加宽段里侧多出来的车道，
+            /// 内侧边缘和加宽段对齐（游戏内：匝道接在辅路中心线上，落地前一大段压在辅路上，报形状无效）；不加宽时就是辅路中心线。
+            /// </summary>
+            public readonly float RampLane;
             /// <summary>匝道在主线高度 / 地面上的平移段长度。</summary>
             public readonly float MainShift, GroundShift;
             /// <summary>匝道接辅路的节点离路口中心的距离。</summary>
@@ -312,6 +321,7 @@ namespace InterchangeMod.Generation.Templates
                 Cl = Om + s1;
                 Og = Cl + s2;
                 FrontInner = Og - p.FrontageAddShift;
+                RampLane = p.FrontageAddShift > 0f ? Math.Max(Cl, FrontInner - p.FrontageWidenedWidth / 2f + p.RampWidth / 2f) : Og;
                 // 反向曲线横移 s 的平均角度约为分流角的一半，长度约为同角度直线的两倍
                 MainShift = 2f * s1 / k;
                 GroundShift = 2f * s2 / k;

@@ -30,6 +30,8 @@ namespace InterchangeMod.Generation.Templates
         private const float kPillarMargin = 3f;
         /// <summary>匝道接高架道路那头的圆弧半径上限（米）：并行重叠段要短于游戏切分高架路段的长度。</summary>
         private const float kDivergeRadius = 80f;
+        /// <summary>kDivergeRadius 放不下时逐档减小的步长和下限（米）。</summary>
+        private const float kDivergeRadiusStep = 10f, kMinDivergeRadius = 50f;
         /// <summary>匝道 S 形横移的圆弧半径（米，地面时）。</summary>
         private const float kSRadius = 150f;
         /// <summary>匝道与主线并行重叠的那段再多保持同高这么远（米）才开始升降。</summary>
@@ -331,21 +333,30 @@ namespace InterchangeMod.Generation.Templates
 
                 // —— 驶出匝道：在 tDiverge 驶出主线，S 形横移到 xP，沿 V 直行到环岛 ——
                 // 主线高架时 S 形两段都用小半径：横移量不大，大半径的 S 形要很久才与主线分开，并行重叠段会超过游戏切分长度
-                float r1 = mainElevated ? kDivergeRadius : kSRadius, r2 = mainElevated ? kDivergeRadius : kSRadius;
                 float shift = xP - om;
                 if (shift <= sepMain)
                 {
                     Fits = false;
                     return;
                 }
-                float theta = (float)Math.Acos(Math.Max(-1f, 1f - shift / (r1 + r2)));
-                float sAlong = (r1 + r2) * MathF.Sin(theta), sLength = (r1 + r2) * theta;
-                // 与主线分开（横向 sepMain）的位置：第一段圆弧内，或第二段（往回转 φ 后横向 r1(1−cosθ) + r2(cos(θ−φ) − cosθ)）
-                float firstLateral = r1 * (1f - MathF.Cos(theta));
-                float clearAt = sepMain <= firstLateral
-                    ? r1 * (float)Math.Acos(1f - sepMain / r1)
-                    : r1 * theta + r2 * (theta - (float)Math.Acos(Math.Min(1f, MathF.Cos(theta) + (sepMain - firstLateral) / r2)));
-                rampFlatStart = clearAt + kFlatMargin;
+                // 主线高架时并行重叠段要短于游戏切分长度：80 米半径不够快就逐档减小（匝道离主线间距至少 3 米时，
+                // 宽的街道单行道路要更急地分开）
+                float r1 = 0f, r2 = 0f, theta = 0f, sAlong = 0f, sLength = 0f;
+                for (float r = mainElevated ? kDivergeRadius : kSRadius; ; r -= kDivergeRadiusStep)
+                {
+                    r1 = r2 = r;
+                    theta = (float)Math.Acos(Math.Max(-1f, 1f - shift / (r1 + r2)));
+                    sAlong = (r1 + r2) * MathF.Sin(theta);
+                    sLength = (r1 + r2) * theta;
+                    // 与主线分开（横向 sepMain）的位置：第一段圆弧内，或第二段（往回转 φ 后横向 r1(1−cosθ) + r2(cos(θ−φ) − cosθ)）
+                    float firstLateral = r1 * (1f - MathF.Cos(theta));
+                    float clearAt = sepMain <= firstLateral
+                        ? r1 * (float)Math.Acos(1f - sepMain / r1)
+                        : r1 * theta + r2 * (theta - (float)Math.Acos(Math.Min(1f, MathF.Cos(theta) + (sepMain - firstLateral) / r2)));
+                    rampFlatStart = clearAt + kFlatMargin;
+                    if (!mainElevated || rampFlatStart <= legs[0].MaxElevatedEdgeLength - 5f || r - kDivergeRadiusStep < kMinDivergeRadius)
+                        break;
+                }
                 if (mainElevated && rampFlatStart > legs[0].MaxElevatedEdgeLength - 5f)
                     Fits = false;
                 Vec3 terminal = ring.PointAt(sOff);
@@ -454,8 +465,12 @@ namespace InterchangeMod.Generation.Templates
                     Vec3 axis = V * end;
                     Vec3 lateral = Directions.RightOf(axis) * hand;
                     Vec3 Point(float along, float l) => axis * along + lateral * l + new Vec3(0f, hm, 0f);
-                    DiamondTemplate.AddTransition(segments, end > 0f ? "Main-endA" : "Main-endB", RoadRole.MainRoad, Point, +1, mainEnd, om,
-                        mainEnd + leg.StubLength, p.LegTransitionAngle, leg.RoadPrefab, leg.ExternalPrefab);
+                    // 两幅放得进外部双向道路的宽度时平行接入，否则斜向汇合
+                    if (DiamondTemplate.FitsAligned(leg, om))
+                        DiamondTemplate.AddAlignedEnd(segments, end > 0f ? "Main-endA" : "Main-endB", RoadRole.MainRoad, Point, mainEnd, om, leg.StubLength, leg.ExternalPrefab);
+                    else
+                        DiamondTemplate.AddTransition(segments, end > 0f ? "Main-endA" : "Main-endB", RoadRole.MainRoad, Point, +1, mainEnd, om,
+                            mainEnd + leg.StubLength, p.LegTransitionAngle, leg.RoadPrefab, leg.ExternalPrefab);
                 }
             }
 

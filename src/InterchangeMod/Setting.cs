@@ -56,8 +56,15 @@ namespace InterchangeMod
         /// <summary>匝道分出/汇入后主线减少车道、辅路增加车道（自动匹配道路）。</summary>
         [SettingsUIHidden] public bool LaneBalance { get; set; }
 
-        /// <summary>中式快速路节点里匝道与主线、辅路之间的间距（米）；越小占地越窄。</summary>
+        /// <summary>
+        /// 匝道与主线、辅路之间的间距（米）；越小占地越窄。至少 MinRampGap：游戏内实测间距不到 3 米时，汇入段和主线重叠。
+        /// </summary>
         [SettingsUIHidden] public float RampGap { get; set; }
+
+        public const float MinRampGap = 3f, DefaultRampGap = 4f;
+
+        /// <summary>实际用的匝道间距：不到 MinRampGap（旧版默认 1 米存下来的值）时用 DefaultRampGap。</summary>
+        public float RampGapOrDefault => RampGap >= MinRampGap ? RampGap : DefaultRampGap;
 
         /// <summary>面板里的间距（分隔带、匝道间距）按游戏网格的格数显示（1 格 = 8 米），存储仍是米。</summary>
         [SettingsUIHidden] public bool SpacingInCells { get; set; }
@@ -187,7 +194,7 @@ namespace InterchangeMod
             GuideSeen = false;
             FrontageRoadPrefab = "";
             LaneBalance = true;
-            RampGap = 1f;
+            RampGap = DefaultRampGap;
             SpacingInCells = false;
             BaseFollowsMatch = true;
             BranchOnLeft = false;
@@ -259,7 +266,7 @@ namespace InterchangeMod
                     return true;
                 case nameof(FrontageRoadPrefab): FrontageRoadPrefab = value ?? ""; return true;
                 case nameof(LaneBalance): LaneBalance = value == "true"; return true;
-                case nameof(RampGap): RampGap = Clamp(number, 0.5f, 16f); return true;
+                case nameof(RampGap): RampGap = Clamp(number, MinRampGap, 16f); return true;
                 case nameof(SpacingInCells): SpacingInCells = value == "true"; return true;
                 case nameof(BaseFollowsMatch): BaseFollowsMatch = value == "true"; return true;
                 case nameof(BranchOnLeft): BranchOnLeft = value == "true"; return true;

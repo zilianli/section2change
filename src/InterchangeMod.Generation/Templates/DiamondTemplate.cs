@@ -202,10 +202,19 @@ namespace InterchangeMod.Generation.Templates
                 return new List<Vec3> { MainPoint(-back, lateral), rampBack, MainPoint(span.Lo, inner), MainPoint(span.Hi, inner), rampFront, MainPoint(front, lateral) };
             }
 
-            if (legs[2].NeedsDualToTwoWayTransition)
-                AddTransition(segments, "Main-2", RoadRole.MainRoad, MainPoint, -1, mainTransitionStart, om, l + legs[2].StubLength, p.LegTransitionAngle, prefab2, legs[2].ExternalPrefab);
-            if (legs[0].NeedsDualToTwoWayTransition)
-                AddTransition(segments, "Main-0", RoadRole.MainRoad, MainPoint, +1, mainTransitionStart, om, l + legs[0].StubLength, p.LegTransitionAngle, prefab0, legs[0].ExternalPrefab);
+            AddEnd(legs[2], "Main-2", RoadRole.MainRoad, MainPoint, -1, mainTransitionStart, om, l, prefab2);
+            AddEnd(legs[0], "Main-0", RoadRole.MainRoad, MainPoint, +1, mainTransitionStart, om, l, prefab0);
+
+            // 臂端外部是双向道路：两幅放得进它的宽度时平行接入，否则斜向汇合
+            void AddEnd(LegSpec leg, string name, RoadRole role, Func<float, float, Vec3> point, int end, float start, float offset, float inner, string? oneWayPrefab)
+            {
+                if (!leg.NeedsDualToTwoWayTransition)
+                    return;
+                if (FitsAligned(leg, offset))
+                    AddAlignedEnd(segments, name, role, point, end * start, offset, leg.StubLength, leg.ExternalPrefab);
+                else
+                    AddTransition(segments, name, role, point, end, start, offset, inner + leg.StubLength, p.LegTransitionAngle, oneWayPrefab, leg.ExternalPrefab);
+            }
 
             // —— 被交道路 ——
             // 双幅被交道路上的匝道接口沿道路方向会偏出 dc 一点（匝道斜着穿过分隔带），过渡段和臂端从最外的接口算起
@@ -238,10 +247,8 @@ namespace InterchangeMod.Generation.Templates
                 return new List<Vec3> { CrossPoint(-outer3, lateral), terminalA, terminalB, CrossPoint(span.Lo, lateral), CrossPoint(span.Hi, lateral), CrossPoint(outer1, lateral) };
             }
 
-            if (legs[3].NeedsDualToTwoWayTransition)
-                AddTransition(segments, "Cross-3", RoadRole.CrossRoad, CrossPoint, -1, crossTransitionStart, oc, reach + legs[3].StubLength, p.LegTransitionAngle, prefab3, legs[3].ExternalPrefab);
-            if (legs[1].NeedsDualToTwoWayTransition)
-                AddTransition(segments, "Cross-1", RoadRole.CrossRoad, CrossPoint, +1, crossTransitionStart, oc, reach + legs[1].StubLength, p.LegTransitionAngle, prefab1, legs[1].ExternalPrefab);
+            AddEnd(legs[3], "Cross-3", RoadRole.CrossRoad, CrossPoint, -1, crossTransitionStart, oc, reach, prefab3);
+            AddEnd(legs[1], "Cross-1", RoadRole.CrossRoad, CrossPoint, +1, crossTransitionStart, oc, reach, prefab1);
 
             // —— 匝道（单向，曲线方向即行驶方向）——
             // 每条匝道分两段，处处切线连续（不出现折角）：
@@ -254,6 +261,14 @@ namespace InterchangeMod.Generation.Templates
             float climbHandle = (l - taper) / 3f;
             float divergeHandle = taper / 3f;
             float clearLateral = om + DivergeSeparation(p);
+            if (MainElevated(p) && legs[0].Form == RoadForm.Dual)
+            {
+                // 高架主线：分流段就是一段圆弧（见 AddElevatedRamp），横移到不再压着主线处，之后的爬坡段沿圆弧终点的方向出发
+                var (angle, _) = ElevatedArc(RampClear(p) - RampAlign(p));
+                k = MathF.Tan(angle);
+                divergeHandle = kElevatedDivergeRadius * 4f / 3f * MathF.Tan(angle / 4f);
+                clearLateral = om + RampClear(p);
+            }
             Vec3 sbSide = -mainSide;
             Vec3 nbOut = main + mainSide * k, nbIn = main - mainSide * k;
             Vec3 sbOut = -main + sbSide * k, sbIn = -main - sbSide * k;
@@ -263,19 +278,19 @@ namespace InterchangeMod.Generation.Templates
             Vec3 sbOffClear = MainPoint(l - taper, -clearLateral);
             Vec3 sbOnClear = MainPoint(-l + taper, -clearLateral);
 
-            segments.Add(new RoadSegmentSpec("NB-diverge", RoadRole.Ramp, Bezier3.FromTangents(nbBack, main, nbOffClear, nbOut, divergeHandle), p.RampPrefab));
+            AddElevatedRamp(segments, p, "NB-diverge", Bezier3.FromTangents(nbBack, main, nbOffClear, nbOut, divergeHandle), nodeAtEnd: false);
             segments.Add(new RoadSegmentSpec("NB-off", RoadRole.Ramp,
                 Bezier3.FromTangents(nbOffClear, nbOut, nbNear, nbApproach, climbHandle), p.RampPrefab));
             segments.Add(new RoadSegmentSpec("NB-on", RoadRole.Ramp,
                 Bezier3.FromTangents(nbFar, nbApproach, nbOnClear, nbIn, climbHandle), p.RampPrefab));
-            segments.Add(new RoadSegmentSpec("NB-merge", RoadRole.Ramp, Bezier3.FromTangents(nbOnClear, nbIn, nbFront, main, divergeHandle), p.RampPrefab));
+            AddElevatedRamp(segments, p, "NB-merge", Bezier3.FromTangents(nbOnClear, nbIn, nbFront, main, divergeHandle), nodeAtEnd: true);
 
-            segments.Add(new RoadSegmentSpec("SB-diverge", RoadRole.Ramp, Bezier3.FromTangents(sbFront, -main, sbOffClear, sbOut, divergeHandle), p.RampPrefab));
+            AddElevatedRamp(segments, p, "SB-diverge", Bezier3.FromTangents(sbFront, -main, sbOffClear, sbOut, divergeHandle), nodeAtEnd: false);
             segments.Add(new RoadSegmentSpec("SB-off", RoadRole.Ramp,
                 Bezier3.FromTangents(sbOffClear, sbOut, sbNear, sbApproach, climbHandle), p.RampPrefab));
             segments.Add(new RoadSegmentSpec("SB-on", RoadRole.Ramp,
                 Bezier3.FromTangents(sbFar, sbApproach, sbOnClear, sbIn, climbHandle), p.RampPrefab));
-            segments.Add(new RoadSegmentSpec("SB-merge", RoadRole.Ramp, Bezier3.FromTangents(sbOnClear, sbIn, sbBack, -main, divergeHandle), p.RampPrefab));
+            AddElevatedRamp(segments, p, "SB-merge", Bezier3.FromTangents(sbOnClear, sbIn, sbBack, -main, divergeHandle), nodeAtEnd: true);
 
             // 原路口改造：臂端升降到外部道路的高度，好接回原有道路
             InterchangeLayout.AddApproachSlopes(segments, p);
@@ -285,9 +300,17 @@ namespace InterchangeMod.Generation.Templates
         /// <summary>
         /// 分流段沿主线方向的长度：曲线从与主线相切逐渐转到 RampDivergeAngle，平均角度约一半，
         /// 横向分开（主线半宽 + 匝道半宽 + 间距）需要的距离约为同角度直线的两倍。角度越小越长。
+        /// 主线是高架（双幅）时，分流段就是 AddElevatedRamp 里那段圆弧。
         /// </summary>
-        public static float TaperLength(InterchangeParams p) =>
-            2f * DivergeSeparation(p) / MathF.Tan(p.RampDivergeAngle * Directions.DegToRad);
+        public static float TaperLength(InterchangeParams p)
+        {
+            float separation = DivergeSeparation(p);
+            float k = MathF.Tan(p.RampDivergeAngle * Directions.DegToRad);
+            float taper = 2f * separation / k;
+            if (!MainElevated(p) || p.Legs[0].Form != RoadForm.Dual)
+                return taper;
+            return ElevatedArc(RampClear(p) - RampAlign(p)).Along;
+        }
 
         /// <summary>匝道中心线在分流段末端离主线（本幅）中心线的横向距离：主线半宽 + 匝道半宽 + 间距。</summary>
         private static float DivergeSeparation(InterchangeParams p) =>
@@ -350,6 +373,138 @@ namespace InterchangeMod.Generation.Templates
                 segments.Add(new RoadSegmentSpec($"{name}-merge-", role, Bezier3.Line(minus, merge), oneWayPrefab));
                 segments.Add(new RoadSegmentSpec($"{name}-tail", role, Bezier3.Line(point(-outer, 0f), merge), twoWayPrefab));
             }
+        }
+
+        /// <summary>
+        /// 匝道接主线的一段（曲线在主线节点处与主线相切，nodeAtEnd = true 表示主线节点在曲线终点 = 汇入）：
+        /// 匝道就是主线外侧分出去（汇进来）的那几条车道，曲线端点向匝道一侧横移 RampAlign，外侧边缘和主线对齐，节点仍在主线中心线上。
+        /// 主线是高架时，匝道从节点起先走一段半径 kElevatedDivergeRadius 的圆弧（与主线相切），横移到 RampClear 后不再压着主线，
+        /// 在那里分段（接主线节点的那段叫 name，另一段叫 name-clear），之后再平顺地转回原来的终点方向：游戏内匝道贴着高架主线
+        /// 缓缓分出时，分流节点后约 10 米报形状无效（节点横移与否都一样）；早先 15° 折出、喇叭形用 80 米圆弧分出时都能放置。
+        /// </summary>
+        internal static void AddElevatedRamp(List<RoadSegmentSpec> segments, InterchangeParams p, string name, Bezier3 curve, bool nodeAtEnd)
+        {
+            Vec3 node = nodeAtEnd ? curve.P3 : curve.P0, far = nodeAtEnd ? curve.P0 : curve.P3;
+            Vec3 tangent = curve.Derivative(nodeAtEnd ? 1f : 0f);
+            Vec3 side = Directions.RightOf(Vec3.Normalize(new Vec3(tangent.X, 0f, tangent.Z)));
+            if (Directions.Dot(far - node, side) < 0f)
+                side = -side;
+            Vec3 shift = side * RampAlign(p);
+            curve = nodeAtEnd
+                ? new Bezier3(curve.P0, curve.P1, curve.P2 + shift, curve.P3 + shift)
+                : new Bezier3(curve.P0 + shift, curve.P1 + shift, curve.P2, curve.P3);
+            var pieces = MainElevated(p)
+                ? ElevatedDiverge(curve, nodeAtEnd, RampClear(p) - RampAlign(p))
+                    ?? InterchangeLayout.SplitAtClear(curve, nodeAtEnd, RampClear(p), p.Legs[0].MaxElevatedEdgeLength)
+                : new List<Bezier3> { curve };
+            for (int i = 0; i < pieces.Count; i++)
+            {
+                bool atNode = nodeAtEnd ? i == pieces.Count - 1 : i == 0;
+                segments.Add(atNode
+                    ? new RoadSegmentSpec(name, RoadRole.Ramp, pieces[i], p.RampPrefab, nodeAtEnd ? (Vec3?)null : node, nodeAtEnd ? node : (Vec3?)null)
+                    : new RoadSegmentSpec($"{name}-clear", RoadRole.Ramp, pieces[i], p.RampPrefab));
+            }
+        }
+
+        /// <summary>高架主线上匝道分出 / 汇入时，靠主线节点那段圆弧的半径（米），与喇叭形相同。</summary>
+        internal const float kElevatedDivergeRadius = 80f;
+
+        /// <summary>从与主线相切出发、以 kElevatedDivergeRadius 横移 rise 的圆弧：转角（弧度）和沿主线的长度。</summary>
+        internal static (float Angle, float Along) ElevatedArc(float rise)
+        {
+            float angle = (float)Math.Acos(Math.Max(-1f, 1f - rise / kElevatedDivergeRadius));
+            return (angle, kElevatedDivergeRadius * MathF.Sin(angle));
+        }
+
+        /// <summary>
+        /// 把匝道曲线（起点在主线节点处、与主线相切；nodeAtEnd 时反过来）换成：圆弧横移 rise（到不再压着主线处），
+        /// 再接一段曲线到原来的终点、终点方向不变。原曲线本身就只横移 rise 时（菱形：分流段就是这段圆弧）只有圆弧。
+        /// 横向走不到 rise、或剩下的长度不够转回来时返回 null。
+        /// </summary>
+        private static List<Bezier3>? ElevatedDiverge(Bezier3 curve, bool nodeAtEnd, float rise)
+        {
+            var c = nodeAtEnd ? curve.Reverse() : curve;
+            Vec3 start = c.P0, far = c.P3;
+            Vec3 travel = Flat(c.Derivative(0f)), farDir = Flat(c.Derivative(1f));
+            Vec3 side = Directions.RightOf(travel);
+            float farLateral = Directions.Dot(far - start, side);
+            if (farLateral < 0f)
+            {
+                side = -side;
+                farLateral = -farLateral;
+            }
+            if (rise < 0.1f || farLateral < rise - 0.01f)
+                return null;
+            var (angle, along) = ElevatedArc(rise);
+            Vec3 heading = travel * MathF.Cos(angle) + side * MathF.Sin(angle);
+            Vec3 arcEnd = start + travel * along + side * rise;
+            arcEnd.Y = start.Y;
+            var arc = Bezier3.FromTangents(start, travel, arcEnd, heading, kElevatedDivergeRadius * 4f / 3f * MathF.Tan(angle / 4f));
+            var pieces = new List<Bezier3> { arc };
+            float lateralLeft = farLateral - rise, alongLeft = Directions.Dot(far - start, travel) - along;
+            if (lateralLeft > 0.05f || alongLeft > 1f)
+            {
+                if (alongLeft < 3f * lateralLeft || alongLeft < kMinRestLength)
+                    return null;
+                // 剩下一段：从圆弧终点沿圆弧方向出发，转回原来的终点方向；起点控制柄不让横向冲过终点
+                float length = Vec3.Distance(arcEnd, far);
+                float h0 = Math.Max(length / 10f, Math.Min(length / 3f, 0.9f * lateralLeft / MathF.Sin(angle)));
+                Vec3 p1 = arcEnd + heading * h0, p2 = far - farDir * (length / 3f);
+                p1.Y = start.Y + (far.Y - start.Y) / 3f;
+                p2.Y = start.Y + (far.Y - start.Y) * 2f / 3f;
+                pieces.Add(new Bezier3(arcEnd, p1, p2, far));
+            }
+            if (!nodeAtEnd)
+                return pieces;
+            pieces.Reverse();
+            return pieces.Select(b => b.Reverse()).ToList();
+        }
+
+        /// <summary>ElevatedDiverge 圆弧之后那段的最小长度（米）。</summary>
+        private const float kMinRestLength = 20f;
+
+        private static Vec3 Flat(Vec3 v) => Vec3.Normalize(new Vec3(v.X, 0f, v.Z));
+
+        /// <summary>匝道在主线节点处的曲线端点离主线（本幅）中心线的横向距离：外侧边缘与主线对齐。</summary>
+        public static float RampAlign(InterchangeParams p) => Math.Max(0f, (p.Legs[0].RoadWidth - p.RampWidth) / 2f);
+
+        internal static bool MainElevated(InterchangeParams p) => LevelPlanner.BandOf(p.ElevationOf(p.Legs[0])) == ElevationBand.Elevated;
+
+        /// <summary>
+        /// 匝道中心离分流节点（主线一幅中心线）横移多远就不再压着主线：匝道节点之间主线是减车道的中段（向分隔带平移了
+        /// MainDropShift），按中段的宽度算，再留 RampSideGap。
+        /// </summary>
+        public static float RampClear(InterchangeParams p)
+        {
+            float deck = p.MainReducedPrefab != null && p.MainReducedWidth > 0f ? p.MainReducedWidth : p.Legs[0].RoadWidth;
+            return deck / 2f + p.RampWidth / 2f + p.RampSideGap - p.MainDropShift;
+        }
+
+        /// <summary>
+        /// 内部双幅的两幅放得进外部双向道路的宽度（BuildParams 按外缘对齐双向道路选的单行道路）：臂端用 AddAlignedEnd 平行接入，
+        /// 不用 AddTransition 斜向汇合。
+        /// </summary>
+        internal static bool FitsAligned(LegSpec leg, float offset) =>
+            leg.ExternalWidth > 0f && 2f * offset + leg.RoadWidth <= leg.ExternalWidth + TrumpetTemplate.kMinSplitMedian + 0.5f;
+
+        /// <summary>
+        /// 臂端过渡（内部双幅 → 外部双向）的边缘对齐做法：两幅平行延伸到 at（带符号，沿道路），接到中心线上同一个节点
+        ///（曲线端点不动，节点横移 = 边缘对齐），再以外部的双向道路延伸 stub。斜向汇合时两幅很宽的话彼此压着走很长一段
+        ///（游戏内环岛式：两幅 24 米宽的单行道路斜向汇入 40 米的双向道路，在桥上报形状无效）。
+        /// point(沿道路距离, 横向偏移) 给出坐标；两幅在 at 处的节点（横向 ±offset）换成中心线上的节点。
+        /// </summary>
+        internal static void AddAlignedEnd(List<RoadSegmentSpec> segments, string name, RoadRole role, Func<float, float, Vec3> point,
+            float at, float offset, float stub, string? twoWayPrefab)
+        {
+            Vec3 joint = point(at, 0f), plus = point(at, offset), minus = point(at, -offset);
+            Vec3 Moved(Vec3 node) => node.Equals(plus) || node.Equals(minus) ? joint : node;
+            for (int i = 0; i < segments.Count; i++)
+            {
+                var s = segments[i];
+                if (s.Role == role && (Moved(s.StartNode) != s.StartNode || Moved(s.EndNode) != s.EndNode))
+                    segments[i] = new RoadSegmentSpec(s.Name, s.Role, s.Curve, s.Prefab, Moved(s.StartNode), Moved(s.EndNode));
+            }
+            segments.Add(new RoadSegmentSpec($"{name}-tail", role, Bezier3.Line(joint, point(at + Math.Sign(at) * stub, 0f)), twoWayPrefab));
         }
 
         /// <summary>主线中段（减车道）的横向偏移：向中央分隔带平移 MainDropShift，保持直行车道边缘不变。</summary>

@@ -431,6 +431,48 @@ namespace InterchangeMod.Generation.Tests
             Assert.True(worst < 0.3f, $"bent road is {worst:F2} m off the warp");
         }
 
+        [Theory]
+        [InlineData("stack", 1f / 1140f, 0f)]
+        [InlineData("turbine", 1f / 1418f, 0f)]
+        [InlineData("stackLeftExit", -1f / 900f, 1f / 1300f)]
+        [InlineData("cloverleaf", 1f / 900f, 0f)]
+        public void SplitNodes_StayClearOfRampsHuggingTheRoad(string kind, float mainCurvature, float crossCurvature)
+        {
+            // 游戏内（涡轮、苜蓿叶弯曲后）：长的地面路段等分时节点落在匝道汇入前贴着道路走的那段里，报“形状无效”。
+            // 新加的节点处路面离同一高度的别的路段（不共用这个节点）至少 2 米：两路面不重叠
+            IInterchangeTemplate template;
+            InterchangeParams p;
+            if (kind == "cloverleaf")
+            {
+                template = new CloverleafTemplate();
+                p = ThumbnailTests.Params(InterchangeType.Cloverleaf);
+            }
+            else
+            {
+                template = new StackTemplate(turbine: kind == "turbine");
+                p = new InterchangeParams { Legs = InterchangeParams.CrossLegs(90f, 0, 1), RampWidth = 12f, RampSideGap = 1f, StackLeftExit = kind == "stackLeftExit" };
+                p.SetRoad(0, 2, RoadForm.Dual, 20f, 8f, "Highway Oneway");
+                p.SetRoad(1, 3, RoadForm.Dual, 20f, 8f, "Highway Oneway");
+                p.Levels[1].Elevation = 10f;
+            }
+            Assert.Empty(template.ValidateParams(p));
+            var bent = new CurveWarp(p.Legs[1].Angle, mainCurvature, crossCurvature).Apply(template.Generate(p));
+            var pieces = bent.Where(sg => System.Text.RegularExpressions.Regex.IsMatch(sg.Name, @"\.\d+$")).ToList();
+            Assert.NotEmpty(pieces);
+            float Width(RoadSegmentSpec sg) => sg.Role == RoadRole.Ramp ? p.RampWidth : sg.Role == RoadRole.MainRoad ? p.Legs[0].RoadWidth : p.Legs[1].RoadWidth;
+            foreach (var piece in pieces)
+            {
+                Vec3 node = piece.StartNode;
+                foreach (var other in bent.Where(sg => !sg.StartNode.Equals(node) && !sg.EndNode.Equals(node)))
+                    for (int k = 0; k <= 40; k++)
+                    {
+                        Vec3 v = other.Curve.Evaluate(k / 40f);
+                        Assert.False(Flat(v, node) < (Width(piece) + Width(other)) / 2f + 2f && System.Math.Abs(v.Y - node.Y) < 5f,
+                            $"split node of {piece.Name} at ({node.X:F0}, {node.Z:F0}) is {Flat(v, node):F1} m from {other.Name}");
+                    }
+            }
+        }
+
         public static IEnumerable<object[]> BigInterchanges() =>
             from kind in new[] { "stack", "stackLeftExit", "turbine" }
             from curve in new[] { (1f / 900f, 0f), (-1f / 1500f, 1f / 1300f) }

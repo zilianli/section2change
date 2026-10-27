@@ -120,5 +120,41 @@ namespace InterchangeMod.Generation.Tests
             p.Legs[0].ExternalPrefab = null;
             Assert.Contains(_template.ValidateParams(p), e => e.Contains("外部双向道路"));
         }
+
+        [Fact]
+        public void WideTwoWayMain_SplitIntoAlignedCarriageways_JoinsParallelAtOneNode()
+        {
+            // 游戏内的组合：地面主线 XL 双向（40 米）在菱形内部拆成两幅 18 米宽的单行道路（外缘对齐，分隔带 4 米），上面是高架公路
+            var p = new InterchangeParams { RampLength = 300f, RampWidth = 16f, RampSideGap = 3f };
+            p.SetRoad(0, 2, RoadForm.Dual, 18f, 4f, "Oneway");
+            p.SetRoad(1, 3, RoadForm.Dual, 20f, 8f, "Highway");
+            foreach (int i in new[] { 0, 2 })
+            {
+                p.Legs[i].ExternalForm = RoadForm.TwoWay;
+                p.Legs[i].ExternalPrefab = "XL";
+                p.Legs[i].ExternalWidth = 40f;
+            }
+            p.Levels[0].Elevation = 0.25f;
+            p.Levels[1].Elevation = 10.25f;
+            Assert.Empty(_template.ValidateParams(p));
+            var segments = _template.Generate(p);
+            Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
+            TestHelpers.AssertRampsConnected(segments);
+            Vec3 main = p.Legs[0].Direction;
+            foreach (string end in new[] { "Main-0", "Main-2" })
+            {
+                // 每端只有一段双向尾段，没有斜向的过渡段
+                var parts = segments.Where(s => s.Name.StartsWith(end + "-")).ToList();
+                var tail = Assert.Single(parts);
+                Assert.Equal("XL", tail.Prefab);
+                // 两幅平行延伸到尾段起点（在中心线上），曲线端点仍在各自一幅上（边缘对齐）
+                Vec3 joint = tail.StartNode;
+                Assert.Equal(0f, joint.X * main.Z - joint.Z * main.X, 3);
+                var carriageways = segments.Where(s => s.Role == RoadRole.MainRoad && s != tail && (s.StartNode == joint || s.EndNode == joint)).ToList();
+                Assert.Equal(2, carriageways.Count);
+                Assert.All(carriageways, s => Assert.True(s.HasNodeOffset));
+                Assert.All(carriageways, s => Assert.Equal("Oneway", s.Prefab));
+            }
+        }
     }
 }

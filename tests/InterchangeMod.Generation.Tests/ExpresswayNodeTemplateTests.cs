@@ -46,20 +46,20 @@ namespace InterchangeMod.Generation.Tests
         {
             var p = Make();
             var segments = _template.Generate(p);
-            var main = segments.Where(s => s.Role == RoadRole.MainRoad).SelectMany(s => new[] { s.Curve.P0, s.Curve.P3 }).ToHashSet();
-            var front = segments.Where(s => s.Role == RoadRole.FrontageRoad).SelectMany(s => new[] { s.Curve.P0, s.Curve.P3 }).ToHashSet();
-            var cross = segments.Where(s => s.Role == RoadRole.CrossRoad).SelectMany(s => new[] { s.Curve.P0, s.Curve.P3 }).ToHashSet();
+            var main = segments.Where(s => s.Role == RoadRole.MainRoad).SelectMany(s => new[] { s.StartNode, s.EndNode }).ToHashSet();
+            var front = segments.Where(s => s.Role == RoadRole.FrontageRoad).SelectMany(s => new[] { s.StartNode, s.EndNode }).ToHashSet();
+            var cross = segments.Where(s => s.Role == RoadRole.CrossRoad).SelectMany(s => new[] { s.StartNode, s.EndNode }).ToHashSet();
 
             foreach (string dir in new[] { "NB", "SB" })
             {
-                var c = segments.ToDictionary(s => s.Name, s => s.Curve);
-                Assert.Contains(c[$"{dir}-off-shift"].P0, main);
-                Assert.Contains(c[$"{dir}-off-merge"].P3, front);
-                Assert.Contains(c[$"{dir}-on-diverge"].P0, front);
-                Assert.Contains(c[$"{dir}-on-shift"].P3, main);
+                var c = segments.ToDictionary(s => s.Name);
+                Assert.Contains(c[$"{dir}-off-shift"].StartNode, main);
+                Assert.Contains(c[$"{dir}-off-merge"].EndNode, front);
+                Assert.Contains(c[$"{dir}-on-diverge"].StartNode, front);
+                Assert.Contains(c[$"{dir}-on-shift"].EndNode, main);
             }
             // 匝道不接被交道路：地面只有辅路与被交道路的平交口
-            Assert.DoesNotContain(segments.Where(s => s.Role == RoadRole.Ramp).SelectMany(s => new[] { s.Curve.P0, s.Curve.P3 }), cross.Contains);
+            Assert.DoesNotContain(segments.Where(s => s.Role == RoadRole.Ramp).SelectMany(s => new[] { s.StartNode, s.EndNode }), cross.Contains);
             // 辅路和被交道路共用交点
             Assert.Equal(2, front.Intersect(cross).Count());
         }
@@ -69,13 +69,25 @@ namespace InterchangeMod.Generation.Tests
         {
             var p = Make();
             Vec3 main = p.Legs[0].Direction;
-            foreach (var s in _template.Generate(p).Where(s => s.Role == RoadRole.Ramp))
+            var segments = _template.Generate(p);
+            var roadNodes = segments.Where(s => s.Role != RoadRole.Ramp).SelectMany(s => new[] { s.StartNode, s.EndNode }).ToHashSet();
+            var ramps = segments.Where(s => s.Role == RoadRole.Ramp).ToList();
+            Vec3 Flat(Vec3 d) => Vec3.Normalize(new Vec3(d.X, 0f, d.Z));
+            foreach (var s in ramps)
             {
-                foreach (float t in new[] { 0f, 1f })
+                foreach (var (t, node) in new[] { (0f, s.StartNode), (1f, s.EndNode) })
                 {
-                    Vec3 d = s.Curve.Derivative(t);
-                    var flat = Vec3.Normalize(new Vec3(d.X, 0f, d.Z));
-                    Assert.True(System.Math.Abs(System.Math.Abs(Directions.Dot(flat, main)) - 1f) < 1e-3f, $"{s.Name} is not parallel to the main line at t={t}");
+                    var flat = Flat(s.Curve.Derivative(t));
+                    if (roadNodes.Contains(node))
+                    {
+                        // 接主线、辅路处与道路平行（外切）
+                        Assert.True(System.Math.Abs(System.Math.Abs(Directions.Dot(flat, main)) - 1f) < 1e-3f, $"{s.Name} is not parallel to the main line at t={t}");
+                        continue;
+                    }
+                    // 匝道自己的分段点（高架主线旁分流圆弧的终点等）：前后两段切线连续
+                    var next = ramps.Single(r => r != s && (t == 1f ? r.StartNode == node : r.EndNode == node));
+                    var other = Flat(next.Curve.Derivative(t == 1f ? 0f : 1f));
+                    Assert.True(Directions.Dot(flat, other) > 0.9998f, $"{s.Name} -> {next.Name} kinks");
                 }
             }
         }
@@ -199,6 +211,16 @@ namespace InterchangeMod.Generation.Tests
                 foreach (var end in new[] { s.Curve.P0, s.Curve.P3 })
                     Assert.Equal(og + 6f, Lateral(end) + 8f, 3);   // 外侧边缘不变
             Assert.Equal(4, widened.Count(s => s.HasNodeOffset));   // 落地点和上匝道分出点处边缘对齐
+            // 匝道就是加宽段里侧多出来的车道：在落地节点处内侧边缘和加宽段对齐（节点仍在辅路中心线上）
+            float wideInner = og + 6f - 16f;
+            foreach (string name in new[] { "NB-off-merge", "NB-on-diverge", "SB-off-merge", "SB-on-diverge" })
+            {
+                var ramp = segments.Single(s => s.Name == name);
+                Vec3 lane = name.Contains("-off-") ? ramp.Curve.P3 : ramp.Curve.P0;
+                Vec3 node = name.Contains("-off-") ? ramp.EndNode : ramp.StartNode;
+                Assert.Equal(wideInner, Lateral(lane) - p.RampWidth / 2f, 3);
+                Assert.Equal(og, Lateral(node), 3);
+            }
         }
 
         [Fact]

@@ -189,6 +189,53 @@ namespace InterchangeMod.Generation.Tests
         }
 
         [Fact]
+        public void WyeLegTrace_FoldingBackNearTheCenter_IsDropped()
+        {
+            // 臂 A 的追踪点在路口附近往回折一下（双幅两幅在不同节点汇合时平移出的中心线会这样），之后是 400 米直路：
+            // 读出的中心线仍是直线，不能报几米的假半径
+            var a = OneSide(TwoWayRoad(Vec3.Zero, 0f, "A", 2), 0f).ToList();
+            var trace = new List<Vec3> { new Vec3(0f, 0f, 2f), new Vec3(0f, 0f, 8f), new Vec3(1.5f, 0f, 4f) };
+            for (float z = 12f; z <= 400f; z += 4f)
+                trace.Add(new Vec3(0f, 0f, z));
+            foreach (var e in a)
+                e.Trace = trace;
+            var edges = Edges(a, OneSide(TwoWayRoad(Vec3.Zero, 120f, "B", 2), 120f), OneSide(TwoWayRoad(Vec3.Zero, 240f, "C", 2), 240f));
+            var m = JunctionMatcher.Match(edges, 130f);
+            Assert.True(m.Wye);
+            var legA = m.TripleLegs!.Single(l => l.Road.Prefab == "A");
+            var line = Centerline.FromPoints(legA.Trace!, Directions.FromAngle(legA.Angle));
+            Assert.True(line.NearlyStraight(0.5f) || line.MinRadius(600f) > 1000f, $"radius {line.MinRadius(600f):F0}");
+        }
+
+        [Fact]
+        public void WyeLegsNotMeetingAtOnePoint_FarEndsStayOnTheirRoads()
+        {
+            // 臂 C 的中心线不过另两条臂的交点（横偏 6 米，游戏内实测的 Y 型）：中心线从立交中心出发，离中心 200 米外回到原有道路上
+            // （整条平移到过中心时，C 的两幅臂端都偏出 6 米接不上原有道路）
+            List<ExternalEdge> Leg(float angle, string road, Vec3 offset)
+            {
+                var list = OneSide(TwoWayRoad(offset, angle, road, 2), angle).ToList();
+                Vec3 dir = Directions.FromAngle(angle);
+                var trace = new List<Vec3>();
+                for (float s = 0f; s <= 400f; s += 4f)
+                    trace.Add(offset + dir * s);
+                foreach (var e in list)
+                    e.Trace = trace;
+                return list;
+            }
+            Vec3 cOffset = Directions.RightOf(Directions.FromAngle(240f)) * 6f;
+            var edges = Edges(Leg(0f, "A", Vec3.Zero), Leg(120f, "B", Vec3.Zero), Leg(240f, "C", cOffset));
+            var m = JunctionMatcher.Match(edges, 130f);
+            Assert.True(m.Wye);
+            var legC = m.TripleLegs!.Single(l => l.Road.Prefab == "C");
+            var trace = legC.Trace!;
+            Assert.True(Vec3.Distance(trace[0], m.Center) < 1e-3f);
+            Vec3 dirC = Directions.FromAngle(240f), right = Directions.RightOf(dirC);
+            foreach (var p in trace.Where(p => Directions.Dot(p - cOffset, dirC) > 210f))
+                Assert.True(System.Math.Abs(Directions.Dot(p - cOffset, right)) < 0.05f, $"{p} off the road");
+        }
+
+        [Fact]
         public void LoneOneWayLeg_IsRejected()
         {
             var edges = new List<ExternalEdge>(TwoWayRoad(Vec3.Zero, 0f, "Large Road", 3));

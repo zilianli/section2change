@@ -161,6 +161,52 @@ namespace InterchangeMod.Generation
             }
         }
 
+        /// <summary>
+        /// 高架道路上分出 / 汇入的匝道与所接道路并行重叠的一段要在一条游戏路段内：长于 maxEdge 的高架路段游戏会切开，
+        /// 切点的立柱落在所接道路的桥面上，分流节点的形状也伸不到重叠段末端（游戏内：单点、中式快速路、菱形高架主线
+        /// 分流处报叠放、立柱重叠和形状无效）。所以在匝道横向离分流节点 clear（不再压着所接道路）处加一个节点。
+        /// 曲线在分流节点处与道路相切；nodeAtEnd = true 表示分流节点在曲线终点（汇入）。
+        /// 返回一段或两段（按行驶方向）：整段不长于 maxEdge（游戏不切）、横向走不到 clear、或外面那段太短时不分。
+        /// </summary>
+        public static List<Bezier3> SplitAtClear(Bezier3 curve, bool nodeAtEnd, float clear, float maxEdge)
+        {
+            var whole = new List<Bezier3> { curve };
+            if (curve.Length() <= maxEdge - 5f)
+                return whole;
+            var c = nodeAtEnd ? curve.Reverse() : curve;
+            float t = ClearParameter(c, clear);
+            if (t >= 1f || c.Slice(t, 1f).Length() < kMinClearPiece)
+                return whole;
+            var pieces = new List<Bezier3> { c.Slice(0f, t), c.Slice(t, 1f) };
+            if (!nodeAtEnd)
+                return pieces;
+            pieces.Reverse();
+            return pieces.Select(b => b.Reverse()).ToList();
+        }
+
+        /// <summary>曲线（起点与道路相切）横向离起点达到 clear 处的参数；走不到时返回 1。</summary>
+        public static float ClearParameter(Bezier3 c, float clear)
+        {
+            Vec3 d = c.Derivative(0f);
+            Vec3 side = Directions.RightOf(Vec3.Normalize(new Vec3(d.X, 0f, d.Z)));
+            float Lateral(float t) => System.Math.Abs(Directions.Dot(c.Evaluate(t) - c.P0, side));
+            if (Lateral(1f) < clear)
+                return 1f;
+            float lo = 0f, hi = 1f;
+            for (int i = 0; i < 30; i++)
+            {
+                float mid = (lo + hi) / 2f;
+                if (Lateral(mid) < clear)
+                    lo = mid;
+                else
+                    hi = mid;
+            }
+            return hi;
+        }
+
+        /// <summary>SplitAtClear 分开后外面那段的最小长度（米），太短的路段游戏报形状无效。</summary>
+        private const float kMinClearPiece = 10f;
+
         public static List<string> ValidateGeometry(IEnumerable<RoadSegmentSpec> segments, InterchangeParams p)
         {
             var errors = new List<string>();

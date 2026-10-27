@@ -65,7 +65,7 @@ export const autoSettings = (s: PanelSettings): PanelSettings => ({
   ...s,
   BaseElevation: 0, LevelGap: 0, MainOnTop: false, CrossingAngle: 90, RampLength: 250, MainRoadForm: "Auto", CrossRoadForm: "TwoWay",
   MainRoadPrefab: "", CrossRoadPrefab: "", MedianWidth: 4, RampDivergeAngle: 15, RampLanes: 0, RampPrefab: "", MatchJunctions: true,
-  CurveFollow: true, FrontageRoadPrefab: "", LaneBalance: true, RampGap: 1, BaseFollowsMatch: true, BranchOnLeft: false,
+  CurveFollow: true, FrontageRoadPrefab: "", LaneBalance: true, RampGap: 4, BaseFollowsMatch: true, BranchOnLeft: false,
   TrumpetLoopForExit: true, LoopRadius: 0, CloverleafCrossOnTop: false, CloverleafHugLoop: false, ParcloLoopsForExit: true,
   RoundaboutRacetrack: false, StackLeftExit: false, DirectionalTwoLevel: false, TeeMainRoad: "auto", CloverleafCollectorMode: "none",
   MaxGradePercent: 8, TrumpetNearRampRadius: 0,

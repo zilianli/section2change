@@ -75,6 +75,7 @@ namespace InterchangeMod.Systems
         private bool IsExpressway => setting?.InterchangeType == "ExpresswayNode" || setting?.InterchangeType == "ExpresswayT";
         private bool IsExpresswayT => setting?.InterchangeType == "ExpresswayT";
         private bool IsSinglePoint => setting?.InterchangeType == "SinglePoint";
+        private bool IsDiamond => setting?.InterchangeType == "Diamond";
         private bool IsTrumpet => setting?.InterchangeType == "Trumpet";
         private bool IsCloverleaf => setting?.InterchangeType == "Cloverleaf";
         private bool IsParclo => setting?.InterchangeType == "PartialCloverleaf";
@@ -680,6 +681,11 @@ namespace InterchangeMod.Systems
                 m_MatchSeed = Entity.Null;
                 m_SettingsVersion++;
             }
+            // 双幅道路的路口由好几个节点组成，鼠标在路口附近移动时会指到不同的节点或旁边的路段，各自匹配出的中心差十几米、
+            // 有的还匹配不上（游戏内 Y 型：预览来回跳、时而报“不是两两相对的直线”）：离当前路口中心不远就保持当前匹配
+            if (seed != m_MatchSeed && m_Match != null && m_Match.Error == null && !m_Match.RoadOnly && !m_Match.Crossing
+                && math.distance(new float2(cursor.X, cursor.Z), new float2(m_Match.Center.X, m_Match.Center.Z)) < kSameJunction)
+                return;
             if (seed == m_MatchSeed)
             {
                 // 普通道路：中心跟着鼠标沿道路移动，每帧重新投影（路段已缓存，开销很小）
@@ -706,6 +712,8 @@ namespace InterchangeMod.Systems
                         (m_Match.Error ?? (m_Match.RoadOnly
                             ? $"plain road '{m_Match.Main.Prefab}' {m_Match.Main.Form} at {m_Match.MainAngle:F0}°"
                             : $"main '{m_Match.Main.Prefab}' {m_Match.Main.Form} at {m_Match.MainAngle:F0}°, cross '{m_Match.Cross.Prefab}' {m_Match.Cross.Form}, angle {m_Match.CrossingAngle:F0}°")));
+                if (setting.DebugLogging && m_MatchEdges != null && !m_Match.RoadOnly)
+                    LogEdges("junction", m_MatchEdges, cursor);
             }
             m_SettingsVersion++;
         }
@@ -718,6 +726,12 @@ namespace InterchangeMod.Systems
 
         /// <summary>同一处立体交叉的不同路段（双幅交叉的另一幅）交叉点离匹配中心不超过这个距离（米）。</summary>
         private const float kSameCrossing = 25f;
+
+        /// <summary>鼠标离当前匹配的平面路口中心不到这个距离（米）时保持当前匹配（见 UpdateJunctionMatchCore）。</summary>
+        private const float kSameJunction = 40f;
+
+        /// <summary>调试：上一次写进日志的参数指纹（参数没变时不重复写）。</summary>
+        private string m_LastLoggedParams;
 
         /// <summary>
         /// 读到的交叉就是当前匹配的那一处：同一对路段，或交叉点离当前匹配中心不到 kSameCrossing 米（鼠标移到双幅交叉的另一幅时
@@ -752,27 +766,27 @@ namespace InterchangeMod.Systems
                 Mod.log.Info($"[debug] crossing: {matched.Count} edges, {m_Match.LegCount} legs, " +
                     (m_Match.Error ?? $"main '{m_Match.Main.Prefab}' {m_Match.Main.Form} at {m_Match.Main.Elevation:F1} m, " +
                         $"cross '{m_Match.Cross.Prefab}' {m_Match.Cross.Form} at {m_Match.Cross.Elevation:F1} m, angle {m_Match.CrossingAngle:F0}°"));
-                LogCrossingEdges(edges, hitPosition);
+                LogEdges("crossing", edges, new Vec3(hitPosition.x, 0f, hitPosition.z));
             }
             m_SettingsVersion++;
             return true;
         }
 
         /// <summary>
-        /// 调试：把立体交叉读出的各半段原样写进日志（锚点、方向、行驶方向、宽度、高度、追踪点每 8 米一个、到 800 米），
-        /// 便于在测试里一比一还原匹配和弯曲。
+        /// 调试：把立体交叉（kind = crossing）或平面路口（junction，如 Y 型三岔）读出的各半段原样写进日志（锚点、方向、行驶方向、
+        /// 宽度、高度、追踪点每 8 米一个、到 800 米），便于在测试里一比一还原匹配和弯曲。
         /// </summary>
-        private void LogCrossingEdges(List<ExternalEdge> edges, float3 hitPosition)
+        private void LogEdges(string kind, List<ExternalEdge> edges, Vec3 cursor)
         {
             var c = System.Globalization.CultureInfo.InvariantCulture;
             string P(Vec3 v) => v.X.ToString("F2", c) + "," + v.Z.ToString("F2", c);
-            Mod.log.Info($"[debug] crossing dump: cursor {P(new Vec3(hitPosition.x, 0f, hitPosition.z))} yaw {(m_Yaw / Directions.DegToRad).ToString("F2", c)} " +
+            Mod.log.Info($"[debug] {kind} dump: cursor {P(cursor)} yaw {(m_Yaw / Directions.DegToRad).ToString("F2", c)} " +
                 $"center {P(m_Match.Center)} main {m_Match.MainAngle.ToString("F2", c)} crossing {m_Match.CrossingAngle.ToString("F2", c)}");
             for (int i = 0; i < edges.Count; i++)
             {
                 var e = edges[i];
                 var trace = e.Trace == null ? "" : string.Join(";", e.Trace.Where((_, k) => k % 2 == 0).Take(100).Select(P));
-                Mod.log.Info($"[debug] crossing edge {i}: anchor {P(e.Anchor)} dir {P(e.Direction)} road '{e.Road}' oneway {e.OneWay} out {e.TravelOutward} " +
+                Mod.log.Info($"[debug] {kind} edge {i}: anchor {P(e.Anchor)} dir {P(e.Direction)} road '{e.Road}' oneway {e.OneWay} out {e.TravelOutward} " +
                     $"width {e.Width.ToString("F1", c)} lanes {e.LanesPerDirection} highway {e.IsHighway} elev {e.Elevation.ToString("F2", c)} trace {trace}");
             }
         }
@@ -899,6 +913,16 @@ namespace InterchangeMod.Systems
                     ? "这是三向（T 型）路口：当前立交类型需要四向路口，请选择快速路 T 型、喇叭形、定向 T 型或半定向 T 型"
                     : $"这是 {m_Match.LegCount} 向路口，当前立交类型需要 {CurrentTemplate.LegCount} 向");
             InterchangeParams p = BuildParams(errors, snapshot);
+            // 调试日志：参数变化时记下类型和完整参数指纹，测试里可以一比一还原游戏内的预览（配合 crossing dump 的弯道）
+            if (setting.DebugLogging)
+            {
+                string fingerprint = p.Fingerprint();
+                if (fingerprint != m_LastLoggedParams)
+                {
+                    m_LastLoggedParams = fingerprint;
+                    Mod.log.Info($"[debug] params {CurrentTemplate.Type}: {fingerprint}");
+                }
+            }
             // 调试日志：定向式每次求解（参数变化时）的耗时，用来查卡顿
             StackTemplate.Trace = IsStack && setting.DebugLogging ? (System.Action<string>)(m => Mod.log.Info($"[debug] stack: {m}")) : null;
             WyeTemplate.Trace = IsWye && setting.DebugLogging ? (System.Action<string>)(m => Mod.log.Info($"[debug] wye: {m}")) : null;
@@ -963,7 +987,10 @@ namespace InterchangeMod.Systems
                     origin, yaw, ref terrain, m_PrefabResolver, m_SelectedRoad, m_RandomSeed);
                 if (errors.Count == 0 && retrofit)
                 {
-                    m_RemovalFootprint = new Footprint(segments.Select(s => s.Curve), kRemovalMargin);
+                    // 凸包按中心线算，要再放宽最宽那条新路的半宽：否则范围外保留的原有道路在凸包边上切断，它的末端（半个路宽的圆头）
+                    // 正好压到新路的边缘（游戏内快速路 T 型：远侧保留的 XL 道路末端压在 32 米宽的辅路加宽段上，报与现有物体重叠）
+                    float widest = segments.Select(s => HalfWidthOf(s.Prefab)).DefaultIfEmpty(0f).Max();
+                    m_RemovalFootprint = new Footprint(segments.Select(s => s.Curve), kRemovalMargin + widest);
                     var corridor = Footprint.Corridor(segments.Select(s => (s.Curve, HalfWidthOf(s.Prefab))), kRemovalMargin);
                     var netTree = m_NetSearchSystem.GetNetSearchTree(readOnly: true, out JobHandle treeDeps);
                     treeDeps.Complete();
@@ -992,6 +1019,9 @@ namespace InterchangeMod.Systems
 
         /// <summary>立交路段查不到预制体宽度时按这个半宽（米）算拆除走廊。</summary>
         private const float kFallbackHalfWidth = 10f;
+
+        /// <summary>双向主线宽到这个值（米）时立交内部拆成双幅（见 BuildParams）。</summary>
+        private const float kWideTwoWayMain = 30f;
 
         /// <summary>立交路段的半宽（米，按预制体）：原路口改造时其他原有道路只拆压到这个走廊的部分。</summary>
         private float HalfWidthOf(string prefab) =>
@@ -1203,22 +1233,26 @@ namespace InterchangeMod.Systems
             PlanLevels(p, snapshot);
 
             // 外部主线是双向道路、但立交主线不在地面（或是苜蓿叶，匝道都接在两幅上）：匝道无法从双向道路中心分出，
-            // 立交内部改用双幅（每方向车道相同的单行道路），臂端过渡回外部的双向道路；苜蓿叶时两幅外缘对齐双向道路的边缘
-            if (mainForm == RoadForm.TwoWay && (IsCloverleaf || IsParclo || IsRoundabout || IsDirectionalT || IsStack || (matched && LevelPlanner.BandOf(p.Levels[0].Elevation) != ElevationBand.Ground))
+            // 立交内部改用双幅（每方向车道相同的单行道路），臂端过渡回外部的双向道路；苜蓿叶、环岛等两幅外缘对齐双向道路的边缘
+            //（两幅都放得进双向道路的宽度，臂端平行接入，见 DiamondTemplate.AddAlignedEnd）。
+            // 菱形的双向主线很宽时（如 XL 双向道路）在地面上也拆开：匝道从路中心分出，前面一大段压在路面上（游戏内菱形报叠放、形状无效）
+            bool wideMain = IsDiamond && mainForm == RoadForm.TwoWay && HalfWidthOf(mainName) * 2f >= kWideTwoWayMain;
+            if (mainForm == RoadForm.TwoWay && (IsCloverleaf || IsParclo || IsRoundabout || IsDirectionalT || IsStack || wideMain || (matched && LevelPlanner.BandOf(p.Levels[0].Elevation) != ElevationBand.Ground))
                 && m_RoadsByName.TryGetValue(mainName, out RoadInfo external))
             {
-                RoadInfo oneWay = (IsCloverleaf || IsDirectionalT || IsStack ? RampMatcher.PickSplitOneWay(m_RoadCatalog, external) : null)
+                bool aligned = IsCloverleaf || IsDirectionalT || IsStack || IsRoundabout || wideMain;
+                RoadInfo oneWay = (aligned ? RampMatcher.PickSplitOneWay(m_RoadCatalog, external) : null)
                     ?? RampMatcher.PickClosest(m_RoadCatalog, external.IsHighway, external.LanesPerDirection, oneWay: true);
                 if (oneWay != null)
                 {
                     float median = effective.MedianWidth, externalWidth = 0f;
-                    if ((IsCloverleaf || IsDirectionalT || IsStack) && m_PrefabResolver.TryResolve(mainName, m_SelectedRoad, out NetPrefab mainPrefab)
+                    if (aligned && m_PrefabResolver.TryResolve(mainName, m_SelectedRoad, out NetPrefab mainPrefab)
                         && m_PrefabResolver.TryResolve(oneWay.Name, m_SelectedRoad, out NetPrefab mainOneWayPrefab))
                     {
                         externalWidth = m_PrefabResolver.GetWidth(mainPrefab);
-                        float aligned = externalWidth - 2f * m_PrefabResolver.GetWidth(mainOneWayPrefab);
-                        if (aligned >= 0f)
-                            median = System.Math.Max(aligned, TrumpetTemplate.kMinSplitMedian);
+                        float edgeMedian = externalWidth - 2f * m_PrefabResolver.GetWidth(mainOneWayPrefab);
+                        if (edgeMedian >= 0f)
+                            median = System.Math.Max(edgeMedian, TrumpetTemplate.kMinSplitMedian);
                     }
                     SetRoad(p, 0, 2, RoadForm.Dual, oneWay.Name, median, errors);
                     foreach (int index in new[] { 0, 2 })
@@ -1335,7 +1369,7 @@ namespace InterchangeMod.Systems
             if (IsStack)
                 p.StackLeftExit = effective.StackLeftExit;
             if (IsExpressway || IsSinglePoint || HasLoops || IsDirectionalT || IsStack)
-                p.RampSideGap = effective.RampGap > 0f ? effective.RampGap : 1f;
+                p.RampSideGap = effective.RampGapOrDefault;
 
             snapshot.MainRoad = mainName;
             snapshot.MainForm = mainForm.ToString();
@@ -1413,7 +1447,7 @@ namespace InterchangeMod.Systems
                     leg.ExternalElevation = m_Match.LowestElevation;
             string mainName = p.Legs[0].RoadPrefab ?? legs[0].Name;
             ChooseRamp(p, mainName, errors, snapshot);
-            p.RampSideGap = effective.RampGap > 0f ? effective.RampGap : 1f;
+            p.RampSideGap = effective.RampGapOrDefault;
 
             snapshot.MainRoad = mainName;
             snapshot.MainForm = p.Legs[0].Form.ToString();
