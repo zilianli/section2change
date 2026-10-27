@@ -51,6 +51,37 @@ namespace InterchangeMod.Generation.Tests
         }
 
         [Theory]
+        [InlineData(90f, true, false)]
+        [InlineData(90f, false, false)]
+        [InlineData(90f, true, true)]
+        [InlineData(60f, true, false)]
+        [InlineData(120f, false, true)]
+        [InlineData(270f, true, false)]
+        public void BranchLaneBalance_ReducesTheLoopAndSemiDirectSides(float branchAngle, bool loopForExit, bool branchUnder)
+        {
+            // 支路驶出的一幅在直连匝道汇入之前只有环道的车流、驶入的一幅在直连匝道驶出之后只剩半定向匝道的车流：这两段减车道
+            var p = Make(branchAngle, loopForExit, branchUnder);
+            p.CrossReducedPrefab = "Branch Reduced";
+            p.CrossReducedWidth = BranchWidth - 4f;
+            p = InterchangeLayout.FitRampLength(_template, p);
+            Assert.Empty(_template.ValidateParams(p));
+            var segments = _template.Generate(p);
+            Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
+            TestHelpers.AssertRampsConnected(segments);
+            Assert.Equal(6, InterchangeLayout.LegEnds(segments).Count);
+            // 两幅都有减车道段；环道、半定向匝道各接在一段减车道段的端点上（布置可能整体镜像反向，不按行驶方向判断）
+            foreach (string chain in new[] { "BranchOut-", "BranchIn-" })
+                Assert.Contains(segments, s => s.Name.StartsWith(chain) && s.Prefab == "Branch Reduced");
+            var reducedNodes = segments.Where(s => s.Prefab == "Branch Reduced").SelectMany(s => new[] { s.StartNode, s.EndNode }).ToHashSet();
+            foreach (string ramp in new[] { "Loop", "SemiDirect" })
+                Assert.Contains(segments, s => s.Name.StartsWith(ramp) && (reducedNodes.Contains(s.StartNode) || reducedNodes.Contains(s.EndNode)));
+            // 直连匝道接在全宽段和减车道段相接的节点上，曲线端点外缘对齐（节点处有横移）
+            foreach (string ramp in new[] { "NearToBranch", "BranchToNear" })
+                Assert.Contains(segments, s => s.Name.StartsWith(ramp) && s.HasNodeOffset
+                    && (reducedNodes.Contains(s.StartNode) || reducedNodes.Contains(s.EndNode)));
+        }
+
+        [Theory]
         [MemberData(nameof(Cases))]
         public void NoTwoRoadsCrossAtGrade(float branchAngle, bool loopForExit, bool branchUnder)
         {

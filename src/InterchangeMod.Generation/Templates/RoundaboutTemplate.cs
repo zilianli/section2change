@@ -196,6 +196,11 @@ namespace InterchangeMod.Generation.Templates
             private readonly PillarPlanner.Span southSpan, northSpan;
             private readonly float tDiverge, rampFlatStart;
             private readonly RampPath offRamp, onRamp;
+            /// <summary>
+            /// 车道平衡：驶出匝道分出点 ~ 驶入匝道汇入点之间主线减车道，中心线向中央分隔带平移 drop（直行车道一侧边缘不变）；
+            /// 两条匝道在主线节点处外缘对齐全宽主线的外缘（曲线端点外移 edge，节点仍在主线上）。没有车道平衡时都是 0。
+            /// </summary>
+            private readonly float drop, edge;
 
             public Plan(InterchangeParams p)
             {
@@ -221,6 +226,8 @@ namespace InterchangeMod.Generation.Templates
                 terminalFlat = wr / 2f / MathF.Sin(MathF.PI / 3f) + kTerminalFlat;
                 float hw = legs[0].RoadWidth / 2f;
                 float sepMain = hw + rw / 2f + gap;
+                drop = p.MainDropShift;
+                edge = drop > 0f ? Math.Max(0f, (legs[0].RoadWidth - rw) / 2f) : 0f;
                 float rise = Math.Abs(hm - hc);
                 if (wr <= 0f || R <= 0f)
                 {
@@ -333,8 +340,10 @@ namespace InterchangeMod.Generation.Templates
 
                 // —— 驶出匝道：在 tDiverge 驶出主线，S 形横移到 xP，沿 V 直行到环岛 ——
                 // 主线高架时 S 形两段都用小半径：横移量不大，大半径的 S 形要很久才与主线分开，并行重叠段会超过游戏切分长度
-                float shift = xP - om;
-                if (shift <= sepMain)
+                // 匝道曲线从主线外移 edge 处出发：横向离开 sepMain − edge 就不再压着主线
+                float shift = xP - (om + edge);
+                float sepAttach = Math.Max(1f, sepMain - edge);
+                if (shift <= sepAttach)
                 {
                     Fits = false;
                     return;
@@ -350,9 +359,9 @@ namespace InterchangeMod.Generation.Templates
                     sLength = (r1 + r2) * theta;
                     // 与主线分开（横向 sepMain）的位置：第一段圆弧内，或第二段（往回转 φ 后横向 r1(1−cosθ) + r2(cos(θ−φ) − cosθ)）
                     float firstLateral = r1 * (1f - MathF.Cos(theta));
-                    float clearAt = sepMain <= firstLateral
-                        ? r1 * (float)Math.Acos(1f - sepMain / r1)
-                        : r1 * theta + r2 * (theta - (float)Math.Acos(Math.Min(1f, MathF.Cos(theta) + (sepMain - firstLateral) / r2)));
+                    float clearAt = sepAttach <= firstLateral
+                        ? r1 * (float)Math.Acos(1f - sepAttach / r1)
+                        : r1 * theta + r2 * (theta - (float)Math.Acos(Math.Min(1f, MathF.Cos(theta) + (sepAttach - firstLateral) / r2)));
                     rampFlatStart = clearAt + kFlatMargin;
                     if (!mainElevated || rampFlatStart <= legs[0].MaxElevatedEdgeLength - 5f || r - kDivergeRadiusStep < kMinDivergeRadius)
                         break;
@@ -370,7 +379,7 @@ namespace InterchangeMod.Generation.Templates
                 if (sLength + (tP - tEnd) < needRamp)
                     tEnd = tP - (needRamp - sLength);
                 tDiverge = tEnd - sAlong;
-                Vec3 divergePoint = V * tDiverge + L * om;
+                Vec3 divergePoint = V * tDiverge + L * (om + edge);
                 var a1 = RampPath.Arcs1(divergePoint, V, L, r1, theta).Arcs[0];
                 var a2 = new RampArc(a1.End, a1.EndHeading, r2, -Math.Sign(a1.Angle) * theta);
                 offRamp = RampPath.FromArcs(a1, a2, Straight(a2.End, V, tP - tEnd));
@@ -411,6 +420,21 @@ namespace InterchangeMod.Generation.Templates
                 }
                 var side = new List<RoadSegmentSpec>();
                 AddLine(side, "Main", RoadRole.MainRoad, legs[0].RoadPrefab, mainNodes, t => MainPoint(t, hm), new[] { tDiverge, tMerge, -mainEnd, mainEnd });
+                if (drop > 0f)
+                {
+                    // 车道平衡：tDiverge ~ tMerge 之间换成减车道的道路，内部节点向中央分隔带平移，两头曲线端点平移、节点不动
+                    Vec3 shiftIn = -L * drop;
+                    bool Inside(Vec3 v) => Directions.Dot(v, V) > tDiverge + 1e-3f && Directions.Dot(v, V) < tMerge - 1e-3f;
+                    for (int i = 0; i < side.Count; i++)
+                    {
+                        var segment = side[i];
+                        Vec3 a = segment.StartNode, b = segment.EndNode;
+                        if (!Inside((a + b) * 0.5f))
+                            continue;
+                        Vec3 na = Inside(a) ? a + shiftIn : a, nb = Inside(b) ? b + shiftIn : b;
+                        side[i] = new RoadSegmentSpec(segment.Name, segment.Role, Bezier3.Line(a + shiftIn, b + shiftIn), p.MainReducedPrefab, na, nb);
+                    }
+                }
 
                 // —— 环岛 L 侧一半：按节点分段；高架时每段不超过游戏切分长度 ——
                 var cuts = new List<float> { 0f };
@@ -434,8 +458,10 @@ namespace InterchangeMod.Generation.Templates
                     ring.Slice(cuts[i], cuts[i + 1]).Emit(side, $"Ring{i + 1}-", RingNode(cuts[i]), RingNode(cuts[i + 1]), 0f, 0f, p.RingPrefab);
 
                 // —— 匝道 ——
-                offRamp.Emit(side, "RampOff", MainPoint(tDiverge, hm), RingNode(sOff), rampFlatStart, terminalFlat, p.RampPrefab);
-                onRamp.Emit(side, "RampOn", RingNode(sOn), MainPoint(tMerge, hm), terminalFlat, rampFlatStart, p.RampPrefab);
+                offRamp.Emit(side, "RampOff", MainPoint(tDiverge, hm) + L * edge, RingNode(sOff), rampFlatStart, terminalFlat, p.RampPrefab,
+                    startNode: MainPoint(tDiverge, hm));
+                onRamp.Emit(side, "RampOn", RingNode(sOn), MainPoint(tMerge, hm) + L * edge, terminalFlat, rampFlatStart, p.RampPrefab,
+                    endNode: MainPoint(tMerge, hm));
 
                 // —— 被交道路这一头：从环岛上的路口沿被交道路向外 ——
                 float crossEnd = crossTerminals.Max(t => Directions.Dot(ring.PointAt(t.S), C)) + legs[1].StubLength;

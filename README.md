@@ -4,7 +4,7 @@ A Cities: Skylines II mod that places a **complete interchange in one placement*
 
 一个天际线 2 mod：**一次放下一整座立交**。选类型，对准已有路口、立体交叉或道路（也可以在空地上），确认预览后放置。中文名“平改立”取自道路工程里的“平面交叉改立体交叉”。
 
-Current version: **1.0.5-beta** · License: [MIT](LICENSE)
+Current version: **1.0.7-beta** · License: [MIT](LICENSE)
 
 <!-- 截图：docs/images/ 下放好后取消注释
 ![overview](docs/images/overview.png)

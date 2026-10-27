@@ -46,6 +46,26 @@ namespace InterchangeMod.Generation.Tests
 
         [Theory]
         [MemberData(nameof(Cases))]
+        public void LaneBalance_ReducesTheMainBetweenOffAndOnRamps(float angle, bool mainOnTop, bool racetrack, bool crossDual)
+        {
+            // 驶出匝道分出点 ~ 驶入匝道汇入点之间主线减车道（内侧边缘不变），两条匝道在主线节点处外缘对齐
+            var p = Make(angle, mainOnTop, racetrack, crossDual);
+            p.MainReducedPrefab = "Highway Reduced";
+            p.MainReducedWidth = MainWidth - 4f;
+            Assert.Empty(_template.ValidateParams(p));
+            var segments = _template.Generate(p);
+            Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
+            TestHelpers.AssertRampsConnected(segments);
+            var reduced = segments.Where(s => s.Prefab == "Highway Reduced").ToList();
+            Assert.NotEmpty(reduced);
+            Assert.Equal(4, reduced.Sum(s => (s.StartNode == s.Curve.P0 ? 0 : 1) + (s.EndNode == s.Curve.P3 ? 0 : 1)));
+            var reducedNodes = reduced.SelectMany(s => new[] { s.StartNode, s.EndNode }).ToHashSet();
+            Assert.Equal(4, segments.Count(s => s.Name.StartsWith("Ramp") && s.HasNodeOffset
+                && (reducedNodes.Contains(s.StartNode) || reducedNodes.Contains(s.EndNode))));
+        }
+
+        [Theory]
+        [MemberData(nameof(Cases))]
         public void Generated_IsValidAndConnected(float angle, bool mainOnTop, bool racetrack, bool crossDual)
         {
             var p = Make(angle, mainOnTop, racetrack, crossDual);

@@ -39,6 +39,29 @@ namespace InterchangeMod.Generation.Tests
 
         [Theory]
         [MemberData(nameof(Cases))]
+        public void LaneBalance_ReducesTheMainBetweenRampAndLoop(float angle, bool mainOnTop, bool loopsForExit)
+        {
+            // 直连匝道驶出点 ~ 环道汇入点之间主线减车道（内侧边缘不变），两条匝道在主线节点处外缘对齐
+            var p = Make(angle, mainOnTop, loopsForExit);
+            p.MainReducedPrefab = "Highway Reduced";
+            p.MainReducedWidth = MainWidth - 4f;
+            Assert.Empty(_template.ValidateParams(p));
+            var segments = _template.Generate(p);
+            Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
+            TestHelpers.AssertRampsConnected(segments);
+            Assert.Equal(6, InterchangeLayout.LegEnds(segments).Count);
+            var reduced = segments.Where(s => s.Prefab == "Highway Reduced").ToList();
+            Assert.NotEmpty(reduced);
+            // 两侧各两头（驶出点、汇入点）曲线端点平移
+            Assert.Equal(4, reduced.Sum(s => (s.StartNode == s.Curve.P0 ? 0 : 1) + (s.EndNode == s.Curve.P3 ? 0 : 1)));
+            var reducedNodes = reduced.SelectMany(s => new[] { s.StartNode, s.EndNode }).ToHashSet();
+            foreach (string ramp in new[] { "Ramp", "Loop", "RampB", "LoopB" })
+                Assert.Contains(segments, s => s.Name.StartsWith(ramp) && s.HasNodeOffset
+                    && (reducedNodes.Contains(s.StartNode) || reducedNodes.Contains(s.EndNode)));
+        }
+
+        [Theory]
+        [MemberData(nameof(Cases))]
         public void Generated_IsValidAndConnected(float angle, bool mainOnTop, bool loopsForExit)
         {
             var p = Make(angle, mainOnTop, loopsForExit);

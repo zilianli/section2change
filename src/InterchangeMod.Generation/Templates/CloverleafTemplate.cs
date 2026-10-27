@@ -225,7 +225,7 @@ namespace InterchangeMod.Generation.Templates
             /// <summary>匝道中心离这条路一幅中心多远才不再与它重叠。</summary>
             public float Sep { get; }
             public bool Elevated => LevelPlanner.BandOf(Height) == ElevationBand.Elevated;
-            /// <summary>车道平衡：减车道段用的道路与向中央分隔带的平移（只有主线有）。</summary>
+            /// <summary>车道平衡：减车道段用的道路与向中央分隔带的平移（主线、双幅的被交道路）。</summary>
             public string? ReducedPrefab { get; set; }
             public float Shift { get; set; }
             /// <summary>匝道在这条路的节点处的横向位置（向外）：车道平衡时匝道外缘对齐全宽外缘（边缘对齐），否则 0。</summary>
@@ -304,6 +304,12 @@ namespace InterchangeMod.Generation.Templates
                     main.ReducedPrefab = p.MainReducedPrefab;
                     main.Shift = p.MainDropShift;
                     main.Drop = Math.Max(0f, (main.Leg.RoadWidth - p.RampWidth) / 2f);
+                }
+                if (p.CrossReducedPrefab != null && cross.Leg.Form == RoadForm.Dual)
+                {
+                    cross.ReducedPrefab = p.CrossReducedPrefab;
+                    cross.Shift = p.CrossDropShift;
+                    cross.Drop = Math.Max(0f, (cross.Leg.RoadWidth - p.RampWidth) / 2f);
                 }
                 if (p.CollectorDistributor)
                     collectorOf[main] = new Road(p, main, "CD", CollectorGap(p, main));

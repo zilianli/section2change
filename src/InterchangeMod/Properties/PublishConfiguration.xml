@@ -49,7 +49,7 @@
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="" />
 	<!--Version of the mod-->
-	<ModVersion Value="1.0.5-beta" />
+	<ModVersion Value="1.0.7-beta" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.0.*" />
 	<!--Dependency for the mod, can be set multiple times-->
@@ -57,7 +57,7 @@
 	<!--Required DLC, can be set multiple times. Supported values are "Landmark Buildings", "San Fransisco Set", "Beach Properties", "Urban Promenades", "Modern Architecture"-->
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
-	<ChangeLog Value="beta 1.0.5: ramps keep at least 3 m (default 4 m) from the main road; elevated diverges leave on an 80 m arc; wide two-way and two-way diamond mains split into carriageways; turbine / stack keep the full game clearance; wye matching is steadier and legs reconnect; interchanges on slopes follow one reference grade; reordered usage guide (placement cannot be undone)" />
+	<ChangeLog Value="beta 1.0.7: lane balance added for stack left-exit, cloverleaf cross road, trumpet branch, partial cloverleaf and roundabout (ramps edge-aligned at their nodes)" />
 	<!--<ChangeLog>
 	</ChangeLog>-->
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->

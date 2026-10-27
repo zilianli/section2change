@@ -72,6 +72,9 @@ namespace InterchangeMod.Generation
         /// <summary>主线中段（减车道）中心线向中央分隔带平移的距离：保持内侧（直行车道）边缘不变。</summary>
         public float MainDropShift => MainReducedPrefab != null && MainReducedWidth > 0f ? (Legs[0].RoadWidth - MainReducedWidth) / 2f : 0f;
 
+        /// <summary>被交道路（支路）减车道段中心线的平移距离，同 MainDropShift。</summary>
+        public float CrossDropShift => CrossReducedPrefab != null && CrossReducedWidth > 0f ? (Legs[1].RoadWidth - CrossReducedWidth) / 2f : 0f;
+
         /// <summary>辅路加宽段中心线向主线一侧平移的距离：保持外侧（直行车道）边缘不变，新增车道在匝道并入的内侧。</summary>
         public float FrontageAddShift => FrontageWidenedPrefab != null && FrontageWidenedWidth > 0f ? (FrontageWidenedWidth - FrontageWidth) / 2f : 0f;
 

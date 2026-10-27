@@ -478,16 +478,17 @@ namespace InterchangeMod.Generation.Templates
             /// <summary>左转匝道两段直线离那一幅中线的横向距离：与它的净距 kParallelGap，再加偏移 extra。</summary>
             private float LeftOffset(Carriageway line, float extra) => line.Width / 2f + rw / 2f + kParallelGap + extra;
 
-            // —— 车道平衡：每幅在右转匝道驶出点和右转匝道汇入点之间减车道（中心线向中央分隔带平移，直行车道一侧边缘不变），
-            // 匝道接入时外缘对齐所接那段道路的外缘（曲线端点横移、节点仍在道路上）——
+            // —— 车道平衡：右出右进时每幅在右转匝道驶出点和汇入点之间减车道（中心线向中央分隔带平移，外侧直行车道边缘不变）；
+            // 左出左进时在左转匝道驶出点和汇入点之间减车道（中心线向外侧平移，分隔带一侧边缘让给左转匝道）。
+            // 匝道接入时外缘对齐所接那段道路的边缘（曲线端点横移、节点仍在道路上）——
 
             private string? ReducedPrefab(Carriageway line) => line.Main ? P.MainReducedPrefab : P.CrossReducedPrefab;
 
             private float ReducedWidth(Carriageway line) => line.Main ? P.MainReducedWidth : P.CrossReducedWidth;
 
-            private bool Balanced(Carriageway line) => !leftExit && ReducedPrefab(line) != null && ReducedWidth(line) > 0f;
+            private bool Balanced(Carriageway line) => ReducedPrefab(line) != null && ReducedWidth(line) > 0f;
 
-            /// <summary>减车道段中心线向中央分隔带（左侧）平移的距离。</summary>
+            /// <summary>减车道段中心线平移的距离：右出右进时向中央分隔带（左侧），左出左进时向外侧（右侧），见 Build。</summary>
             private float Drop(Carriageway line) => Balanced(line) ? (line.Width - ReducedWidth(line)) / 2f : 0f;
 
             /// <summary>道路在地面以下（路堑或隧道）。</summary>
@@ -500,11 +501,11 @@ namespace InterchangeMod.Generation.Templates
             private float RightAttach(Carriageway line) => Balanced(line) || Underground(line.Height) ? Math.Max(0f, (line.Width - rw) / 2f) : 0f;
 
             /// <summary>
-            /// 左转匝道在这一幅上接入处的横向位置（向右）：和右转匝道一样外缘对齐全宽道路的外缘。左转匝道接在减车道段上，
-            /// 减车道段常常和匝道一样宽，外缘对齐减车道段会与它完全重合（游戏报形状无效）；错开一部分像普通分流、合流一样接入。
+            /// 左转匝道在这一幅上接入处的横向位置（向右）：右出右进时和右转匝道一样外缘对齐全宽道路的外缘；左出左进时左转匝道
+            /// 是分隔带一侧分出去的车道，车道平衡或道路在地下时外缘对齐分隔带一侧的边缘（游戏内：从中心线错开接入，汇入汇出处不顺）。
             /// </summary>
             private float LeftAttach(Carriageway line) =>
-                !leftExit ? RightAttach(line) : Underground(line.Height) ? -Math.Max(0f, (line.Width - rw) / 2f) : 0f;
+                !leftExit ? RightAttach(line) : Balanced(line) || Underground(line.Height) ? -Math.Max(0f, (line.Width - rw) / 2f) : 0f;
 
             private static float AlongS(float d, float sr) => 2f * sr * MathF.Sin((float)Math.Acos(Math.Max(-1f, 1f - d / (2f * sr))));
 
@@ -1058,9 +1059,11 @@ namespace InterchangeMod.Generation.Templates
                     var attaches = Attaches(line);
                     var sorted = LineCuts(line)!;
 
-                    // 车道平衡：右转匝道驶出点 ~ 汇入点之间用减车道的道路，节点向中央分隔带平移；两头的曲线端点平移、节点不动
-                    float lo = rights.First(r => r.From == line).FromAt, hi = rights.First(r => r.To == line).ToAt;
-                    Vec3 dropShift = -line.Right * Drop(line);
+                    // 车道平衡：右出右进时右转匝道驶出点 ~ 汇入点之间用减车道的道路，节点向中央分隔带平移；左出左进时是左转匝道
+                    // 驶出点 ~ 汇入点之间，节点向外侧平移。两头的曲线端点平移、节点不动
+                    var balancing = leftExit ? lefts : rights;
+                    float lo = balancing.First(r => r.From == line).FromAt, hi = balancing.First(r => r.To == line).ToAt;
+                    Vec3 dropShift = line.Right * (leftExit ? Drop(line) : -Drop(line));
                     bool InZone(float t) => Balanced(line) && t > lo + 1e-3f && t < hi - 1e-3f;
                     Vec3 Node(float t) => At(line.Point(t) + (InZone(t) ? dropShift : Vec3.Zero), h);
                     for (int i = 0; i + 1 < sorted.Count; i++)

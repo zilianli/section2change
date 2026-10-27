@@ -427,9 +427,19 @@ namespace InterchangeMod.Generation.Templates
                 outNodes.Add(TailPoint(tail, ob));
                 inNodes.Add(TailPoint(tail, -ob));
                 inNodes.Reverse();
-                AddChain(segments, "BranchOut", RoadRole.CrossRoad, leg1.RoadPrefab, outNodes);
+                // 车道平衡：驶出的一幅在直连匝道汇入之前只有环道的车流、驶入的一幅在直连匝道驶出之后只剩半定向匝道的车流，
+                // 这两段用减车道的道路，向远离直连匝道的一侧平移（另一侧边缘不变）；直连匝道在节点处外缘对齐全宽道路的边缘
+                bool balanced = leg1.Form == RoadForm.Dual && p.CrossDropShift > 0f;
+                float dropB = balanced ? p.CrossDropShift : 0f, edgeB = balanced ? Math.Max(0f, (leg1.RoadWidth - p.RampWidth) / 2f) : 0f;
+                int outRamp = outNodes.IndexOf(outRampNode), inRamp = inNodes.IndexOf(inRampNode);
+                Vec3 sideOut = RampSide(nearOut, outRampNode, outNodes[outRamp + 1] - outRampNode, atEnd: true);
+                Vec3 sideIn = RampSide(nearIn, inRampNode, inNodes[inRamp + 1] - inRampNode, atEnd: false);
+                Vec3 shiftOut = sideOut * -dropB, shiftIn = sideIn * -dropB;
+                var outMoved = AddBalancedChain(segments, "BranchOut", RoadRole.CrossRoad, leg1.RoadPrefab, balanced ? p.CrossReducedPrefab : null,
+                    outNodes, outRamp, reducedBeforeRamp: true, shiftOut);
                 int outLast = segments.Count - 1;
-                AddChain(segments, "BranchIn", RoadRole.CrossRoad, leg1.RoadPrefab, inNodes);
+                var inMoved = AddBalancedChain(segments, "BranchIn", RoadRole.CrossRoad, leg1.RoadPrefab, balanced ? p.CrossReducedPrefab : null,
+                    inNodes, inRamp, reducedBeforeRamp: false, shiftIn);
                 int inFirst = outLast + 1;
                 if (aligned)
                 {
@@ -448,15 +458,15 @@ namespace InterchangeMod.Generation.Templates
 
                 // —— 近侧直连匝道：两端与道路并行重叠的部分与所接道路同高，中间升降（主线在上层时）——
                 // 匝道在主线一端：曲线端点在外侧 d 处，节点是主线的节点（边缘对齐）
-                nearOut.Emit(segments, "NearToBranch", Point(xOut, -om - d, h0), outRampNode, outFlatMain, outFlatBranch, p.RampPrefab,
-                    startNode: Point(xOut, -om, h0));
-                nearIn.Emit(segments, "BranchToNear", inRampNode, Point(xIn, -om - d, h0), inFlatBranch, inFlatMain, p.RampPrefab,
-                    endNode: Point(xIn, -om, h0));
+                nearOut.Emit(segments, "NearToBranch", Point(xOut, -om - d, h0), outRampNode + sideOut * edgeB, outFlatMain, outFlatBranch, p.RampPrefab,
+                    startNode: Point(xOut, -om, h0), endNode: outRampNode);
+                nearIn.Emit(segments, "BranchToNear", inRampNode + sideIn * edgeB, Point(xIn, -om - d, h0), inFlatBranch, inFlatMain, p.RampPrefab,
+                    startNode: inRampNode, endNode: Point(xIn, -om, h0));
 
                 // —— 环道、半定向匝道 ——
-                loop.Emit(segments, "Loop", Point(xLoop, om + d, h0), B(uLoopEnd, ob, h1), loopFlat, 0f, p.RampPrefab,
+                loop.Emit(segments, "Loop", Point(xLoop, om + d, h0), outMoved[0], loopFlat, 0f, p.RampPrefab,
                     startNode: Point(xLoop, om, h0));
-                semi.Emit(segments, "SemiDirect", B(uSemiStart, -ob, h1), Point(xMerge, om + d, h0), 0f, semiFlat, p.RampPrefab,
+                semi.Emit(segments, "SemiDirect", inMoved[inMoved.Count - 1], Point(xMerge, om + d, h0), 0f, semiFlat, p.RampPrefab,
                     endNode: Point(xMerge, om, h0));
             }
 
@@ -492,16 +502,37 @@ namespace InterchangeMod.Generation.Templates
                     nodes, lo, hi, P.MainReducedPrefab, Y * (inner - lateral));
             }
 
-            /// <summary>按给定顺序（即行驶顺序）把节点连成路段；高度不同的路段用两端水平的竖曲线。</summary>
-            private static void AddChain(List<RoadSegmentSpec> segments, string name, RoadRole role, string? prefab, IList<Vec3> nodes)
+            /// <summary>直连匝道在支路一幅节点 node 处从哪一侧接入（沿 along 行驶时的左右，返回那一侧的单位向量）：看匝道离节点 20 米处。</summary>
+            private static Vec3 RampSide(RampPath path, Vec3 node, Vec3 along, bool atEnd)
             {
-                for (int i = 0; i + 1 < nodes.Count; i++)
-                {
-                    Vec3 a = nodes[i], b = nodes[i + 1];
-                    var curve = Math.Abs(a.Y - b.Y) > 0.1f ? Bezier3.SmoothSlope(a, b) : Bezier3.Line(a, b);
-                    segments.Add(new RoadSegmentSpec($"{name}-{i + 1}", role, curve, prefab));
-                }
+                Vec3 q = path.PointAt(atEnd ? Math.Max(0f, path.Length - 20f) : Math.Min(path.Length, 20f));
+                Vec3 right = Directions.RightOf(Flat(along));
+                return Directions.Dot(Flat0(q) - Flat0(node), right) >= 0f ? right : -right;
             }
+
+            /// <summary>
+            /// 支路一幅（按行驶顺序的节点）：rampIndex 处是直连匝道的节点；它之前（reducedBeforeRamp）或之后的路段用减车道的道路
+            /// （reducedPrefab 为 null 时不减），那一段的节点平移 shift，匝道节点处曲线端点平移、节点不动（边缘对齐）。
+            /// 返回平移后的节点（环道终点 / 半定向匝道起点要接到平移后的位置）。
+            /// </summary>
+            private static List<Vec3> AddBalancedChain(List<RoadSegmentSpec> segments, string name, RoadRole role, string? prefab, string? reducedPrefab,
+                IList<Vec3> nodes, int rampIndex, bool reducedBeforeRamp, Vec3 shift)
+            {
+                bool balanced = reducedPrefab != null && rampIndex >= 0;
+                bool Reduced(int seg) => balanced && (reducedBeforeRamp ? seg < rampIndex : seg >= rampIndex);
+                bool Moved(int k) => balanced && k != rampIndex && (reducedBeforeRamp ? k < rampIndex : k > rampIndex);
+                var moved = nodes.Select((v, k) => Moved(k) ? v + shift : v).ToList();
+                for (int i = 0; i + 1 < moved.Count; i++)
+                {
+                    Vec3 a = moved[i], b = moved[i + 1];
+                    bool reduced = Reduced(i);
+                    Vec3 ca = reduced && i == rampIndex ? a + shift : a, cb = reduced && i + 1 == rampIndex ? b + shift : b;
+                    var curve = Math.Abs(a.Y - b.Y) > 0.1f ? Bezier3.SmoothSlope(ca, cb) : Bezier3.Line(ca, cb);
+                    segments.Add(new RoadSegmentSpec($"{name}-{i + 1}", role, curve, reduced ? reducedPrefab : prefab, a, b));
+                }
+                return moved;
+            }
+
         }
     }
 }

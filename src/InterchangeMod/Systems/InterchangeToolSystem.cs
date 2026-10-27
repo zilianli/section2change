@@ -1608,8 +1608,8 @@ namespace InterchangeMod.Systems
                 snapshot.MainReducedLanes = reduced.LanesPerDirection;
             }
 
-            // 定向式、涡轮的被交道路两幅也接匝道：同样减车道
-            if (IsStack && p.Legs[1].Form == RoadForm.Dual && m_RoadsByName.TryGetValue(crossName, out RoadInfo cross)
+            // 双幅的被交道路（支路）两幅也接匝道时同样减车道（定向式、涡轮、苜蓿叶、喇叭形、T 型的支路等；不用的类型忽略它）
+            if (p.Legs[1].Form == RoadForm.Dual && m_RoadsByName.TryGetValue(crossName, out RoadInfo cross)
                 && FindOneWay(cross.IsHighway, cross.LanesPerDirection - rampLanes) is RoadInfo crossReduced
                 && m_PrefabResolver.TryResolve(crossReduced.Name, m_SelectedRoad, out NetPrefab crossReducedPrefab))
             {

@@ -124,6 +124,26 @@ namespace InterchangeMod.Generation.Tests
             Assert.All(reduced, s => Assert.True(s.HasNodeOffset));
         }
 
+        [Theory]
+        [MemberData(nameof(Cases))]
+        public void LaneBalance_CrossRoadToo(float angle, bool mainOnTop)
+        {
+            // 双幅的被交道路也一样：每幅两段减车道，交织段保持全宽
+            var p = Make(angle, mainOnTop);
+            p.MainReducedPrefab = "Highway Oneway Reduced";
+            p.MainReducedWidth = 12f;
+            p.CrossReducedPrefab = "Cross Oneway Reduced";
+            p.CrossReducedWidth = CrossWidth - 4f;
+            Assert.Empty(_template.ValidateParams(p));
+            var segments = _template.Generate(p);
+            Assert.Empty(InterchangeLayout.ValidateGeometry(segments, p));
+            TestHelpers.AssertRampsConnected(segments);
+            Assert.Equal(8, InterchangeLayout.LegEnds(segments).Count);
+            var reduced = segments.Where(s => s.Prefab == "Cross Oneway Reduced").ToList();
+            Assert.Equal(4, reduced.Count);
+            Assert.All(reduced, s => Assert.True(s.HasNodeOffset));
+        }
+
         [Fact]
         public void ElevatedBase_RampOverlapsWithViaductsStayShort()
         {

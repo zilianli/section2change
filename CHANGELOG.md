@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.7-beta — 2026-10-28
+
+- Lane balance for stack left-exit (median-side lanes drop between the left-turn ramps) 定向左出左进车道平衡
+- Lane balance on divided cross roads of cloverleaf 苜蓿叶被交道路车道平衡
+- Trumpet branch: loop-only and semi-direct-only stretches use the reduced road 喇叭形支路车道平衡
+- Lane balance for partial cloverleaf and roundabout mains 部分苜蓿叶、环岛主线车道平衡
+- Ramps are edge-aligned where they join or leave the road 匝道接入处边缘对齐
+
 ## 1.0.5-beta — 2026-10-28
 
 - Ramps keep at least 3 m (default 4 m) from the main road — fixes merge overlaps 匝道与主线间距至少 3 米，修复汇入段重叠
