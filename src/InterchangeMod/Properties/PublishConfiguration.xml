@@ -8,22 +8,44 @@
 	<!--Long description of the mod. Single line or multi line. Supports minimal markdown subset-->
 	<!--LongDescription Value="This is a long description" /-->
 	<LongDescription>
-section2change (平改立) places a whole interchange at once: pick a type, aim at an existing junction or road (or empty ground), check the preview, confirm.
+**section2change (平改立)** places a whole interchange in one go: pick a type, aim at an existing junction, crossing or road (or empty ground), check the preview, confirm.
 
-- 13 types: diamond, single-point, Chinese expressway node, cloverleaf, partial cloverleaf, roundabout, stack, turbine; T junctions: expressway T, trumpet, semi-directional T, directional T; three-way: wye
-- Aims at existing junctions and crossings, matches their roads, levels and angles, removes the old junction and reconnects the roads
-- Follows curved roads; levels by elevation, elevated or ground; ramp grades and clearances checked before placing
-- Auto mode: just point and confirm; manual mode: every parameter adjustable
-- Trumpet, directional / semi-directional T, stack, turbine and wye support right-hand traffic only. Beta: please report problems with a screenshot and the mod log
+**13 interchange types**
+- Four-way: diamond, single-point, Chinese expressway node, cloverleaf, partial cloverleaf, roundabout, stack, turbine
+- Three-way: expressway T, trumpet, semi-directional T, directional T
+- Wye (three roads at about 120°)
 
-平改立：一次放下一整座立交。选类型，对准已有路口 / 道路（或空地），确认预览后放置；自动匹配原有道路、层高和角度，拆掉原路口并接回，弯道上整体顺着道路弯曲。
+**Features**
+- Upgrade existing junctions: matches roads, levels and angle, removes the old junction and reconnects every leg; roads under bridges with enough clearance are kept
+- Follows curved roads (radius 150 m or more) and places the interchange on the roads' grade
+- Lane balance with edge-aligned lane drops, pillars kept clear of roads below, grade and clearance checked before placing
+- Auto mode (point and confirm) or manual mode (every parameter adjustable); Chinese and English UI
+
+**How to use**
+1. Open the tool with the button at the top left or Shift + I
+2. Pick a type and hover a junction, a road or empty ground
+3. Left-click to pin the preview, check the panel, then Confirm
+
+**Please note**
+- Placement cannot be undone (the game does not support undo) - save first if in doubt
+- Works best on flat ground with straight, uniform-grade roads
+- Trumpet, directional types, stack, turbine and wye support right-hand traffic only
+- Beta: report problems on GitHub with a screenshot and the mod log (turn on debug logging in the settings first)
+
+**平改立**：一次放下一整座立交。选类型，对准已有路口、立体交叉或道路（也可以空地），确认预览后放置；自动匹配原有道路、层高和交角，拆掉原路口并接回各臂，弯道和坡道上整体顺着道路放置。放置后不能撤销，请先存档；最好在平地、平直且坡度均匀的道路上使用。问题请到 GitHub 附截图和日志反馈。
 	</LongDescription>
 	<!--Thumbnail-->
 	<Thumbnail Value="Properties/Thumbnail.png" />
 	<!--Screenshot, can be set multiple times-->
-	<Screenshot Value="" />
+	<Screenshot Value="Properties/Screenshots/overview.png" />
+	<Screenshot Value="Properties/Screenshots/diamond.png" />
+	<Screenshot Value="Properties/Screenshots/cloverleaf.png" />
+	<Screenshot Value="Properties/Screenshots/stack.png" />
+	<Screenshot Value="Properties/Screenshots/turbine.png" />
+	<Screenshot Value="Properties/Screenshots/retrofit.png" />
+	<Screenshot Value="Properties/Screenshots/panel.png" />
 	<!--Tag, can be set multiple times-->
-	<Tag Value="" />
+	<Tag Value="Code Mod" />
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="" />
 	<!--Version of the mod-->
@@ -39,7 +61,7 @@ section2change (平改立) places a whole interchange at once: pick a type, aim 
 	<!--<ChangeLog>
 	</ChangeLog>-->
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->
-	<ExternalLink Type="" Url="" />
+	<ExternalLink Type="github" Url="https://github.com/zilianli/section2change" />
 	<!--Supported values Public, Private, Unlisted-->
 	<AccessLevel Value="Public" />
 </Publish>
