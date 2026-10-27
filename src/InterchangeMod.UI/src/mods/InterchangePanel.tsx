@@ -18,6 +18,13 @@ type PickerSlot = "main" | "cross" | "ramp" | "frontage" | null;
 const fourWayTypes = ["Diamond", "ExpresswayNode", "SinglePoint", "Cloverleaf", "PartialCloverleaf", "Roundabout", "Stack", "Turbine"];
 const threeWayTypes = ["ExpresswayT", "Trumpet", "SemiDirectionalT", "DirectionalT", "Wye"];
 
+// 使用指南各节按轻重给标题配色：重要提醒红、注意事项橙、说明蓝、其他灰
+const guideLevelClass: Record<string, string> = {
+  critical: styles.guideCritical,
+  warning: styles.guideWarning,
+  tip: styles.guideTip,
+};
+
 const typeNameOf = (t: Strings, type: string) =>
   ({
     Diamond: t.typeDiamond, ExpresswayNode: t.typeExpressway, SinglePoint: t.typeSinglePoint, Cloverleaf: t.typeCloverleaf,
@@ -92,7 +99,7 @@ export const InterchangePanel = () => {
             <div className={styles.homeHint}>{t.guideIntro}</div>
             {t.guideSections.map((section) => (
               <div key={section.title} className={styles.section}>
-                <div className={styles.sectionTitle}>{section.title}</div>
+                <div className={`${styles.sectionTitle} ${guideLevelClass[section.level] ?? ""}`}>{section.title}</div>
                 {section.items.map((item) => <div key={item} className={styles.guideItem}>{item}</div>)}
               </div>
             ))}

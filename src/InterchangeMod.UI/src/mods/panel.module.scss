@@ -482,6 +482,22 @@
   border-radius: 4rem;
 }
 
+// 使用指南各节标题按轻重配色（默认是 .sectionTitle 的浅蓝）
+.guideCritical {
+  color: rgb(255, 120, 110);
+  border-bottom-color: rgba(255, 120, 110, 0.35);
+}
+
+.guideWarning {
+  color: rgb(255, 190, 90);
+  border-bottom-color: rgba(255, 190, 90, 0.35);
+}
+
+.guideTip {
+  color: rgb(180, 185, 195);
+  border-bottom-color: rgba(180, 185, 195, 0.25);
+}
+
 .guideItem {
   font-size: 12rem;
   color: rgba(255, 255, 255, 0.8);
