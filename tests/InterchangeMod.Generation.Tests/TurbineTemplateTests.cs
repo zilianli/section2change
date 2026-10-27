@@ -91,6 +91,55 @@ namespace InterchangeMod.Generation.Tests
         }
 
         [Theory]
+        // 游戏内对准已有立体交叉、层高差正好是最小净空 7.5 米的两处：匝道在平面上挨着道路或别的匝道的地方，上下至少差 7.5 米
+        //（原来只要求 0.9 个层高，匝道还没升降到位就跨过去，只差 7.0 米，游戏报净空不足）
+        [InlineData(20f, 8f, 16f, 4f, 12f, 20f, 0.07f, 8f)]
+        [InlineData(20f, 8f, 12f, 2f, 12f, 10f, 0.08f, 0f)]
+        // 从游戏读回的高度带误差（10.00004 / 17.50003）：层高差比 7.5 米少万分之几米也要放得下（游戏内定向式、涡轮报“现在高差 7.5 米”）
+        [InlineData(20f, 8f, 12f, 2f, 12f, 10.00004f, 0.08f, 0f, -0.00001f)]
+        public void MinimumLevelGap_KeepsTheGameClearanceEverywhere(float mainWidth, float mainMedian, float crossWidth, float crossMedian,
+            float rampWidth, float baseElevation, float maxGrade, float crossReduced, float gapError = 0f)
+        {
+            var p = new InterchangeParams
+            {
+                Legs = InterchangeParams.CrossLegs(90f, 0, 1), RampWidth = rampWidth, RampSideGap = 4f, MaxGrade = maxGrade,
+                MainReducedPrefab = "Main Reduced", MainReducedWidth = 12f,
+                CrossReducedPrefab = crossReduced > 0f ? "Cross Reduced" : null, CrossReducedWidth = crossReduced,
+            };
+            p.SetRoad(0, 2, RoadForm.Dual, mainWidth, mainMedian, "Highway Oneway");
+            p.SetRoad(1, 3, RoadForm.Dual, crossWidth, crossMedian, "Cross Oneway");
+            p.Levels[0].Elevation = baseElevation;
+            p.Levels[1].Elevation = baseElevation + HeightRange.MeasuredMinimumGap + gapError;
+            Assert.Empty(new StackTemplate(turbine: false).ValidateParams(p));
+            var template = new StackTemplate(turbine: true);
+            Assert.Empty(template.ValidateParams(p));
+            var segments = template.Generate(p);
+            float Width(RoadSegmentSpec s) => s.Role == RoadRole.Ramp ? rampWidth
+                : s.Prefab == "Main Reduced" ? 12f : s.Prefab == "Cross Reduced" ? crossReduced
+                : s.Role == RoadRole.MainRoad ? mainWidth : crossWidth;
+            var samples = segments.Select(s => Enumerable.Range(0, 41).Select(i => s.Curve.Evaluate(i / 40f)).ToArray()).ToArray();
+            for (int i = 0; i < segments.Count; i++)
+                for (int j = i + 1; j < segments.Count; j++)
+                {
+                    var a = segments[i];
+                    var b = segments[j];
+                    var nodesA = new[] { a.StartNode, a.EndNode };
+                    // 同一条匝道（或道路）前后几段在平面上本来就挨着
+                    if (nodesA.Contains(b.StartNode) || nodesA.Contains(b.EndNode) || a.Name.Split('-')[0] == b.Name.Split('-')[0])
+                        continue;
+                    float reach = (Width(a) + Width(b)) / 2f;
+                    foreach (var u in samples[i])
+                        foreach (var v in samples[j])
+                        {
+                            float dx = u.X - v.X, dz = u.Z - v.Z, dy = System.Math.Abs(u.Y - v.Y);
+                            // 上下错开（不是同层分流、汇入处挨着）的地方，高差要够游戏的净空
+                            Assert.False(dx * dx + dz * dz < reach * reach && dy > 1f && dy < HeightRange.MeasuredMinimumGap - HeightRange.GapTolerance,
+                                $"{a.Name} and {b.Name} only {System.Math.Abs(u.Y - v.Y):F2} m apart near ({u.X:F0}, {u.Z:F0}) {u.Y:F2}/{v.Y:F2}");
+                        }
+                }
+        }
+
+        [Theory]
         [InlineData(20f, 8f, 8f, 4f, 12f, 8.5f)]
         [InlineData(20f, 8f, 20f, 8f, 12f, 8.5f)]
         [InlineData(20f, 8f, 20f, 8f, 12f, 10f)]

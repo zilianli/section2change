@@ -119,7 +119,7 @@ namespace InterchangeMod.Generation.Templates
                 errors.Add($"{DisplayName}的两条道路都需要是双幅（双向道路会在立交内拆成双幅、外端接回）");
             float hm = p.ElevationOf(legs[0]), hc = p.ElevationOf(legs[1]);
             float gap = DiamondTemplate.RequiredGap(p);
-            if (hc - hm < gap)
+            if (hc - hm < gap - HeightRange.GapTolerance)
                 errors.Add($"被交道路要在主线上方至少 {gap:F1} 米（第 2 层）：现在高差 {hc - hm:F1} 米");
             // 主线要从被交道路下面穿过：被交道路是高架，或主线在隧道里（被交道路可以在地面）
             else if (LevelPlanner.BandOf(hc) != ElevationBand.Elevated && hm > HeightRange.TunnelThreshold + kTunnelTolerance)
@@ -366,6 +366,11 @@ namespace InterchangeMod.Generation.Templates
         {
             private readonly InterchangeParams P;
             private readonly float hm, hc, g, rw, gap, grade, om, oc;
+            /// <summary>
+            /// 匝道与途中的道路、别的匝道上下错开的最小高差：层高差的 90%（匝道还在升降时允许略低于整层），但不低于游戏要求的净空
+            /// （游戏内：涡轮的左转匝道在离层高差 0.5 米处跨过主线，只差 7.0 米，报净空不足）。
+            /// </summary>
+            private readonly float minRise;
             /// <summary>左转匝道左出左进（在中央分隔带一侧驶出、汇入），否则右出右进。</summary>
             private readonly bool leftExit;
             private readonly Carriageway[] lines;
@@ -383,6 +388,7 @@ namespace InterchangeMod.Generation.Templates
                 hm = p.ElevationOf(legs[0]);
                 hc = p.ElevationOf(legs[1]);
                 g = hc - hm;
+                minRise = Math.Max(0.9f * g, DiamondTemplate.RequiredGap(p) - HeightRange.GapTolerance);
                 rw = p.RampWidth;
                 gap = p.RampSideGap;
                 grade = p.MaxGrade * kGradeMargin;
@@ -641,13 +647,13 @@ namespace InterchangeMod.Generation.Templates
                 return (first, last);
             }
 
-            /// <summary>两条匝道平面上挨着的地方，高度至少差一层高差的 90%。</summary>
+            /// <summary>两条匝道平面上挨着的地方，高度至少差 minRise。</summary>
             private bool Clear(Ramp one, Ramp other)
             {
                 var o = other.AsObstacle(rw);
                 float reach = rw + gap * 0.5f;
                 foreach (var u in one.Samples())
-                    if (o.Distance(u, out float h) < reach && Math.Abs(u.Y - h) < g * 0.9f)
+                    if (o.Distance(u, out float h) < reach && Math.Abs(u.Y - h) < minRise)
                         return false;
                 return true;
             }

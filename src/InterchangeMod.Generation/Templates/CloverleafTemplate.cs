@@ -75,7 +75,7 @@ namespace InterchangeMod.Generation.Templates
             float hm = p.ElevationOf(legs[0]), hc = p.ElevationOf(legs[1]);
             float gap = DiamondTemplate.RequiredGap(p);
             float upper = Math.Max(hm, hc);
-            if (Math.Abs(hm - hc) < gap)
+            if (Math.Abs(hm - hc) < gap - HeightRange.GapTolerance)
                 errors.Add($"两条道路高差 {Math.Abs(hm - hc):F1} 米，至少需要 {gap:F1} 米净空");
             else if (LevelPlanner.BandOf(upper) != ElevationBand.Elevated)
                 errors.Add($"上层道路离地 {upper:F1} 米会建成路堤（挡土墙），下层道路无法从下面穿过：需要至少 {HeightRange.BridgeThreshold:F1} 米");

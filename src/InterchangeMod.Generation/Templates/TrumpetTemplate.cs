@@ -79,7 +79,7 @@ namespace InterchangeMod.Generation.Templates
             float gap = DiamondTemplate.RequiredGap(p);
             bool branchUpper = h1 > h0;
             float upper = Math.Max(h0, h1);
-            if (Math.Abs(h1 - h0) < gap)
+            if (Math.Abs(h1 - h0) < gap - HeightRange.GapTolerance)
                 errors.Add($"支路与主线高差 {Math.Abs(h1 - h0):F1} 米，至少需要 {gap:F1} 米净空：支路（跨线桥）要在上层");
             else if (LevelPlanner.BandOf(upper) != ElevationBand.Elevated)
                 errors.Add($"{(branchUpper ? "跨线桥" : "主线高架")}离地 {upper:F1} 米会建成路堤（挡土墙），下层道路无法从下面穿过：需要至少 {HeightRange.BridgeThreshold:F1} 米");

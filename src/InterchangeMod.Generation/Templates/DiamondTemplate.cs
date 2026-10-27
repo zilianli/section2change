@@ -101,7 +101,7 @@ namespace InterchangeMod.Generation.Templates
             float neededGap = RequiredGap(p);
             if (climb <= 0f)
                 errors.Add($"匝道太短：分流段就需要 {taper:F0} 米（分流角度越小分流段越长）");
-            else if (rise < neededGap)
+            else if (rise < neededGap - HeightRange.GapTolerance)
                 errors.Add($"主线和被交道路高差 {rise:F1} 米，这两种道路之间至少需要 {neededGap:F1} 米净空");
             else if (climb < rise / p.MaxGrade)
                 errors.Add($"匝道长度至少需要 {rise / p.MaxGrade + taper:F0} 米（含 {taper:F0} 米分流段）才能满足坡度限制");

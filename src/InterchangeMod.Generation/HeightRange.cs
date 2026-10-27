@@ -34,6 +34,12 @@ namespace InterchangeMod.Generation
         public const float MeasuredMinimumGap = 7.5f;
 
         /// <summary>
+        /// 判断高差够不够时的浮点余量（米）：从游戏读回的已有道路高度带有误差（如 17.50003 与 10.00004），层高差正好是最小净空时
+        /// 算出来差万分之几米（游戏内：对准层高差 7.5 米的立体交叉，定向式、涡轮报“至少 7.5 米：现在高差 7.5 米”）。
+        /// </summary>
+        public const float GapTolerance = 0.01f;
+
+        /// <summary>
         /// 游戏内实测：两条道路上下平行重叠（双层道路）时，路面高差至少 10 米。
         /// 菱形立交只有交叉跨越用不到；以后的定向/涡轮立交有平行叠放的匝道时用。
         /// </summary>

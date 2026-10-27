@@ -70,7 +70,7 @@ namespace InterchangeMod.Generation.Templates
 
             float hMain = p.ElevationOf(legs[0]), hGround = p.ElevationOf(legs[1]);
             float gap = DiamondTemplate.RequiredGap(p);
-            if (hMain - hGround < gap)
+            if (hMain - hGround < gap - HeightRange.GapTolerance)
                 errors.Add($"主线比被交道路高 {hMain - hGround:F1} 米，至少需要 {gap:F1} 米净空：主线要在上层");
             else if (LevelPlanner.BandOf(hMain) != ElevationBand.Elevated)
                 errors.Add($"主线离地 {hMain:F1} 米会建成路堤（挡土墙），匝道和被交道路无法从桥下穿过：主线需要至少 {HeightRange.BridgeThreshold:F1} 米");

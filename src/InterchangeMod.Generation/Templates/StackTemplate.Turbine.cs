@@ -24,8 +24,10 @@ namespace InterchangeMod.Generation.Templates
         private static readonly float[] kRingSpacings = { 0f, 15f, 30f, 45f, 60f, 80f };
         /// <summary>纵断面求解的采样间距（米），和化简时允许的高度误差（米）。</summary>
         private const float kProfileStep = 2f, kProfileTolerance = 0.2f;
-        /// <summary>纵断面在 0.9 个层高净空之外再留的余量（米）。</summary>
+        /// <summary>纵断面在 0.9 个层高之外再留的余量（米）；游戏要求的净空本身不再加余量（整层上正好是它）。</summary>
         private const float kProfileMargin = 0.1f;
+        /// <summary>纵断面里每处交叉范围两头多留的长度（米），见 Profile。</summary>
+        private const float kCrossingBuffer = 4f;
         /// <summary>转折点落在挡立柱的位置上时，沿匝道最多挪开的距离（米）。</summary>
         private const float kMaxKnotShift = 30f;
         /// <summary>一条匝道最多考虑的交叉处数（每处上 / 下两种选法，组合数随它指数增长）。</summary>
@@ -306,8 +308,8 @@ namespace InterchangeMod.Generation.Templates
             }
 
             /// <summary>
-            /// 纵断面：两头水平段分别与 h0、h1 同高；途中每处与障碍物（道路、别的匝道）平面上挨着的范围，要么在它上方至少 0.9 个层高，
-            /// 要么在它下方至少 0.9 个层高（只有它够高时）；全程不低于第 1 层、不高于第 3 层，坡度不超过最大坡度。逐一试每处的上 / 下
+            /// 纵断面：两头水平段分别与 h0、h1 同高；途中每处与障碍物（道路、别的匝道）平面上挨着的范围，要么在它上方至少 minRise，
+            /// 要么在它下方至少 minRise（只有它够高时）；全程不低于第 1 层、不高于第 3 层，坡度不超过最大坡度。逐一试每处的上 / 下
             /// 选法，取最高点最低（其次总升降最少）的那个；按“能不升降就不升降”从头走出高度，化简成几个转折点。放不下时返回 null。
             /// 来向那幅在开头的水平段里、去向那幅在结尾的水平段里不算交叉（那是分流、合流）。
             /// </summary>
@@ -317,8 +319,10 @@ namespace InterchangeMod.Generation.Templates
                 float total = path.Length;
                 int n = Math.Max(2, (int)Math.Ceiling(total / kProfileStep)) + 1;
                 float ds = total / (n - 1);
-                // 净空多留出化简误差和一点余量：化简后的高度仍满足 Clear 的 0.9 个层高，不卡在临界上（浮点舍入不同就会时过时不过）
-                float minH = Math.Min(hm, hc), maxH = Math.Max(hm, hc) + g, clearance = 0.9f * g + kProfileTolerance + kProfileMargin;
+                // 0.9 个层高时多留出化简误差和一点余量：化简后的高度仍满足，不卡在临界上（浮点舍入不同就会时过时不过）；
+                // 游戏要求的净空不加余量：匝道在自己那一层上跨过相邻一层的道路时高差正好是它（层高差最小时就是这样，加余量就放不下）
+                float minH = Math.Min(hm, hc), maxH = Math.Max(hm, hc) + g;
+                float clearance = Math.Max(0.9f * g + kProfileTolerance + kProfileMargin, minRise);
                 // 从地面以上的道路 / 匝道上方经过要够高架（低于 8.5 米是路堤，挡土墙压在下面的路上）
                 float bridge = HeightRange.BridgeThreshold + kProfileTolerance + kProfileMargin;
 
@@ -349,6 +353,14 @@ namespace InterchangeMod.Generation.Templates
                 crossings.AddRange(open.Values);
                 if (crossings.Count > kMaxCrossings)
                     return null;
+                // 交叉范围两头各多留 kCrossingBuffer：开始升降的地方离交叉处远一点，弯道上整体弯曲后（升降起点在平面上挪动一两米）
+                // 交叉处的高度不变（游戏内弯道上：匝道在开始爬坡处从别的匝道下面穿过，弯曲后高了 0.1 米，净空差 0.1 米）
+                int buffer = (int)Math.Ceiling(kCrossingBuffer / ds);
+                for (int c = 0; c < crossings.Count; c++)
+                {
+                    var (cLo, cHi, cMin, cMax) = crossings[c];
+                    crossings[c] = (Math.Max(0, cLo - buffer), Math.Min(n - 1, cHi + buffer), cMin, cMax);
+                }
 
                 float[] best = null!;
                 float bestTop = float.MaxValue, bestClimb = float.MaxValue;
@@ -463,7 +475,7 @@ namespace InterchangeMod.Generation.Templates
                 return true;
             }
 
-            /// <summary>匝道与途中的道路、匝道上下错开至少 0.9 个层高，从地面以上的上方经过、从下面穿过时上面那条都是高架（同 Profile 的判断）。</summary>
+            /// <summary>匝道与途中的道路、匝道上下错开至少 minRise，从地面以上的上方经过、从下面穿过时上面那条都是高架（同 Profile 的判断）。</summary>
             private bool ProfileClear(Ramp ramp, IReadOnlyList<Obstacle> obstacles)
             {
                 float total = ramp.Length;
@@ -478,8 +490,8 @@ namespace InterchangeMod.Generation.Templates
                         if (o.Distance(v, out float hh) >= (rw + o.Width) / 2f + gap * 0.5f)
                             continue;
                         bool bad = h > hh
-                            ? h - hh < 0.9f * g || (hh > -HeightRange.RaisedThreshold && h < HeightRange.BridgeThreshold - 0.01f)
-                            : hh - h < 0.9f * g || hh < HeightRange.BridgeThreshold - 0.01f;
+                            ? h - hh < minRise || (hh > -HeightRange.RaisedThreshold && h < HeightRange.BridgeThreshold - 0.01f)
+                            : hh - h < minRise || hh < HeightRange.BridgeThreshold - 0.01f;
                         if (bad)
                             return false;
                     }
