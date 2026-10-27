@@ -38,6 +38,15 @@ namespace InterchangeMod.Generation.Templates
         private const float kNodeSpacing = 1f;
         /// <summary>过渡段起点离最外侧匝道节点的距离。</summary>
         private const float kTransitionGap = 10f;
+        /// <summary>
+        /// 两幅平行接入外部双向道路（AddAlignedEnd）时，接入节点离最外的匝道节点的距离（米）：两个节点都接着宽路，
+        /// 离得太近节点区相互重叠（斜向汇合的汇合点本来就在更外面，用 kTransitionGap）。
+        /// </summary>
+        private const float kAlignedEndGap = 40f;
+
+        /// <summary>臂端过渡的起点（离中心）：inner 是最外的匝道节点 / 接口；平行接入时多留 kAlignedEndGap。</summary>
+        private static float TransitionStart(LegSpec leg, float inner, float offset) =>
+            inner + (FitsAligned(leg, offset) ? kAlignedEndGap : kTransitionGap);
         /// <summary>过渡段汇合点之外双向道路至少延伸的长度。</summary>
         private const float kTransitionTail = 20f;
 
@@ -175,10 +184,9 @@ namespace InterchangeMod.Generation.Templates
             (Vec3 sbNear, Vec3 sbFar) = Terminal(-sideCross * dc + up * hCross, sbApproach, crossSide, oc);
 
             // —— 主线 ——
-            // 臂端外部是双向道路时，两幅在过渡起点结束，之后由过渡段汇合（见 AddTransition）
-            float mainTransitionStart = l + kTransitionGap;
-            float back = legs[2].NeedsDualToTwoWayTransition ? mainTransitionStart : l + legs[2].StubLength;
-            float front = legs[0].NeedsDualToTwoWayTransition ? mainTransitionStart : l + legs[0].StubLength;
+            // 臂端外部是双向道路时，两幅在过渡起点结束，之后平行接入（AddAlignedEnd）或斜向汇合（AddTransition）
+            float back = legs[2].NeedsDualToTwoWayTransition ? TransitionStart(legs[2], l, om) : l + legs[2].StubLength;
+            float front = legs[0].NeedsDualToTwoWayTransition ? TransitionStart(legs[0], l, om) : l + legs[0].StubLength;
             string? prefab0 = legs[0].RoadPrefab, prefab2 = legs[2].RoadPrefab;
             if (legs[0].Form == RoadForm.Dual)
             {
@@ -202,8 +210,8 @@ namespace InterchangeMod.Generation.Templates
                 return new List<Vec3> { MainPoint(-back, lateral), rampBack, MainPoint(span.Lo, inner), MainPoint(span.Hi, inner), rampFront, MainPoint(front, lateral) };
             }
 
-            AddEnd(legs[2], "Main-2", RoadRole.MainRoad, MainPoint, -1, mainTransitionStart, om, l, prefab2);
-            AddEnd(legs[0], "Main-0", RoadRole.MainRoad, MainPoint, +1, mainTransitionStart, om, l, prefab0);
+            AddEnd(legs[2], "Main-2", RoadRole.MainRoad, MainPoint, -1, back, om, l, prefab2);
+            AddEnd(legs[0], "Main-0", RoadRole.MainRoad, MainPoint, +1, front, om, l, prefab0);
 
             // 臂端外部是双向道路：两幅放得进它的宽度时平行接入，否则斜向汇合
             void AddEnd(LegSpec leg, string name, RoadRole role, Func<float, float, Vec3> point, int end, float start, float offset, float inner, string? oneWayPrefab)
@@ -219,9 +227,8 @@ namespace InterchangeMod.Generation.Templates
             // —— 被交道路 ——
             // 双幅被交道路上的匝道接口沿道路方向会偏出 dc 一点（匝道斜着穿过分隔带），过渡段和臂端从最外的接口算起
             float reach = new[] { nbNear, nbFar, sbNear, sbFar }.Max(v => MathF.Abs(Directions.Dot(v, cross)));
-            float crossTransitionStart = reach + kTransitionGap;
-            float outer3 = legs[3].NeedsDualToTwoWayTransition ? crossTransitionStart : reach + legs[3].StubLength;
-            float outer1 = legs[1].NeedsDualToTwoWayTransition ? crossTransitionStart : reach + legs[1].StubLength;
+            float outer3 = legs[3].NeedsDualToTwoWayTransition ? TransitionStart(legs[3], reach, oc) : reach + legs[3].StubLength;
+            float outer1 = legs[1].NeedsDualToTwoWayTransition ? TransitionStart(legs[1], reach, oc) : reach + legs[1].StubLength;
             string? prefab1 = legs[1].RoadPrefab, prefab3 = legs[3].RoadPrefab;
             if (legs[1].Form == RoadForm.Dual)
             {
@@ -247,8 +254,8 @@ namespace InterchangeMod.Generation.Templates
                 return new List<Vec3> { CrossPoint(-outer3, lateral), terminalA, terminalB, CrossPoint(span.Lo, lateral), CrossPoint(span.Hi, lateral), CrossPoint(outer1, lateral) };
             }
 
-            AddEnd(legs[3], "Cross-3", RoadRole.CrossRoad, CrossPoint, -1, crossTransitionStart, oc, reach, prefab3);
-            AddEnd(legs[1], "Cross-1", RoadRole.CrossRoad, CrossPoint, +1, crossTransitionStart, oc, reach, prefab1);
+            AddEnd(legs[3], "Cross-3", RoadRole.CrossRoad, CrossPoint, -1, outer3, oc, reach, prefab3);
+            AddEnd(legs[1], "Cross-1", RoadRole.CrossRoad, CrossPoint, +1, outer1, oc, reach, prefab1);
 
             // —— 匝道（单向，曲线方向即行驶方向）——
             // 每条匝道分两段，处处切线连续（不出现折角）：

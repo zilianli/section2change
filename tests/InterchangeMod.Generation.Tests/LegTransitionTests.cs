@@ -150,6 +150,8 @@ namespace InterchangeMod.Generation.Tests
                 // 两幅平行延伸到尾段起点（在中心线上），曲线端点仍在各自一幅上（边缘对齐）
                 Vec3 joint = tail.StartNode;
                 Assert.Equal(0f, joint.X * main.Z - joint.Z * main.X, 3);
+                // 接入节点离匝道节点（±RampLength）至少 40 米：两个节点都接着宽路，太近节点区重叠
+                Assert.True(System.Math.Abs(Directions.Dot(joint, main)) >= p.RampLength + 40f - 1e-3f, $"{end}: joint at {Directions.Dot(joint, main):F1}");
                 var carriageways = segments.Where(s => s.Role == RoadRole.MainRoad && s != tail && (s.StartNode == joint || s.EndNode == joint)).ToList();
                 Assert.Equal(2, carriageways.Count);
                 Assert.All(carriageways, s => Assert.True(s.HasNodeOffset));

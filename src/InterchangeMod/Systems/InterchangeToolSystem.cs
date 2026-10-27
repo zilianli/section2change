@@ -1020,9 +1020,6 @@ namespace InterchangeMod.Systems
         /// <summary>立交路段查不到预制体宽度时按这个半宽（米）算拆除走廊。</summary>
         private const float kFallbackHalfWidth = 10f;
 
-        /// <summary>双向主线宽到这个值（米）时立交内部拆成双幅（见 BuildParams）。</summary>
-        private const float kWideTwoWayMain = 30f;
-
         /// <summary>立交路段的半宽（米，按预制体）：原路口改造时其他原有道路只拆压到这个走廊的部分。</summary>
         private float HalfWidthOf(string prefab) =>
             !string.IsNullOrEmpty(prefab) && m_PrefabResolver.TryResolve(prefab, m_SelectedRoad, out NetPrefab net)
@@ -1235,12 +1232,13 @@ namespace InterchangeMod.Systems
             // 外部主线是双向道路、但立交主线不在地面（或是苜蓿叶，匝道都接在两幅上）：匝道无法从双向道路中心分出，
             // 立交内部改用双幅（每方向车道相同的单行道路），臂端过渡回外部的双向道路；苜蓿叶、环岛等两幅外缘对齐双向道路的边缘
             //（两幅都放得进双向道路的宽度，臂端平行接入，见 DiamondTemplate.AddAlignedEnd）。
-            // 菱形的双向主线很宽时（如 XL 双向道路）在地面上也拆开：匝道从路中心分出，前面一大段压在路面上（游戏内菱形报叠放、形状无效）
-            bool wideMain = IsDiamond && mainForm == RoadForm.TwoWay && HalfWidthOf(mainName) * 2f >= kWideTwoWayMain;
-            if (mainForm == RoadForm.TwoWay && (IsCloverleaf || IsParclo || IsRoundabout || IsDirectionalT || IsStack || wideMain || (matched && LevelPlanner.BandOf(p.Levels[0].Elevation) != ElevationBand.Ground))
+            // 菱形的双向主线在地面上也拆开：匝道从双向道路的中心线节点相切分出，前面一大段压在路面上
+            //（游戏内 XL 双向、24 米的 Medium Road 都报叠放、形状无效）
+            bool splitMain = IsDiamond && mainForm == RoadForm.TwoWay;
+            if (mainForm == RoadForm.TwoWay && (IsCloverleaf || IsParclo || IsRoundabout || IsDirectionalT || IsStack || splitMain || (matched && LevelPlanner.BandOf(p.Levels[0].Elevation) != ElevationBand.Ground))
                 && m_RoadsByName.TryGetValue(mainName, out RoadInfo external))
             {
-                bool aligned = IsCloverleaf || IsDirectionalT || IsStack || IsRoundabout || wideMain;
+                bool aligned = IsCloverleaf || IsDirectionalT || IsStack || IsRoundabout || splitMain;
                 RoadInfo oneWay = (aligned ? RampMatcher.PickSplitOneWay(m_RoadCatalog, external) : null)
                     ?? RampMatcher.PickClosest(m_RoadCatalog, external.IsHighway, external.LanesPerDirection, oneWay: true);
                 if (oneWay != null)
