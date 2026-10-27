@@ -381,6 +381,56 @@ namespace InterchangeMod.Generation.Tests
             TestHelpers.AssertRampsConnected(segments);
         }
 
+        [Fact]
+        public void TightenedGrade_SnapsToSteps()
+        {
+            // 首轮核查第 8 条：弯道内侧坡度超限时收紧的坡度原来随弯道连续变化，沿弯道移动鼠标时每帧都不同，
+            // 定向式、涡轮这类带缓存的模板每次都完整求解（一次 0.1–0.3 秒）。收紧后的坡度要落在 0.25% 一档上
+            var grades = new List<float>();
+            foreach (bool turbine in new[] { false, true })
+                foreach (float radius in new[] { 600f, 605f })
+                {
+                    var template = new StackTemplate(turbine: turbine);
+                    var p = new InterchangeParams { Legs = InterchangeParams.CrossLegs(90f, 0, 1), RampWidth = 12f, RampSideGap = 1f };
+                    p.SetRoad(0, 2, RoadForm.Dual, 20f, 8f, "Highway Oneway");
+                    p.SetRoad(1, 3, RoadForm.Dual, 20f, 8f, "Highway Oneway");
+                    p.Levels[1].Elevation = 10f;
+                    InterchangeLayout.Bend(template, p, new CurveWarp(p.Legs[1].Angle, 1f / radius, 1f / radius), out InterchangeParams used);
+                    grades.Add(used.MaxGrade);
+                    if (used.MaxGrade < p.MaxGrade)
+                        Assert.Equal(System.Math.Round(used.MaxGrade / 0.0025), used.MaxGrade / 0.0025, 3);
+                }
+            Assert.Contains(grades, g => g < 0.08f);
+        }
+
+        [Theory]
+        [InlineData(1f / 1140f, 0f)]
+        [InlineData(1f / 600f, -1f / 900f)]
+        public void LongGroundSegments_FollowTheWarpClosely(float aheadCurvature, float behindCurvature)
+        {
+            // 游戏内（定向式、88° 立体交叉，主线一侧 R 1140 弯、一侧直）：一千多米的地面主线一段三次贝塞尔穿过中心，弯曲后中间
+            // 偏出近 8 米，压到分隔带里左转匝道的立柱。弯曲前把长的地面路段等分，弯曲后每段和逐点弯曲相差不到 0.3 米
+            var warp = new CurveWarp(90f, aheadCurvature == 0f ? Centerline.Straight : Centerline.Arc(aheadCurvature),
+                behindCurvature == 0f ? Centerline.Straight : Centerline.Arc(behindCurvature), Centerline.Straight, Centerline.Straight);
+            var road = new RoadSegmentSpec("MainB-3", RoadRole.MainRoad, Bezier3.Line(new Vec3(-14.5f, 0f, 597f), new Vec3(-14.5f, 0f, -442f)), "Highway Oneway");
+            var bent = warp.Apply(new[] { road });
+            Assert.True(bent.Count > 1);
+            // 相邻两段首尾是同一个节点
+            for (int i = 0; i + 1 < bent.Count; i++)
+                Assert.Equal(bent[i].EndNode, bent[i + 1].StartNode);
+            float worst = 0f;
+            for (int k = 0; k <= 200; k++)
+            {
+                Vec3 exact = warp.Apply(road.Curve.Evaluate(k / 200f));
+                float best = float.MaxValue;
+                foreach (var sg in bent)
+                    for (int j = 0; j <= 400; j++)
+                        best = System.Math.Min(best, Flat(sg.Curve.Evaluate(j / 400f), exact));
+                worst = System.Math.Max(worst, best);
+            }
+            Assert.True(worst < 0.3f, $"bent road is {worst:F2} m off the warp");
+        }
+
         public static IEnumerable<object[]> BigInterchanges() =>
             from kind in new[] { "stack", "stackLeftExit", "turbine" }
             from curve in new[] { (1f / 900f, 0f), (-1f / 1500f, 1f / 1300f) }
@@ -409,7 +459,8 @@ namespace InterchangeMod.Generation.Tests
             // 同一组参数弯曲前后逐段对应：匝道从道路节点出发处沿匝道 5 / 10 / 20 米的点，弯曲后（同一个点变换过去）离最近道路的距离不变
             // （按弧长重新取点不行：走廊里沿路方向会按 1 ± 横距 / 半径 伸缩约 1%，分流斜段上同样弧长处的横距本来就会差十几厘米）
             var straight = template.Generate(used);
-            Assert.Equal(straight.Count, bent.Count);
+            // 长的地面路段弯曲前被等分（原名 / 原名.2 / …）：每段原路段都还在
+            Assert.All(straight, sg => Assert.Contains(bent, b => b.Name == sg.Name));
             // 到道路折线（每段 80 份）的垂直距离；沿匝道按实际弧长取点（弯曲后参数和弧长的对应会变）
             float Nearest(Vec3 v, IEnumerable<RoadSegmentSpec> roads)
             {

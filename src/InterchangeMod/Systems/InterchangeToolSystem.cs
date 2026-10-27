@@ -450,6 +450,13 @@ namespace InterchangeMod.Systems
                     return inputDeps;
                 origin = m_LastOrigin;
                 yaw = m_Pinned && !m_PinnedOnMatch ? m_Yaw : m_LastYaw;
+                // 面板上改了“上层道路 / T 型主线”时鼠标必然在面板上（或预览已固定）：匹配结果照样按需对调主线和被交道路，
+                // 对准路口的预览朝向跟着新的主线方向（否则要等鼠标回到地图上才纠正，期间面板误报错误）
+                if (m_Match != null && m_Match.Error == null && (!m_Pinned || m_PinnedOnMatch))
+                {
+                    OrientCrossing();
+                    yaw = m_Match.MainAngle * Directions.DegToRad;
+                }
             }
             else
             {
@@ -709,6 +716,17 @@ namespace InterchangeMod.Systems
         /// </summary>
         private string m_LastCrossingReason = "";
 
+        /// <summary>同一处立体交叉的不同路段（双幅交叉的另一幅）交叉点离匹配中心不超过这个距离（米）。</summary>
+        private const float kSameCrossing = 25f;
+
+        /// <summary>
+        /// 读到的交叉就是当前匹配的那一处：同一对路段，或交叉点离当前匹配中心不到 kSameCrossing 米（鼠标移到双幅交叉的另一幅时
+        /// 路段对会变，不必重新收集、重建整座立交）。
+        /// </summary>
+        private bool IsCurrentCrossing((Entity, Entity) key, float3 point) =>
+            m_Match != null && m_Match.Crossing
+            && (key.Equals(m_CrossingKey) || math.distance(point.xz, new float2(m_Match.Center.X, m_Match.Center.Z)) < kSameCrossing);
+
         private bool TryMatchCrossing(Entity hitEntity, float3 hitPosition)
         {
             var matched = new List<Entity>();
@@ -716,10 +734,10 @@ namespace InterchangeMod.Systems
             var netTree = m_NetSearchSystem.GetNetSearchTree(readOnly: true, out JobHandle treeDeps);
             treeDeps.Complete();
             var edges = JunctionReader.ReadCrossing(EntityManager, m_PrefabSystem, netTree, hitEntity, hitPosition,
-                m_RoadsByName, ref terrain, matched, out var key);
+                m_RoadsByName, ref terrain, matched, out var key, IsCurrentCrossing);
             if (edges == null)
                 return false;
-            if (key.Equals(m_CrossingKey) && m_Match != null)
+            if (edges == JunctionReader.Unchanged || (key.Equals(m_CrossingKey) && m_Match != null))
                 return true;
 
             m_CrossingKey = key;

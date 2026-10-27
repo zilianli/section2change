@@ -125,8 +125,22 @@ namespace InterchangeMod.Generation.Templates
                 // 布置按相对高度缓存：基层整体升降（对准道路时随地形变化）只把输出平移
                 float shift = p.ElevationOf(p.Legs[0]) - plan.BaseHeight;
                 if (Math.Abs(shift) > 1e-4f)
+                {
                     for (int i = 0; i < built.Count; i++)
                         built[i] = built[i].Transform(v => new Vec3(v.X, v.Y + shift, v.Z));
+                    // 跨线桥的断点是按求解时的离地高度分的：平移后原来在地面的长段变成高架（超过高架分段长度）时，按这次的基层重解
+                    if (built.Any(sg => Math.Max(sg.Curve.P0.Y, sg.Curve.P3.Y) >= HeightRange.BridgeThreshold - 0.5f && sg.Curve.Length() > kMaxElevatedPiece + 1f))
+                    {
+                        var fresh = new Plan(p, directional);
+                        if (fresh.Fits)
+                        {
+                            m_Plan = fresh;
+                            m_PlanKey = Key(p);
+                            built.Clear();
+                            fresh.Build(built);
+                        }
+                    }
+                }
                 InterchangeLayout.AddApproachSlopes(built, p);
                 m_Segments = built;
                 m_SegmentsKey = key;

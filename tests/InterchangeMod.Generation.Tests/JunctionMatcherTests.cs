@@ -158,6 +158,19 @@ namespace InterchangeMod.Generation.Tests
         }
 
         [Fact]
+        public void TwoOneWayRoadsDrivingIntoTheSameNode_FailWithoutThrowing()
+        {
+            // 首轮核查第 7 条：两条单行道路相向驶入同一个节点时原来抛异常（游戏里每帧报错、预览不再更新）
+            var edges = new List<ExternalEdge>
+            {
+                new ExternalEdge { Anchor = Vec3.Zero, Direction = Directions.FromAngle(0f), Road = "OW", OneWay = true, TravelOutward = false, Width = 8f, LanesPerDirection = 2 },
+                new ExternalEdge { Anchor = Vec3.Zero, Direction = Directions.FromAngle(180f), Road = "OW", OneWay = true, TravelOutward = false, Width = 8f, LanesPerDirection = 2 },
+            };
+            var m = JunctionMatcher.Match(edges, preferredAngle: 0f);
+            Assert.NotNull(m.Error);
+        }
+
+        [Fact]
         public void ThreeLegsWithoutStraightRoad_IsAWye()
         {
             // 三条臂互成 120°：没有直行的道路，认作 Y 型三岔路口（只有 Y 型分向能对准），给出三条臂的角度和道路

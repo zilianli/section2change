@@ -103,15 +103,20 @@ namespace InterchangeMod.Generation.Tests
             // 节点仍精确相等（同一个局部点得到同一个结果）
             TestHelpers.AssertRampsConnected(warped);
             // 弯曲后的贝塞尔与逐点弯曲的原曲线大体一致（穿过两种弯法过渡区的长匝道形状本来就不唯一，只防止离谱：2 米内）；
-            // 端点高度不变，中间的高度随控制柄缩放略有变化
-            for (int i = 0; i < segments.Count; i++)
+            // 端点高度不变，中间的高度随控制柄缩放略有变化。长的地面路段弯曲前被等分成几段（名字 原名 / 原名.2 / …），按弯曲后最近的点比
+            foreach (var segment in segments)
+            {
+                var pieces = warped.Where(w => w.Name == segment.Name || w.Name.StartsWith(segment.Name + ".")).ToList();
+                Assert.NotEmpty(pieces);
                 for (int k = 0; k <= 10; k++)
                 {
                     float t = k / 10f;
-                    Vec3 exact = warp.Apply(segments[i].Curve.Evaluate(t)), approx = warped[i].Curve.Evaluate(t);
-                    Assert.True(Flat(exact, approx) < 2f, $"{segments[i].Name} t {t}: {Flat(exact, approx):F2} m");
-                    Assert.True(System.Math.Abs(exact.Y - approx.Y) < (k == 0 || k == 10 ? 0.001f : 0.5f), $"{segments[i].Name} t {t}: height {exact.Y:F2} vs {approx.Y:F2}");
+                    Vec3 exact = warp.Apply(segment.Curve.Evaluate(t));
+                    Vec3 approx = pieces.SelectMany(w => Enumerable.Range(0, 201).Select(j => w.Curve.Evaluate(j / 200f))).OrderBy(q => Flat(exact, q)).First();
+                    Assert.True(Flat(exact, approx) < 2f, $"{segment.Name} t {t}: {Flat(exact, approx):F2} m");
+                    Assert.True(System.Math.Abs(exact.Y - approx.Y) < (k == 0 || k == 10 ? 0.001f : 0.5f), $"{segment.Name} t {t}: height {exact.Y:F2} vs {approx.Y:F2}");
                 }
+            }
             // 同一条路前后相接的路段（节点只接这两段）在共用节点处仍相切（俯视）
             foreach (var a in warped)
                 foreach (var b in warped.Where(b => b != a && b.StartNode.Equals(a.EndNode)

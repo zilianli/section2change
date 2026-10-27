@@ -157,9 +157,17 @@ namespace InterchangeMod.Placement
         /// <summary>最近一次 ReadCrossing 没认出立体交叉的原因（调试日志用）。</summary>
         public static string LastCrossingReason = "";
 
+        /// <summary>
+        /// ReadCrossing 找到的就是当前匹配的那一处（isCurrent 判定）时返回它：没有重新收集、追踪路段（鼠标停在道路上时每帧都会读，
+        /// 收集时每条路段两半各追踪 2 千米，只在换了一处交叉时才做）。
+        /// </summary>
+        public static readonly List<ExternalEdge> Unchanged = new List<ExternalEdge>();
+
+        /// <param name="isCurrent">找到的交叉（路段对、交叉点）是不是当前匹配的那一处；是时返回 Unchanged。</param>
         public static List<ExternalEdge> ReadCrossing(EntityManager entityManager, PrefabSystem prefabSystem,
             NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree, Entity hit, float3 cursor,
-            IReadOnlyDictionary<string, RoadInfo> roads, ref TerrainHeightData terrain, List<Entity> matched, out (Entity, Entity) key)
+            IReadOnlyDictionary<string, RoadInfo> roads, ref TerrainHeightData terrain, List<Entity> matched, out (Entity, Entity) key,
+            System.Func<(Entity, Entity), float3, bool> isCurrent = null)
         {
             key = default;
             if (hit != Entity.Null && entityManager.Exists(hit) && entityManager.HasComponent<Temp>(hit))
@@ -173,10 +181,15 @@ namespace InterchangeMod.Placement
                 : $"nearest crossing {math.distance(nearest.Point.xz, cursor.xz):F0} m from the cursor (limit {kCrossingRadius:F0} m)";
             // 没有真正相交的道路时，再看是不是“丁字”：一条路的尽头停在另一条路旁边（如地面道路在高架下方结束）
             if (fromHit.Count == 0 || math.distance(nearest.Point.xz, cursor.xz) > kCrossingRadius)
-                return ReadTee(entityManager, prefabSystem, netTree, hit, cursor, roads, ref terrain, matched, out key);
+                return ReadTee(entityManager, prefabSystem, netTree, hit, cursor, roads, ref terrain, matched, out key, isCurrent);
             Entity other = nearest.Edge;
             float3 center = nearest.Point;
             key = (hit, other);
+            if (isCurrent != null && isCurrent(key, center))
+            {
+                LastCrossingReason = "same crossing as the current match";
+                return Unchanged;
+            }
 
             var collected = CollectAt(entityManager, prefabSystem, netTree, center, hit, other, roads, ref terrain, matched);
             LastCrossingReason = $"crossing found, {collected.Count} edges collected" + (s_Rejected.Count > 0 ? "; rejected: " + string.Join("; ", s_Rejected) : "");
@@ -195,7 +208,8 @@ namespace InterchangeMod.Placement
         /// </summary>
         private static List<ExternalEdge> ReadTee(EntityManager entityManager, PrefabSystem prefabSystem,
             NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree, Entity hit, float3 cursor,
-            IReadOnlyDictionary<string, RoadInfo> roads, ref TerrainHeightData terrain, List<Entity> matched, out (Entity, Entity) key)
+            IReadOnlyDictionary<string, RoadInfo> roads, ref TerrainHeightData terrain, List<Entity> matched, out (Entity, Entity) key,
+            System.Func<(Entity, Entity), float3, bool> isCurrent)
         {
             key = default;
             var candidates = FindTeeEnds(entityManager, netTree, hit).Concat(FindTeeMains(entityManager, netTree, hit)).ToList();
@@ -205,6 +219,8 @@ namespace InterchangeMod.Placement
             if (math.distance(tee.Point.xz, cursor.xz) > kCrossingRadius)
                 return null;
             key = (tee.Main, tee.Branch);
+            if (isCurrent != null && isCurrent(key, tee.Point))
+                return Unchanged;
             return CollectAt(entityManager, prefabSystem, netTree, tee.Point, tee.Main, tee.Branch, roads, ref terrain, matched);
         }
 

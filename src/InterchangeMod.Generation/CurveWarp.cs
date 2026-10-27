@@ -198,7 +198,38 @@ namespace InterchangeMod.Generation
             return k0 > 0.3f && k0 < 3f && k3 > 0.3f && k3 < 3f ? (k0, k3) : (1f, 1f);
         }
 
-        public List<RoadSegmentSpec> Apply(IEnumerable<RoadSegmentSpec> segments) => segments.Select(Apply).ToList();
+        /// <summary>
+        /// 弯曲前把长于这个长度（米）的地面路段等分：一段三次贝塞尔贴不住长距离的弯曲（游戏内：定向式一千多米的地面主线穿过中心，
+        /// 主线一侧弯、一侧直，中间偏出近 8 米，压到分隔带里的立柱）。
+        /// </summary>
+        private const float kMaxBentPiece = 100f;
+
+        public List<RoadSegmentSpec> Apply(IEnumerable<RoadSegmentSpec> segments) =>
+            IsIdentity ? segments.ToList() : segments.SelectMany(Split).Select(Apply).ToList();
+
+        /// <summary>
+        /// 长于 kMaxBentPiece 的地面路段按参数等分：中间的节点在原曲线上取一次，相邻两段共用，弯曲后照样相接。
+        /// 高架路段不分（多出来的节点下面会多出立柱，模板已把高架段分得够短）。
+        /// </summary>
+        private static IEnumerable<RoadSegmentSpec> Split(RoadSegmentSpec segment)
+        {
+            var c = segment.Curve;
+            float length = c.Length();
+            if (length <= kMaxBentPiece || Math.Max(c.P0.Y, c.P3.Y) >= HeightRange.BridgeThreshold - 0.5f)
+            {
+                yield return segment;
+                yield break;
+            }
+            int n = (int)Math.Ceiling(length / kMaxBentPiece);
+            var points = Enumerable.Range(0, n + 1).Select(k => k == 0 ? c.P0 : k == n ? c.P3 : c.Evaluate(k / (float)n)).ToArray();
+            for (int k = 0; k < n; k++)
+            {
+                var piece = c.Slice(k / (float)n, (k + 1) / (float)n);
+                yield return new RoadSegmentSpec(k == 0 ? segment.Name : $"{segment.Name}.{k + 1}", segment.Role,
+                    new Bezier3(points[k], piece.P1, piece.P2, points[k + 1]), segment.Prefab,
+                    k == 0 ? segment.StartNode : points[k], k == n - 1 ? segment.EndNode : points[k + 1]);
+            }
+        }
 
         /// <summary>切线 v（在 p 处）弯曲后的样子：水平分量按数值雅可比矩阵变换，竖直分量不变。</summary>
         private Vec3 Jacobian(Vec3 p, Vec3 v)

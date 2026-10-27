@@ -223,6 +223,28 @@ namespace InterchangeMod.Generation.Tests
         }
 
         [Theory]
+        [InlineData(0f, 3.5f)]
+        [InlineData(3.5f, 0f)]
+        [InlineData(2f, -1f)]
+        public void ReusedLayoutAtShiftedBase_MatchesAFreshSolve(float first, float second)
+        {
+            // 首轮核查第 6 条：布置按相对高度缓存，基层在同一高度段里平移后复用时原来只把输出平移，匝道断点还是按原来的离地高度分的，
+            // 出现 80 米以上的高架段（游戏会从中间切开，立柱位置不受控制）。复用的结果要和这个基层下重新求解的一样
+            var reused = new WyeTemplate();
+            Assert.Empty(reused.ValidateParams(Make(baseElevation: first)));
+            reused.Generate(Make(baseElevation: first));
+            var p = Make(baseElevation: second);
+            Assert.Empty(reused.ValidateParams(p));
+            var a = reused.Generate(p);
+            var b = new WyeTemplate().Generate(p);
+            Assert.Equal(b.Select(sg => sg.Name), a.Select(sg => sg.Name));
+            for (int i = 0; i < a.Count; i++)
+                Assert.True(Vec3.Distance(a[i].Curve.P0, b[i].Curve.P0) < 0.01f && Vec3.Distance(a[i].Curve.P3, b[i].Curve.P3) < 0.01f, a[i].Name);
+            foreach (var sg in a.Where(sg => sg.Curve.P0.Y > 8.4f || sg.Curve.P3.Y > 8.4f))
+                Assert.True(sg.Curve.Length() < 80f, $"{sg.Name} is {sg.Curve.Length():F0} m");
+        }
+
+        [Theory]
         [InlineData(90f, 180f)]
         [InlineData(160f, 260f)]
         public void LegsTooFarFromEvenlySpaced_AreRejected(float angle1, float angle2)

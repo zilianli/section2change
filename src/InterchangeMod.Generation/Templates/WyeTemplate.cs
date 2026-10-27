@@ -120,13 +120,7 @@ namespace InterchangeMod.Generation.Templates
             if (key != m_SegmentsKey)
             {
                 var built = new List<RoadSegmentSpec>();
-                var plan = PlanFor(p);
-                plan.Build(built);
-                // 布置按相对高度缓存：基层整体升降（对准道路时随地形变化）只把输出平移
-                float shift = p.ElevationOf(p.Legs[0]) - plan.BaseHeight;
-                if (Math.Abs(shift) > 1e-4f)
-                    for (int i = 0; i < built.Count; i++)
-                        built[i] = built[i].Transform(v => new Vec3(v.X, v.Y + shift, v.Z));
+                PlanFor(p).Build(built);
                 InterchangeLayout.AddApproachSlopes(built, p);
                 m_Segments = built;
                 m_SegmentsKey = key;
@@ -166,10 +160,14 @@ namespace InterchangeMod.Generation.Templates
         private Plan? m_Plan;
         private List<RoadSegmentSpec>? m_Segments;
 
+        /// <summary>
+        /// 求解布置：按相对高度缓存（基层随地形升降时不必重解）；复用时把高度平移到这次的基层，匝道断点按实际离地高度重分
+        /// （哪段算高架、高架段 ≤ 70 米随基层变），分不下时按这次的基层重解。
+        /// </summary>
         private Plan PlanFor(InterchangeParams p)
         {
             string key = Key(p);
-            if (key != m_PlanKey || m_Plan == null)
+            if (key != m_PlanKey || m_Plan == null || !m_Plan.Rebase(p.ElevationOf(p.Legs[0])))
             {
                 var watch = System.Diagnostics.Stopwatch.StartNew();
                 m_Plan = new Plan(p);
@@ -426,15 +424,15 @@ namespace InterchangeMod.Generation.Templates
             public bool Fits => Errors.Count == 0;
             public string Summary = "";
 
-            /// <summary>建立布置时的基层高度（缓存的布置用于别的基层时，输出按差值平移）。</summary>
-            public float BaseHeight => h0;
 
             private readonly Vec3[] d = new Vec3[3], R = new Vec3[3];
             /// <summary>o：立交内每一幅中线离道路中线的距离（拉开后的）；oOuter：臂端原来的；legShift：臂端 S 形接回的长度。</summary>
             private readonly float[] o = new float[3], oOuter = new float[3], legShift = new float[3], e = new float[3], w = new float[3];
             /// <summary>每条路进向一幅的右转、左转目标。</summary>
             private readonly int[] rightOf = new int[3], leftOf = new int[3];
-            private readonly float h0, g, up, rw, gap, grade, rise;
+            /// <summary>h0 基层、up 跨线桥的离地高度：复用布置时随基层平移（Rebase）。</summary>
+            private float h0, up;
+            private readonly float g, rw, gap, grade, rise;
             private readonly bool baseElevated;
 
             /// <summary>求出的布置：每条路的分岔 / 并合距离，六条匝道。</summary>
@@ -484,6 +482,29 @@ namespace InterchangeMod.Generation.Templates
 
                 if (!Solve())
                     Errors.Add("左转匝道的跨线桥放不下：请加大最大坡度、减小层间高差，或把三条路的夹角调得更接近 120°");
+            }
+
+            /// <summary>
+            /// 复用布置到基层 baseHeight（同一高度段内）：高度折线整体平移，匝道断点按新的离地高度重新分。分不下时返回 false。
+            /// </summary>
+            public bool Rebase(float baseHeight)
+            {
+                float delta = baseHeight - h0;
+                if (Math.Abs(delta) < 1e-4f)
+                    return true;
+                h0 = baseHeight;
+                up = h0 + g;
+                foreach (var ramp in ramps)
+                    ramp.Knots = ramp.Knots.Select(k => (k.S, k.H + delta)).ToList();
+                var bodies = Bodies();
+                foreach (var ramp in ramps)
+                {
+                    var cuts = PlanCuts(ramp, bodies);
+                    if (cuts == null)
+                        return false;
+                    ramp.Cuts = cuts;
+                }
+                return true;
             }
 
             // —— 几何 ——

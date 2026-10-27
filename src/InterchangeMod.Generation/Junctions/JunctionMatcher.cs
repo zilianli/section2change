@@ -216,7 +216,10 @@ namespace InterchangeMod.Generation.Junctions
             }
             else
             {
-                var outward = leg.Edges.Concat(other.Edges).First(e => e.TravelOutward);
+                // 两条单行道路都驶入这个节点（画反了方向、或两条单行路尾接尾）：看不出是双幅的哪一幅
+                var outward = leg.Edges.Concat(other.Edges).FirstOrDefault(e => e.TravelOutward);
+                if (outward == null)
+                    return Fail(result, "这条路两侧的单行道路方向相对（都驶向这个节点），无法判断是双幅道路的哪一幅");
                 Vec3 travel = outward.Direction;
                 Vec3 driveSide = Directions.RightOf(travel) * (rightHandTraffic ? 1f : -1f);
                 float half = (dualMedian + outward.Width) / 2f;

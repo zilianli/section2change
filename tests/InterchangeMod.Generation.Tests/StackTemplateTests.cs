@@ -140,6 +140,8 @@ namespace InterchangeMod.Generation.Tests
         [InlineData(66f, 0f)]
         [InlineData(67f, 10f)]
         [InlineData(114f, 0f)]
+        [InlineData(110f, 0f)]
+        [InlineData(68f, 0f)]
         public void WideRoadsAndRamps(float angle, float baseElevation) => WideRoads(angle, baseElevation, leftExit: false);
 
         [Theory]
@@ -330,6 +332,53 @@ namespace InterchangeMod.Generation.Tests
                             float dx = u.X - v.X, dz = u.Z - v.Z;
                             Assert.False(dx * dx + dz * dz < reach * reach && System.Math.Abs(u.Y - v.Y) < 2f,
                                 $"{a.Name} and {b.Name} overlap near ({u.X:F0}, {u.Y:F1}, {u.Z:F0})");
+                        }
+                }
+        }
+
+        [Theory]
+        // 游戏内实测参数（88° 立体交叉：地面主线、10.25 米高架被交道路，自动模式）：左转匝道的节点在地面主线分隔带里，
+        // 立柱（垂直于桥面、和桥面一样宽的薄墙）不能压到更低的道路
+        [InlineData(88.48f, 0.23f, 10.25f, false)]
+        [InlineData(90f, 0f, 10f, false)]
+        [InlineData(75f, 0f, 10f, false)]
+        [InlineData(88.48f, 0.23f, 10.25f, true)]
+        public void ElevatedNodes_PillarsClearLowerRoads(float angle, float mainElevation, float crossElevation, bool leftExit)
+        {
+            var p = new InterchangeParams
+            {
+                Legs = InterchangeParams.CrossLegs(angle, 0, 1), RampPrefab = "Highway Oneway - 2 lanes", RampWidth = 12f, RampSideGap = 1f,
+                MainReducedPrefab = "Highway Oneway - 2 lanes", MainReducedWidth = 12f, CrossReducedPrefab = "Highway Oneway - 2 lanes", CrossReducedWidth = 12f,
+                StackLeftExit = leftExit,
+            };
+            p.SetRoad(0, 2, RoadForm.Dual, 20f, 8f, "Highway Oneway - 4 lanes");
+            p.SetRoad(1, 3, RoadForm.Dual, 20f, 8f, "Highway Oneway - 4 lanes");
+            p.Levels[0].Elevation = mainElevation;
+            p.Levels[1].Elevation = crossElevation;
+            Assert.Empty(_template.ValidateParams(p));
+            var segments = _template.Generate(p);
+            // 高架节点的立柱：垂直于桥面、和桥面一样宽的薄墙（厚 3 米），不能压到低 3 米以上的道路
+            foreach (var owner in segments)
+                foreach (var (node, tangent) in new[] { (owner.Curve.P0, owner.Curve.P1 - owner.Curve.P0), (owner.Curve.P3, owner.Curve.P3 - owner.Curve.P2) })
+                {
+                    float length = (float)System.Math.Sqrt(tangent.X * tangent.X + tangent.Z * tangent.Z);
+                    if (node.Y < HeightRange.BridgeThreshold || length < 1e-3f)
+                        continue;
+                    var across = new Vec3(-tangent.Z / length, 0f, tangent.X / length);
+                    foreach (var other in segments.Where(sg => sg != owner))
+                        for (int i = 0; i <= 40; i++)
+                        {
+                            var v = other.Curve.Evaluate(i / 40f);
+                            if (v.Y > node.Y - 3f)
+                                continue;
+                            float half = GameWidth(owner.Prefab) / 2f;
+                            Vec3 a = node - across * half, b = node + across * half;
+                            float dx = b.X - a.X, dz = b.Z - a.Z;
+                            float t = System.Math.Max(0f, System.Math.Min(1f, ((v.X - a.X) * dx + (v.Z - a.Z) * dz) / (dx * dx + dz * dz)));
+                            float px = a.X + dx * t - v.X, pz = a.Z + dz * t - v.Z;
+                            float distance = (float)System.Math.Sqrt(px * px + pz * pz);
+                            Assert.False(distance < GameWidth(other.Prefab) / 2f + 1.5f,
+                                $"pillar of {owner.Name} at ({node.X:F1}, {node.Y:F1}, {node.Z:F1}) is {distance:F1} m from {other.Name} ({v.Y:F1} m)");
                         }
                 }
         }

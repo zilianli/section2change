@@ -32,11 +32,13 @@ namespace InterchangeMod.Generation
 
         /// <summary>弯道上坡度超限时收紧最大坡度重新求解的次数上限。</summary>
         private const int kCurveRetries = 3;
+        /// <summary>收紧后的坡度按这个档位向下取整：沿弯道移动鼠标时相邻几帧收紧到同一档，带缓存的模板才能复用求解结果。</summary>
+        private const float kGradeStep = 0.0025f;
 
         /// <summary>
         /// 弯道上的立交（docs/04）：按直线生成后整体弯曲。弯道内侧的匝道被压短、坡度变陡，弯曲后检查坡度：超限时把求解用的
-        /// 最大坡度按超出比例收紧（再留 3%），重新配匝道长度、生成、弯曲，最多 kCurveRetries 次——这就是弯道求解较慢的原因。
-        /// used 是最后实际求解用的参数；仍超限的路段交给调用方用原来的上限 ValidateGeometry 报出来。
+        /// 最大坡度按超出比例收紧（再留 3%，按 kGradeStep 向下取整），重新配匝道长度、生成、弯曲，最多 kCurveRetries 次——
+        /// 这就是弯道求解较慢的原因。used 是最后实际求解用的参数；仍超限的路段交给调用方用原来的上限 ValidateGeometry 报出来。
         /// </summary>
         public static List<RoadSegmentSpec> Bend(IInterchangeTemplate template, InterchangeParams p, CurveWarp warp, out InterchangeParams used)
         {
@@ -48,7 +50,11 @@ namespace InterchangeMod.Generation
                 if (worst <= p.MaxGrade + kGradeTolerance)
                     break;
                 var tighter = used.Clone();
-                tighter.MaxGrade = used.MaxGrade * p.MaxGrade / worst * 0.97f;
+                // 按档位向下取整（至少比上次低一档）：收紧值随弯道连续变化时也落到同一档
+                float grade = (float)System.Math.Floor(used.MaxGrade * p.MaxGrade / worst * 0.97f / kGradeStep) * kGradeStep;
+                tighter.MaxGrade = System.Math.Min(grade, used.MaxGrade - kGradeStep);
+                if (tighter.MaxGrade < kGradeStep)
+                    break;
                 tighter = FitRampLength(template, tighter);
                 if (template.ValidateParams(tighter).Count > 0)
                     break;
