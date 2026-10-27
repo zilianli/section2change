@@ -44,6 +44,8 @@ const zh = {
         "升级范围内的道路类型、曲率不要突变：不要在立交范围里中途换道路，弯道的弯曲程度要平缓变化",
         "道路间距保持稳定：两层之间的高差不超过 15 米；双幅道路两幅之间的间距（分隔带）保持不变",
         "不支持短距离内的 S 形曲线：立交范围内的道路最好是直线或同一方向的弯道",
+        "地形尽量平整：最好在平地上使用，放置前先把立交范围内的地形大致整平。道路本身有坡度时（建议在 8% 以内）可能匹配不上、两端接不回，地形起伏大时匝道离地高度会算错、无法放置",
+        "坡道上使用时，立交范围内的道路最好是平直、坡度均匀的一段：整座立交按一个统一的坡度放置，中途变坡（如下坡后接平地）时两端可能接不上原有道路",
       ],
     },
     {
@@ -317,6 +319,8 @@ const en: typeof zh = {
         "Keep road type and curvature steady within the upgrade area: don't switch roads halfway through, and let curves change gradually",
         "Keep spacing steady: no more than 15 m height difference between the two levels, and a constant median between the two carriageways of a divided road",
         "S-curves over a short distance are not supported: roads within the interchange should be straight or curve one way",
+        "Keep the terrain flat: works best on level ground, so flatten the area first. Sloped roads (keep under 8%) may not match or reconnect, and rough terrain can make ramp heights wrong so the interchange cannot be placed",
+        "On slopes, keep the roads within the interchange straight with a uniform grade: the whole interchange follows one grade, so a change of grade (e.g. downhill then flat) may leave the ends unconnected",
       ],
     },
     {

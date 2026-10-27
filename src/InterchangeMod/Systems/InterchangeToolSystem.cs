@@ -650,6 +650,11 @@ namespace InterchangeMod.Systems
                 && EntityManager.GetComponentData<Temp>(hitEntity).m_Original == Entity.Null)
                 return;
 
+            if (setting.DebugLogging && JunctionReader.LastElevationNote.Length > 0)
+            {
+                Mod.log.Info($"[debug] {JunctionReader.LastElevationNote}");
+                JunctionReader.LastElevationNote = "";
+            }
             // 立体交叉（如高架跨过街道，没有共用节点）：以两条道路在俯视图上的交点作为虚拟路口来匹配
             if (effective.MatchJunctions && TryMatchCrossing(hitEntity, hitPosition))
                 return;
@@ -983,6 +988,7 @@ namespace InterchangeMod.Systems
             {
                 TerrainHeightData terrain = m_TerrainSystem.GetHeightData();
                 EntityCommandBuffer commandBuffer = m_ToolOutputBarrier.CreateCommandBuffer();
+                InterchangePlacer.RoadSamples = retrofit ? SampleMatchedRoads() : null;
                 errors = InterchangePlacer.CreateDefinitions(commandBuffer, segments,
                     origin, yaw, ref terrain, m_PrefabResolver, m_SelectedRoad, m_RandomSeed);
                 if (errors.Count == 0 && retrofit)
@@ -1016,6 +1022,36 @@ namespace InterchangeMod.Systems
             ReportErrors(errors);
             return inputDeps;
         }
+
+        /// <summary>
+        /// 被改造的原有道路（立体交叉的两条路，或路口 / 道路的各段）上的采样点，按方向分成几条路（方向相差不到 kSameRoadAngle，
+        /// 正反算同一条）：参考平面的坡度按它们拟合，见 InterchangePlacer.RoadSamples。
+        /// </summary>
+        private List<(float3 Point, int Road)> SampleMatchedRoads()
+        {
+            var edges = m_Match.Crossing ? m_CrossingEdges : m_MatchRoadEdges;
+            var directions = new List<float2>();
+            var samples = new List<(float3 Point, int Road)>();
+            foreach (Entity edge in edges)
+            {
+                if (!EntityManager.Exists(edge) || !EntityManager.HasComponent<Curve>(edge))
+                    continue;
+                Colossal.Mathematics.Bezier4x3 curve = EntityManager.GetComponentData<Curve>(edge).m_Bezier;
+                float2 direction = math.normalizesafe(curve.d.xz - curve.a.xz);
+                int road = directions.FindIndex(d => math.abs(math.dot(d, direction)) > math.cos(math.radians(kSameRoadAngle)));
+                if (road < 0)
+                {
+                    road = directions.Count;
+                    directions.Add(direction);
+                }
+                for (int i = 0; i <= kRoadSamples; i++)
+                    samples.Add((Colossal.Mathematics.MathUtils.Position(curve, i / (float)kRoadSamples), road));
+            }
+            return samples;
+        }
+
+        private const float kSameRoadAngle = 30f;
+        private const int kRoadSamples = 8;
 
         /// <summary>立交路段查不到预制体宽度时按这个半宽（米）算拆除走廊。</summary>
         private const float kFallbackHalfWidth = 10f;

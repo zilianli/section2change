@@ -79,7 +79,7 @@ namespace InterchangeMod.Placement
 
             if (minElevation < placeable.m_ElevationRange.min - 0.01f || maxElevation > placeable.m_ElevationRange.max + 0.01f)
             {
-                error = $"'{prefab.name}' allows elevation {placeable.m_ElevationRange.min:F0}..{placeable.m_ElevationRange.max:F0} m, needs {minElevation:F0}..{maxElevation:F0} m";
+                error = $"{prefab.name} 离地 {minElevation:F0}–{maxElevation:F0} 米，超出这种道路允许的 {placeable.m_ElevationRange.min:F0}–{placeable.m_ElevationRange.max:F0} 米";
                 return false;
             }
             return true;

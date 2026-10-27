@@ -136,7 +136,7 @@ namespace InterchangeMod.Placement
                         Width = info.Width,
                         LanesPerDirection = info.LanesPerDirection,
                         IsHighway = info.IsHighway,
-                        Elevation = nodePosition.y - TerrainUtils.SampleHeight(ref terrain, nodePosition),
+                        Elevation = ElevationOf(entityManager, node, 0f, nodePosition, ref terrain),
                         // 弯道适配：沿这条路往外追踪中心线
                         Trace = Trace(entityManager, atStart ? curve.m_Bezier : Reverse(curve.m_Bezier), other, edgeEntity),
                     });
@@ -156,6 +156,34 @@ namespace InterchangeMod.Placement
         /// </summary>
         /// <summary>最近一次 ReadCrossing 没认出立体交叉的原因（调试日志用）。</summary>
         public static string LastCrossingReason = "";
+
+        /// <summary>调试：最近一次游戏记录的离地高度和“路面高度 − 地形采样”差得多的情况（没有时为空）。</summary>
+        public static string LastElevationNote = "";
+
+        /// <summary>
+        /// 节点或路段（在曲线参数 t 处）的离地高度：用游戏自己记的 Elevation（不在地面的节点、路段才有，游戏判断高架、路堤、隧道和能否放置
+        /// 都用它；路段按两端节点插值，两端都没有时用路段自己的）；都没有就是地面道路，按 0。
+        /// 原来用“路面高度 − 地形采样”：地形改过（整平、挖填）后采样和道路对不上，游戏内平地上的路读出 17.7 / 44.9 米，
+        /// 三层立交算到 70 米高、无法放置。两者差得多时记进 LastElevationNote（调试日志）。
+        /// </summary>
+        private static float ElevationOf(EntityManager entityManager, Entity entity, float t, float3 position, ref TerrainHeightData terrain)
+        {
+            float GameElevation(Entity e) => entityManager.HasComponent<Game.Net.Elevation>(e)
+                ? math.csum(entityManager.GetComponentData<Game.Net.Elevation>(e).m_Elevation) / 2f : 0f;
+            float elevation;
+            if (entityManager.HasComponent<Edge>(entity))
+            {
+                Edge edge = entityManager.GetComponentData<Edge>(entity);
+                float a = GameElevation(edge.m_Start), b = GameElevation(edge.m_End);
+                elevation = a == 0f && b == 0f ? GameElevation(entity) : math.lerp(a, b, t);
+            }
+            else
+                elevation = GameElevation(entity);
+            float sampled = position.y - TerrainUtils.SampleHeight(ref terrain, position);
+            if (math.abs(sampled - elevation) > 1f)
+                LastElevationNote = $"elevation at ({position.x:F0}, {position.z:F0}): game {elevation:F1} m, road y − terrain {sampled:F1} m";
+            return elevation;
+        }
 
         /// <summary>
         /// ReadCrossing 找到的就是当前匹配的那一处（isCurrent 判定）时返回它：没有重新收集、追踪路段（鼠标停在道路上时每帧都会读，
@@ -240,8 +268,7 @@ namespace InterchangeMod.Placement
             {
                 Bezier4x3 c = entityManager.GetComponentData<Curve>(edge).m_Bezier;
                 MathUtils.Distance(c.xz, center.xz, out float t);
-                float3 p = MathUtils.Position(c, t);
-                return p.y - TerrainUtils.SampleHeight(ref heights, p);
+                return ElevationOf(entityManager, edge, t, MathUtils.Position(c, t), ref heights);
             }
             float elevationA = ElevationNear(roadA, ref terrain), elevationB = ElevationNear(roadB, ref terrain);
             s_Rejected.Clear();
@@ -263,7 +290,7 @@ namespace InterchangeMod.Placement
                 if (MathUtils.Distance(curve.xz, center.xz, out float t) > kPartnerSearch)
                     continue;
                 float3 point = MathUtils.Position(curve, t);
-                float elevation = point.y - TerrainUtils.SampleHeight(ref terrain, point);
+                float elevation = ElevationOf(entityManager, candidate, t, point, ref terrain);
                 if (math.abs(elevation - (groupA ? elevationA : elevationB)) > 3f)
                 {
                     s_Rejected.Add($"{(groupA ? "A" : "B")} {info.Name}: elevation {elevation:F1} vs {(groupA ? elevationA : elevationB):F1}");

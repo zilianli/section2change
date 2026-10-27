@@ -235,11 +235,11 @@ namespace InterchangeMod.Placement
                             $"end {(endTarget >= 0 ? "leg end" : end >= 1f ? "original node" : "cut")}{(merged ? ", merged with the next edge" : "")}");
                     if (merged)
                         continue;
-                    float startElevation = ElevationAt(part.a, ref terrain), endElevation = ElevationAt(part.d, ref terrain);
+                    float startElevation = InterchangePlacer.TerrainElevation(part.a, ref terrain), endElevation = InterchangePlacer.TerrainElevation(part.d, ref terrain);
                     if (startTarget >= 0)
-                        Snap(ends[startTarget], ref part.a, ref part.b, ref startElevation);
+                        Snap(ends[startTarget], ref part.a, ref part.b, ref startElevation, ref terrain);
                     if (endTarget >= 0)
-                        Snap(ends[endTarget], ref part.d, ref part.c, ref endElevation);
+                        Snap(ends[endTarget], ref part.d, ref part.c, ref endElevation, ref terrain);
                     NetCourseBuilder.CreateSegment(commandBuffer, prefab, part, startElevation, endElevation, randomSeed++,
                         start <= 0f ? edge.m_Start : Entity.Null,
                         end >= 1f ? edge.m_End : Entity.Null);
@@ -396,11 +396,11 @@ namespace InterchangeMod.Placement
         }
 
         /// <summary>把切断端（point，相邻控制点 handle）移到臂端上；手柄一起平移，保持方向。</summary>
-        private static void Snap((float3 World, float Elevation) end, ref float3 point, ref float3 handle, ref float elevation)
+        private static void Snap((float3 World, float Elevation) end, ref float3 point, ref float3 handle, ref float elevation, ref TerrainHeightData terrain)
         {
             handle += end.World - point;
             point = end.World;
-            elevation = end.Elevation;
+            elevation = InterchangePlacer.TerrainElevation(end.World, ref terrain);
         }
 
         /// <summary>写调试日志（由工具按设置里的调试开关设置）。</summary>
@@ -422,11 +422,11 @@ namespace InterchangeMod.Placement
             Bezier4x3 curve = entityManager.GetComponentData<Curve>(next).m_Bezier;
             CreateDelete(commandBuffer, next, nextEdge, curve);
             bool nodeAtStart = nextEdge.m_Start == node;
-            float startElevation = ElevationAt(curve.a, ref terrain), endElevation = ElevationAt(curve.d, ref terrain);
+            float startElevation = InterchangePlacer.TerrainElevation(curve.a, ref terrain), endElevation = InterchangePlacer.TerrainElevation(curve.d, ref terrain);
             if (nodeAtStart)
-                Snap(legEnd, ref curve.a, ref curve.b, ref startElevation);
+                Snap(legEnd, ref curve.a, ref curve.b, ref startElevation, ref terrain);
             else
-                Snap(legEnd, ref curve.d, ref curve.c, ref endElevation);
+                Snap(legEnd, ref curve.d, ref curve.c, ref endElevation, ref terrain);
             NetCourseBuilder.CreateSegment(commandBuffer, prefab, curve, startElevation, endElevation, randomSeed,
                 nodeAtStart ? Entity.Null : nextEdge.m_Start, nodeAtStart ? nextEdge.m_End : Entity.Null);
             return true;
@@ -500,10 +500,11 @@ namespace InterchangeMod.Placement
         private const float kElevatedCutGap = 20f;
 
         private static float ElevatedExtra(float3 position, ref TerrainHeightData terrain) =>
-            ElevationAt(position, ref terrain) >= InterchangeMod.Generation.HeightRange.BridgeThreshold ? kElevatedCutGap : 0f;
+            InterchangePlacer.TerrainElevation(position, ref terrain) >= InterchangeMod.Generation.HeightRange.BridgeThreshold ? kElevatedCutGap : 0f;
 
+        /// <summary>原有道路上一点在立交局部坐标里的高度（相对地面参考平面），和新路的层高、臂端高度比较用。</summary>
         private static float ElevationAt(float3 position, ref TerrainHeightData terrain) =>
-            position.y - TerrainUtils.SampleHeight(ref terrain, position);
+            InterchangePlacer.LocalHeight(position, ref terrain);
 
         /// <summary>世界坐标 → 立交局部坐标（InterchangePlacer.ToWorld 的逆变换，高度不用）。</summary>
         private static Bezier3 ToLocal(Bezier4x3 world, float3 origin, float yaw) =>
