@@ -2,7 +2,7 @@
 	<!--Id must be set in order to update existed mod. it is not required for publishing mod for the first time-->
 	<ModId Value="165223" />
 	<!--Name of the mod to display to players-->
-	<DisplayName Value="section2change (Beta)" />
+	<DisplayName Value="section2change 平改立 (Beta)" />
 	<!--Short description of the mod-->
 	<ShortDescription Value="Turn a junction into a complete interchange in one placement (平改立)" />
 	<!--Long description of the mod. Single line or multi line. Supports minimal markdown subset-->
@@ -32,7 +32,34 @@
 - Trumpet, directional types, stack, turbine and wye support right-hand traffic only
 - Beta: report problems on GitHub with a screenshot and the mod log (turn on debug logging in the settings first)
 
-**平改立**：一次放下一整座立交。选类型，对准已有路口、立体交叉或道路（也可以空地），确认预览后放置；自动匹配原有道路、层高和交角，拆掉原路口并接回各臂，弯道和坡道上整体顺着道路放置。放置后不能撤销，请先存档；最好在平地、平直且坡度均匀的道路上使用。问题请到 GitHub 附截图和日志反馈。
+---
+
+**平改立（中文说明）**
+
+一次放下一整座立交：选立交类型，对准已有路口、立体交叉或道路（也可以在空地上），确认预览后放置。
+
+**13 种立交**
+- 四向：菱形、单点、中式快速路节点、苜蓿叶、部分苜蓿叶、环岛、定向、涡轮
+- 三向：快速路 T 型、喇叭形、半定向 T、定向 T
+- Y 型分向（三条路约 120° 汇合）
+
+**功能**
+- 平改立：对准已有路口，自动匹配道路、层高和交角，拆掉原路口并接回各臂；桥下净空够的道路保留
+- 弯道（半径 150 米以上）上整体顺着道路弯曲，坡道上按原有道路的坡度整体放置
+- 车道平衡（边缘对齐的减车道）、立柱避开下层道路、放置前检查坡度和净空
+- 自动模式一指即放，手动模式可调所有参数；中英文界面
+
+**使用方法**
+1. 点左上角按钮或按 Shift + I 打开工具
+2. 选立交类型，鼠标对准路口、道路或空地
+3. 左键固定预览，查看面板里的结果和报错，点“确认放置”；右键退出
+
+**注意事项**
+- 放置后不能撤销（游戏不支持撤销），必要时先存档
+- 最好在平地、平直且坡度均匀的道路上使用；地形起伏大时请先整平
+- 立交范围内的道路类型、曲率不要突变，不支持短距离内的 S 形弯
+- 喇叭形、定向类、涡轮和 Y 型目前只支持右侧通行
+- 测试版：遇到问题请到 GitHub 提交 issue，附截图和 mod 日志（先在设置里打开调试日志）
 	</LongDescription>
 	<!--Thumbnail-->
 	<Thumbnail Value="Properties/Thumbnail.png" />
