@@ -37,13 +37,15 @@
 	<!--Thumbnail-->
 	<Thumbnail Value="Properties/Thumbnail.png" />
 	<!--Screenshot, can be set multiple times-->
-	<Screenshot Value="Properties/Screenshots/overview.png" />
-	<Screenshot Value="Properties/Screenshots/diamond.png" />
-	<Screenshot Value="Properties/Screenshots/cloverleaf.png" />
-	<Screenshot Value="Properties/Screenshots/stack.png" />
-	<Screenshot Value="Properties/Screenshots/turbine.png" />
-	<Screenshot Value="Properties/Screenshots/retrofit.png" />
-	<Screenshot Value="Properties/Screenshots/panel.png" />
+	<Screenshot Value="Properties/Screenshots/01-overview.jpg" />
+	<Screenshot Value="Properties/Screenshots/02-before-curve.jpg" />
+	<Screenshot Value="Properties/Screenshots/03-retrofit-before.jpg" />
+	<Screenshot Value="Properties/Screenshots/04-retrofit-preview.jpg" />
+	<Screenshot Value="Properties/Screenshots/05-retrofit-after.jpg" />
+	<Screenshot Value="Properties/Screenshots/06-diamond.jpg" />
+	<Screenshot Value="Properties/Screenshots/07-cloverleaf.jpg" />
+	<Screenshot Value="Properties/Screenshots/08-stack.jpg" />
+	<Screenshot Value="Properties/Screenshots/09-panel.jpg" />
 	<!--Tag, can be set multiple times-->
 	<Tag Value="Code Mod" />
 	<!--Link to the forum post where the mod can be discussed-->

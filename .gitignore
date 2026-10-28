@@ -8,3 +8,7 @@ src/InterchangeMod.UI/build/
 .idea/
 *.log
 src/InterchangeMod/Library/
+
+# 原始截图（太大，不进仓库）
+src/InterchangeMod/Properties/Screenshots/raw/
+/section2change-cover-*.png

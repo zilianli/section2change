@@ -6,9 +6,15 @@ A Cities: Skylines II mod that places a **complete interchange in one placement*
 
 Current version: **1.0.7-beta** · License: [MIT](LICENSE)
 
-<!-- 截图：docs/images/ 下放好后取消注释
-![overview](docs/images/overview.png)
--->
+![Turbine on a curved crossing 弯道上的涡轮](docs/images/01-overview.jpg)
+
+| Before 原路口 | Preview 预览 | After 放置后 |
+|---|---|---|
+| ![](docs/images/03-retrofit-before.jpg) | ![](docs/images/04-retrofit-preview.jpg) | ![](docs/images/05-retrofit-after.jpg) |
+
+| Diamond 菱形 | Cloverleaf 苜蓿叶 | Stack 定向 |
+|---|---|---|
+| ![](docs/images/06-diamond.jpg) | ![](docs/images/07-cloverleaf.jpg) | ![](docs/images/08-stack.jpg) |
 
 ## Features · 功能
 
