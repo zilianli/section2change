@@ -9,6 +9,8 @@ using Game.Prefabs;
 using Game.Simulation;
 using Game.Tools;
 using InterchangeMod.Generation.Geometry;
+using InterchangeMod.Generation;
+using InterchangeMod.Generation.Roads;
 using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
@@ -27,9 +29,6 @@ namespace InterchangeMod.Placement
     /// </summary>
     public static class RoadRemover
     {
-        /// <summary>和要清理的各层高度（levels）都相差超过这个值的道路（上方的高架、下方的隧道）不拆。</summary>
-        public const float kElevationTolerance = 4.5f;
-
         /// <summary>保留部分短于这个长度就不建了（游戏也建不出这么短的路段）。</summary>
         private const float kMinRemainderLength = 2f;
 
@@ -50,12 +49,9 @@ namespace InterchangeMod.Placement
         private const int kMaxKeptEdges = 32;
         /// <summary>接不上臂端的切断端再往外退的距离（米），另加这条路的半宽：宽路斜着穿出范围时，端头两角不伸进立交。</summary>
         private const float kUnconnectedGap = 10f;
-        /// <summary>被改造的道路沿路往外最多认多少段（防止沿很长的路一直走下去）。</summary>
-        private const int kMaxConvertedEdges = 64;
 
         /// <summary>
-        /// 找出要拆的原有道路（不属于建筑等其他对象的普通道路路段，离某一层高度不远：levels 普通改造是立交各层，立体交叉还有
-        /// 两条原有道路原来的高度）：
+        /// 找出要拆的原有道路（不属于建筑等其他对象的普通道路路段）：
         ///   被改造的道路（convertedSeeds 匹配到的路段，以及沿路经过普通路中节点往外、仍和凸包相交的各段）：和凸包 hull 相交就拆，
         ///   立体交叉匹配到的路段（alwaysRemove，如被替换的高架）不论高度都拆；
         ///   其他道路：被新路压到时才拆——中心线离新路不到（新路半宽 + 余量 + 自己的半宽）且高度上没有净空，或落在新路的立柱上
@@ -63,7 +59,7 @@ namespace InterchangeMod.Placement
         /// converted 收到被改造道路的路段（CreateDefinitions 按它选切断的范围）。范围都是立交局部坐标（origin 为原点、yaw 旋转前）。
         /// </summary>
         public static List<Entity> FindEdges(EntityManager entityManager, NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree,
-            Footprint hull, Footprint corridor, float3 origin, float yaw, IReadOnlyList<float> levels, ref TerrainHeightData terrain,
+            Footprint hull, Footprint corridor, float3 origin, float yaw, ref TerrainHeightData terrain,
             IEnumerable<Entity> convertedSeeds, ICollection<Entity> alwaysRemove, out HashSet<Entity> converted)
         {
             converted = Converted(entityManager, convertedSeeds, hull, origin, yaw);
@@ -82,8 +78,7 @@ namespace InterchangeMod.Placement
                         continue;
                     Bezier4x3 world = entityManager.GetComponentData<Curve>(entity).m_Bezier;
                     Bezier3 local = ToLocal(world, origin, yaw);
-                    bool overlaps = alwaysRemove != null && alwaysRemove.Contains(entity) ? hull.Intersects(local)
-                        : converted.Contains(entity) ? OverlapsAtLevels(local, world, hull, levels, ref terrain)
+                    bool overlaps = (alwaysRemove != null && alwaysRemove.Contains(entity)) || converted.Contains(entity) ? hull.Intersects(local)
                         : CollidesWithNewRoads(local, world, corridor, HalfWidth(entityManager, entity), ref terrain);
                     if (overlaps)
                         result.Add(entity);
@@ -93,6 +88,8 @@ namespace InterchangeMod.Placement
             {
                 candidates.Dispose();
             }
+            if (Debug)
+                Mod.log.Info($"[road-trace] complete: matchedChain={converted.Count}, removed={result.Count}; footprint-bounded, no segment-count truncation");
             return result;
         }
 
@@ -101,26 +98,19 @@ namespace InterchangeMod.Placement
         /// </summary>
         private static HashSet<Entity> Converted(EntityManager entityManager, IEnumerable<Entity> seeds, Footprint hull, float3 origin, float yaw)
         {
-            var result = new HashSet<Entity>();
-            var queue = new Queue<Entity>();
-            foreach (Entity seed in seeds ?? Enumerable.Empty<Entity>())
-                if (entityManager.Exists(seed) && IsRemovableRoad(entityManager, seed) && result.Add(seed))
-                    queue.Enqueue(seed);
-            while (queue.Count > 0 && result.Count < kMaxConvertedEdges)
+            IEnumerable<Entity> Neighbors(Entity current)
             {
-                Entity current = queue.Dequeue();
                 Edge edge = entityManager.GetComponentData<Edge>(current);
                 foreach (Entity node in new[] { edge.m_Start, edge.m_End })
                 {
                     Entity next = NextAlongRoad(entityManager, node, current);
-                    if (next == Entity.Null || result.Contains(next)
-                        || !hull.Intersects(ToLocal(entityManager.GetComponentData<Curve>(next).m_Bezier, origin, yaw)))
-                        continue;
-                    result.Add(next);
-                    queue.Enqueue(next);
+                    if (next != Entity.Null) yield return next;
                 }
             }
-            return result;
+            return RoadChainTraversal.Collect(
+                (seeds ?? Enumerable.Empty<Entity>()).Where(seed => entityManager.Exists(seed) && IsRemovableRoad(entityManager, seed)),
+                Neighbors,
+                next => hull.Intersects(ToLocal(entityManager.GetComponentData<Curve>(next).m_Bezier, origin, yaw)));
         }
 
         /// <summary>原有道路的半宽（米，按它的预制体）。</summary>
@@ -138,13 +128,23 @@ namespace InterchangeMod.Placement
         /// 返回接上的臂端数。
         /// </summary>
         public static int CreateDefinitions(EntityCommandBuffer commandBuffer, EntityManager entityManager, List<Entity> edges,
-            Footprint hull, Footprint corridor, HashSet<Entity> converted, IReadOnlyList<Vec3> legEnds, float3 origin, float yaw,
-            ref TerrainHeightData terrain, int randomSeed)
+            Footprint hull, Footprint corridor, HashSet<Entity> converted, IReadOnlyList<RoadSegmentSpec> segments,
+            PrefabSystem prefabSystem, IReadOnlyDictionary<string, RoadInfo> roads, NetPrefab fallback, float3 origin, float yaw,
+            ref TerrainHeightData terrain, int randomSeed, List<string> errors)
         {
             // 和立交路段用同一个换算，得到完全相同的世界坐标，游戏才会把两个节点合并
-            var ends = new List<(float3 World, float Elevation)>();
-            foreach (Vec3 end in legEnds)
-                ends.Add((InterchangePlacer.ToWorld(end, origin, yaw, ref terrain), end.Y));
+            var ends = new List<ConnectionEnd>();
+            foreach (Vec3 end in InterchangeLayout.LegEnds(segments))
+            {
+                var owner = segments.First(s => s.StartNode == end || s.EndNode == end);
+                if (!roads.TryGetValue(owner.Prefab ?? fallback?.name ?? "", out RoadInfo info)) continue;
+                bool atEnd = owner.EndNode == end;
+                ends.Add(new ConnectionEnd {
+                    World = InterchangePlacer.ToWorld(end, origin, yaw, ref terrain), Elevation = end.Y,
+                    Outward = (owner.Curve.Derivative(atEnd ? 1f : 0f) * (atEnd ? 1f : -1f)).RotateY(yaw),
+                    Flow = info.IsOneWay ? (atEnd == (info.ForwardLanes > 0) ? 1 : -1) : 0,
+                });
+            }
             var used = new bool[ends.Count];
             int connected = 0;
 
@@ -153,7 +153,9 @@ namespace InterchangeMod.Placement
             var attached = new Dictionary<Entity, List<(float T, bool KeepAfter, int End)>>();
             for (int i = 0; i < ends.Count; i++)
             {
-                Entity onEdge = Attach(entityManager, edges, ends[i], origin, ref terrain, out float t, out bool keepAfter);
+                Entity onEdge = Attach(entityManager, edges, converted, prefabSystem, roads, ends[i], origin, ref terrain,
+                    out float t, out bool keepAfter, out bool ambiguous);
+                if (ambiguous) errors.Add($"臂端 ({ends[i].World.x:F0}, {ends[i].World.z:F0}) 有多个兼容的原路候选，无法安全接回，请调整位置或道路布局");
                 if (onEdge == Entity.Null)
                     continue;
                 if (!attached.TryGetValue(onEdge, out var list))
@@ -186,19 +188,20 @@ namespace InterchangeMod.Placement
                     foreach (var a in mine)
                         parts.Add(a.KeepAfter ? (a.T, 1f, a.End, -1) : (0f, a.T, -1, a.End));
                 Bezier3 local = ToLocal(curve, origin, yaw);
-                TerrainHeightData heights = terrain;
                 var outside = converted.Contains(entity) ? hull.OutsideIntervals(local)
-                    : Footprint.OutsideIntervals(t => corridor.Collides(local.Evaluate(t), ElevationAt(MathUtils.Position(curve, t), ref heights), width / 2f));
+                    : corridor.OutsideCollisionIntervals(WithElevation(local, curve, ref terrain), width / 2f);
                 foreach (var (outsideStart, outsideEnd) in outside)
                 {
                     if (mine != null && parts.Any(q => q.Start < outsideEnd && outsideStart < q.End))
                         continue;
                     float start = outsideStart, end = outsideEnd;
                     // 切断端：附近有同一高度的臂端就接上；接不上（比如在高架的臂端下面）就再退 kUnconnectedGap，避开臂端节点和立柱
-                    int startTarget = start > 0f ? FindEnd(ends, used, curve, edgeLength, ref start, keepAfter: true, ref terrain) : -1;
+                    int startTarget = start > 0f && converted.Contains(entity) ? FindEnd(ends, used, curve, edgeLength,
+                        OldFlow(entityManager, prefabSystem, roads, entity), ref start, keepAfter: true, ref terrain, errors) : -1;
                     if (startTarget >= 0)
                         used[startTarget] = true;
-                    int endTarget = end < 1f ? FindEnd(ends, used, curve, edgeLength, ref end, keepAfter: false, ref terrain) : -1;
+                    int endTarget = end < 1f && converted.Contains(entity) ? FindEnd(ends, used, curve, edgeLength,
+                        OldFlow(entityManager, prefabSystem, roads, entity), ref end, keepAfter: false, ref terrain, errors) : -1;
                     if (endTarget >= 0)
                         used[endTarget] = true;
                     // 高架的切断端还要多退一些：末端节点下有立柱，不能落在立交新建的道路上
@@ -220,7 +223,8 @@ namespace InterchangeMod.Placement
                     {
                         Entity node = startTarget >= 0 ? edge.m_End : edge.m_Start;
                         var legEnd = startTarget >= 0 ? ends[startTarget] : ends[endTarget];
-                        merged = TryMergeThroughNode(commandBuffer, entityManager, node, entity, prefab, edges, legEnd, ref terrain, randomSeed++);
+                        merged = TryMergeThroughNode(commandBuffer, entityManager, node, entity, prefab, edges, legEnd,
+                            prefabSystem, roads, ref terrain, randomSeed++);
                     }
                     if (!merged && length < kMinRemainderLength)
                     {
@@ -253,17 +257,22 @@ namespace InterchangeMod.Placement
         /// （keepAfter：t 之后）。那一侧短到不成一段（臂端就在节点上）的段排在后面，节点另一边那段也在 edges 里时用那段。
         /// 没有时返回 Entity.Null。
         /// </summary>
-        private static Entity Attach(EntityManager entityManager, List<Entity> edges, (float3 World, float Elevation) end, float3 origin,
-            ref TerrainHeightData terrain, out float t, out bool keepAfter)
+        private static Entity Attach(EntityManager entityManager, List<Entity> edges, HashSet<Entity> converted,
+            PrefabSystem prefabSystem, IReadOnlyDictionary<string, RoadInfo> roads, ConnectionEnd end, float3 origin,
+            ref TerrainHeightData terrain, out float t, out bool keepAfter, out bool ambiguous)
         {
             Entity best = Entity.Null;
             float bestScore = float.MaxValue;
+            float secondScore = float.MaxValue;
             t = 0f;
             keepAfter = false;
             // 调试：离臂端最近的原有道路（不论能不能接）
             float nearest = float.MaxValue, nearestRise = 0f;
+            int identityCandidates = 0, nearCandidates = 0, heightRejected = 0, directionRejected = 0;
             foreach (Entity entity in edges)
             {
+                if (!converted.Contains(entity)) continue;
+                identityCandidates++;
                 Bezier4x3 curve = entityManager.GetComponentData<Curve>(entity).m_Bezier;
                 float projected = NearestT(curve, end.World);
                 float3 onRoad = MathUtils.Position(curve, projected);
@@ -274,24 +283,28 @@ namespace InterchangeMod.Placement
                     nearest = lateral;
                     nearestRise = rise;
                 }
-                if (lateral > kConnectLateral || math.abs(rise) > kConnectElevation)
-                    continue;
+                if (lateral > kConnectLateral) continue;
+                nearCandidates++;
+                if (math.abs(rise) > kConnectElevation) { heightRejected++; continue; }
                 float length = MathUtils.Length(curve);
                 float step = math.min(1f, kOutwardProbe / math.max(1f, length));
                 bool after = math.distancesq(MathUtils.Position(curve, math.min(1f, projected + step)).xz, origin.xz)
                     > math.distancesq(MathUtils.Position(curve, math.max(0f, projected - step)).xz, origin.xz);
+                if (!Compatible(end, curve, projected, after, OldFlow(entityManager, prefabSystem, roads, entity))) { directionRejected++; continue; }
                 float score = lateral + ((after ? 1f - projected : projected) * length < kMinRemainderLength ? kConnectLateral : 0f);
-                if (score >= bestScore)
-                    continue;
+                if (score >= bestScore) { secondScore = math.min(secondScore, score); continue; }
+                secondScore = bestScore;
                 best = entity;
                 bestScore = score;
                 t = projected;
                 keepAfter = after;
             }
+            ambiguous = best != Entity.Null && secondScore - bestScore <= 0.25f;
             if (Debug)
                 Mod.log.Info($"[debug] leg end ({end.World.x:F1}, {end.World.z:F1}) elevation {end.Elevation:F1}: nearest old road {nearest:F1} m sideways, " +
-                    $"leg end {nearestRise:F1} m above it{(best == Entity.Null ? ", not connected" : "")}");
-            return best;
+                    $"leg end {nearestRise:F1} m above it{(best == Entity.Null || ambiguous ? ", not connected" : "")}; " +
+                    $"matchedCandidates={identityCandidates}, within6m={nearCandidates}, heightRejected={heightRejected}, directionRejected={directionRejected}, ambiguous={ambiguous}");
+            return ambiguous ? Entity.Null : best;
         }
 
         /// <summary>
@@ -343,26 +356,35 @@ namespace InterchangeMod.Placement
         /// 放宽到 kConnectInside），离道路中心线不超过 kConnectLateral。keepAfter：保留部分在 t 之后（切断点是保留部分的起点）。
         /// 找到时把 t 改成投影位置（在那里重新切，保留部分不会折回），返回臂端序号；没有时返回 -1。
         /// </summary>
-        private static int FindEnd(List<(float3 World, float Elevation)> ends, bool[] used, Bezier4x3 curve, float edgeLength,
-            ref float t, bool keepAfter, ref TerrainHeightData terrain)
+        private static int FindEnd(List<ConnectionEnd> ends, bool[] used, Bezier4x3 curve, float edgeLength, int? oldFlow,
+            ref float t, bool keepAfter, ref TerrainHeightData terrain, List<string> errors)
         {
             int best = -1;
             float bestLateral = kConnectLateral, bestT = t;
+            float secondLateral = float.MaxValue;
             for (int i = 0; i < ends.Count; i++)
             {
                 if (used[i])
                     continue;
                 float projected = NearestT(curve, ends[i].World);
+                if (!Compatible(ends[i], curve, projected, keepAfter, oldFlow)) continue;
                 float3 onRoad = MathUtils.Position(curve, projected);
                 float lateral = math.distance(onRoad.xz, ends[i].World.xz);
                 // 沿路离切断点的距离：往切掉的那部分里为正
                 float inward = (keepAfter ? t - projected : projected - t) * edgeLength;
-                if (lateral > bestLateral || inward > kConnectInside || inward < -kConnectDistance
+                if (lateral > kConnectLateral || inward > kConnectInside || inward < -kConnectDistance
                     || math.abs(ends[i].Elevation - ElevationAt(onRoad, ref terrain)) > kConnectElevation)
                     continue;
+                if (lateral >= bestLateral && best >= 0) { secondLateral = math.min(secondLateral, lateral); continue; }
+                if (best >= 0) secondLateral = bestLateral;
                 best = i;
                 bestLateral = lateral;
                 bestT = projected;
+            }
+            if (best >= 0 && secondLateral - bestLateral <= 0.25f)
+            {
+                errors.Add("原路切断点附近有多个兼容臂端，无法安全接回，请调整位置或道路布局");
+                return -1;
             }
             t = bestT;
             return best;
@@ -396,7 +418,7 @@ namespace InterchangeMod.Placement
         }
 
         /// <summary>把切断端（point，相邻控制点 handle）移到臂端上；手柄一起平移，保持方向。</summary>
-        private static void Snap((float3 World, float Elevation) end, ref float3 point, ref float3 handle, ref float elevation, ref TerrainHeightData terrain)
+        private static void Snap(ConnectionEnd end, ref float3 point, ref float3 handle, ref float elevation, ref TerrainHeightData terrain)
         {
             handle += end.World - point;
             point = end.World;
@@ -411,7 +433,8 @@ namespace InterchangeMod.Placement
         /// 从臂端 legEnd 直接重建到下一段的另一端（下一段的方向、形状不变，只把 node 那一端移到臂端）。成功返回 true。
         /// </summary>
         private static bool TryMergeThroughNode(EntityCommandBuffer commandBuffer, EntityManager entityManager, Entity node, Entity self,
-            Entity prefab, List<Entity> removing, (float3 World, float Elevation) legEnd, ref TerrainHeightData terrain, int randomSeed)
+            Entity prefab, List<Entity> removing, ConnectionEnd legEnd, PrefabSystem prefabs,
+            IReadOnlyDictionary<string, RoadInfo> roads, ref TerrainHeightData terrain, int randomSeed)
         {
             // 节点是路口（接着不止一段）时不能合并
             Entity next = NextAlongRoad(entityManager, node, self);
@@ -420,8 +443,9 @@ namespace InterchangeMod.Placement
 
             Edge nextEdge = entityManager.GetComponentData<Edge>(next);
             Bezier4x3 curve = entityManager.GetComponentData<Curve>(next).m_Bezier;
-            CreateDelete(commandBuffer, next, nextEdge, curve);
             bool nodeAtStart = nextEdge.m_Start == node;
+            if (!Compatible(legEnd, curve, nodeAtStart ? 0f : 1f, nodeAtStart, OldFlow(entityManager, prefabs, roads, next))) return false;
+            CreateDelete(commandBuffer, next, nextEdge, curve);
             float startElevation = InterchangePlacer.TerrainElevation(curve.a, ref terrain), endElevation = InterchangePlacer.TerrainElevation(curve.d, ref terrain);
             if (nodeAtStart)
                 Snap(legEnd, ref curve.a, ref curve.b, ref startElevation, ref terrain);
@@ -469,31 +493,39 @@ namespace InterchangeMod.Placement
         /// <summary>其他原有道路有没有一点被新路压到（见 Footprint.Collides）；halfWidth 是它自己的半宽。</summary>
         private static bool CollidesWithNewRoads(Bezier3 local, Bezier4x3 world, Footprint corridor, float halfWidth, ref TerrainHeightData terrain)
         {
-            const int samples = 32;
-            for (int i = 0; i <= samples; i++)
-            {
-                float t = i / (float)samples;
-                if (corridor.Collides(local.Evaluate(t), ElevationAt(MathUtils.Position(world, t), ref terrain), halfWidth))
-                    return true;
-            }
-            return false;
+            var outside = corridor.OutsideCollisionIntervals(WithElevation(local, world, ref terrain), halfWidth);
+            return !(outside.Count == 1 && outside[0] == (0f, 1f));
         }
 
-        /// <summary>道路在范围内的部分里，有没有一点离某一层高度不远。</summary>
-        private static bool OverlapsAtLevels(Bezier3 local, Bezier4x3 world, Footprint footprint, IReadOnlyList<float> levels,
-            ref TerrainHeightData terrain)
+        // The fitted reference plane is linear, so transforming all four heights preserves
+        // the exact local Bezier (never interpolate terrain samples as road elevation).
+        private static Bezier3 WithElevation(Bezier3 local, Bezier4x3 world, ref TerrainHeightData terrain) => new Bezier3(
+            new Vec3(local.P0.X, ElevationAt(world.a, ref terrain), local.P0.Z),
+            new Vec3(local.P1.X, ElevationAt(world.b, ref terrain), local.P1.Z),
+            new Vec3(local.P2.X, ElevationAt(world.c, ref terrain), local.P2.Z),
+            new Vec3(local.P3.X, ElevationAt(world.d, ref terrain), local.P3.Z));
+
+        private struct ConnectionEnd
         {
-            const int samples = 32;
-            for (int i = 0; i <= samples; i++)
-            {
-                float t = i / (float)samples;
-                if (!footprint.Contains(local.Evaluate(t)))
-                    continue;
-                float elevation = ElevationAt(MathUtils.Position(world, t), ref terrain);
-                if (levels.Any(level => math.abs(elevation - level) <= kElevationTolerance))
-                    return true;
-            }
-            return false;
+            public float3 World;
+            public float Elevation;
+            public Vec3 Outward;
+            public int Flow;
+        }
+
+        private static int? OldFlow(EntityManager em, PrefabSystem prefabs, IReadOnlyDictionary<string, RoadInfo> roads, Entity edge)
+        {
+            Entity entity = em.GetComponentData<PrefabRef>(edge).m_Prefab;
+            if (!prefabs.TryGetPrefab(entity, out PrefabBase prefab) || !roads.TryGetValue(prefab.name, out RoadInfo info)) return null;
+            return info.IsOneWay ? (info.ForwardLanes > 0 ? 1 : -1) : 0;
+        }
+
+        private static bool Compatible(ConnectionEnd end, Bezier4x3 curve, float t, bool after, int? flow)
+        {
+            if (!flow.HasValue) return false;
+            float3 tangent = MathUtils.Tangent(curve, t) * (after ? 1f : -1f);
+            return ConnectionPolicy.CanConnect(true, end.Outward, end.Flow,
+                new Vec3(tangent.x, tangent.y, tangent.z), flow.Value * (after ? 1 : -1));
         }
 
         /// <summary>高架（离地达到桥梁高度）的切断端多退的距离（米）。</summary>

@@ -4,7 +4,7 @@ A Cities: Skylines II mod that places a **complete interchange in one placement*
 
 一个天际线 2 mod：**一次放下一整座立交**。选类型，对准已有路口、立体交叉或道路（也可以在空地上），确认预览后放置。中文名“平改立”取自道路工程里的“平面交叉改立体交叉”。
 
-Current version: **1.0.7-beta** · License: [MIT](LICENSE)
+Current version: **1.0.8-beta** · License: [MIT](LICENSE)
 
 ![Turbine on a curved crossing 弯道上的涡轮](docs/images/01-overview.jpg)
 
@@ -58,6 +58,10 @@ Requirements: Cities: Skylines II with the official modding toolchain, .NET SDK,
 ```bash
 cd src/InterchangeMod && DOTNET_ROLL_FORWARD=Major dotnet build -c Release
 ```
+
+Builds stage the complete package in `.artifacts/staging`. Install UI dependencies with `npm ci` in `src/InterchangeMod.UI` first. To deploy to the game after closing Cities2, use `dotnet msbuild src/InterchangeMod/InterchangeMod.csproj -restore -t:Build -p:Configuration=Release -p:DeployToGame=true` from the repository root. Keep `DOTNET_ROLL_FORWARD=Major` if only .NET 8 is installed. Deployment refuses a running game.
+
+默认构建仅暂存到 `.artifacts/staging`。关闭游戏后，显式指定 `DeployToGame=true` 才部署。水中替换及涡轮/定向式长臂修复已获用户游戏验证；范围与限制见 [1.0.8 发布说明](docs/11-发布说明-1.0.8.md)。
 
 ```bash
 cd tests && DOTNET_ROLL_FORWARD=Major dotnet test InterchangeMod.Generation.Tests

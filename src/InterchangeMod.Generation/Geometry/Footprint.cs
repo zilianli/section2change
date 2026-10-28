@@ -228,7 +228,160 @@ namespace InterchangeMod.Generation.Geometry
         /// 整条在范围内时返回空列表；整条在范围外时返回 [(0, 1)]。
         /// </summary>
         public List<(float Start, float End)> OutsideIntervals(Bezier3 curve, int samples = 64, float extra = 0f) =>
-            OutsideIntervals(t => Contains(curve.Evaluate(t), extra), samples);
+            CurveIntervals(curve, extra, false, null, 0f);
+
+        /// <summary>曲线 Y 必须与走廊处于同一参考平面。筛选和切分共用保守的曲线范围检测。</summary>
+        public List<(float Start, float End)> OutsideCollisionIntervals(Bezier3 curve, float extra) =>
+            CurveIntervals(curve, extra, true, null, 0f);
+
+        public bool IntersectsAtLevels(Bezier3 curve, IReadOnlyList<float> levels, float tolerance)
+        {
+            var outside = CurveIntervals(curve, 0f, false, levels, tolerance);
+            return !(outside.Count == 1 && outside[0] == (0f, 1f));
+        }
+
+        // A Bezier curve lies in the convex hull of its control points. Prove an entire
+        // interval outside/inside from that bound; subdivide only the undecided intervals.
+        // At 1 cm spatial uncertainty (or floating-point depth limit), keep the interval
+        // inside conservatively. This also catches tangencies between every old sample.
+        private List<(float Start, float End)> CurveIntervals(Bezier3 curve, float extra, bool collision,
+            IReadOnlyList<float>? levels, float tolerance)
+        {
+            var result = new List<(float Start, float End)>();
+            void Visit(Bezier3 part, float start, float end, int depth)
+            {
+                Vec3 center = part.Evaluate(0.5f);
+                float radius = 0f, low = float.MaxValue, high = float.MinValue;
+                foreach (var p in new[] { part.P0, part.P1, part.P2, part.P3 })
+                {
+                    float dx = p.X - center.X, dz = p.Z - center.Z;
+                    radius = Math.Max(radius, MathF.Sqrt(dx * dx + dz * dz));
+                    low = Math.Min(low, p.Y); high = Math.Max(high, p.Y);
+                }
+                int state = Classify(part, center, radius, low, high, extra, collision);
+                if (levels != null && state >= 0)
+                {
+                    bool possible = false, covered = false;
+                    foreach (float level in levels)
+                    {
+                        possible |= high >= level - tolerance && low <= level + tolerance;
+                        covered |= low >= level - tolerance && high <= level + tolerance;
+                    }
+                    if (!possible) state = -1;
+                    else if (!covered) state = 0;
+                }
+                if (state < 0)
+                {
+                    if (result.Count > 0 && result[result.Count - 1].End == start)
+                        result[result.Count - 1] = (result[result.Count - 1].Start, end);
+                    else result.Add((start, end));
+                    return;
+                }
+                if (state > 0 || depth >= 24 || (radius <= 0.005f && high - low <= 0.01f)) return;
+                float mid = (start + end) * 0.5f;
+                Visit(part.Slice(0f, 0.5f), start, mid, depth + 1);
+                Visit(part.Slice(0.5f, 1f), mid, end, depth + 1);
+            }
+            Visit(curve, 0f, 1f, 0);
+            return result;
+        }
+
+        // -1: provably outside; +1: provably inside one member; 0: subdivide.
+        private int Classify(Bezier3 part, Vec3 center, float radius, float low, float high, float extra, bool collision)
+        {
+            if (m_Pieces == null)
+            {
+                if (m_Hull.Count == 0) return -1;
+                bool allInside = true;
+                foreach (var p in new[] { part.P0, part.P1, part.P2, part.P3 })
+                    allInside &= Contains(p, extra + 0.0001f);
+                // A buffered convex hull remains convex. This proves boundary-parallel
+                // intervals inside without descending to the minimum leaf size.
+                if (allInside) return 1;
+                if (m_Hull.Count >= 3)
+                    for (int i = 0; i < m_Hull.Count; i++)
+                    {
+                        var a = m_Hull[i]; var b = m_Hull[(i + 1) % m_Hull.Count];
+                        float dx = b.X - a.X, dz = b.Z - a.Z;
+                        float limit = -(Margin + extra + 0.0001f) * MathF.Sqrt(dx * dx + dz * dz);
+                        if (Cross(a, b, (part.P0.X, part.P0.Z)) < limit && Cross(a, b, (part.P1.X, part.P1.Z)) < limit
+                            && Cross(a, b, (part.P2.X, part.P2.Z)) < limit && Cross(a, b, (part.P3.X, part.P3.Z)) < limit) return -1;
+                    }
+                float distance = float.MaxValue;
+                for (int i = 0; i < m_Hull.Count; i++)
+                    distance = Math.Min(distance, DistanceToSegment(center.X, center.Z, m_Hull[i], m_Hull[(i + 1) % m_Hull.Count]));
+                if (m_Hull.Count >= 3 && InsideHull(center.X, center.Z)) distance = -distance;
+                return distance - radius > Margin + extra ? -1 : distance + radius <= Margin + extra ? 1 : 0;
+            }
+            bool possible = false;
+            var controls = new[] { part.P0, part.P1, part.P2, part.P3 };
+            // Use the same polyline/capsules as point collision checks, including pillars.
+            foreach (var piece in m_Pieces)
+            {
+                float reach = piece.Half + Margin + extra;
+                float distance = DistanceToSegment(center.X, center.Z, (piece.AX, piece.AZ), (piece.BX, piece.BZ));
+                if (distance - radius > reach + 0.0001f) continue;
+                float dx = piece.BX - piece.AX, dz = piece.BZ - piece.AZ;
+                float length = MathF.Sqrt(dx * dx + dz * dz);
+                float maxDistance = 0f, minNormal = float.MaxValue, maxNormal = float.MinValue;
+                float minU = 1f, maxU = 0f;
+                foreach (var p in controls)
+                {
+                    maxDistance = Math.Max(maxDistance, DistanceToSegment(p.X, p.Z, (piece.AX, piece.AZ), (piece.BX, piece.BZ)));
+                    float u = Project(p.X, p.Z, (piece.AX, piece.AZ), (piece.BX, piece.BZ));
+                    minU = Math.Min(minU, u); maxU = Math.Max(maxU, u);
+                    if (length > 1e-6f)
+                    {
+                        float normal = ((p.X - piece.AX) * -dz + (p.Z - piece.AZ) * dx) / length;
+                        minNormal = Math.Min(minNormal, normal); maxNormal = Math.Max(maxNormal, normal);
+                    }
+                }
+                // A capsule is convex: if all control points lie in it, the complete
+                // curve lies in it. The perpendicular projection also proves parallel
+                // outside intervals without subdividing them to centimetres.
+                if (length > 1e-6f && (minNormal > reach + 0.0001f || maxNormal < -reach - 0.0001f)) continue;
+                bool verticalPossible = true, verticalCovered = true;
+                if (collision)
+                {
+                    float ha = piece.AH + (piece.BH - piece.AH) * minU;
+                    float hb = piece.AH + (piece.BH - piece.AH) * maxU;
+                    float hLow = Math.Min(ha, hb), hHigh = Math.Max(ha, hb);
+                    verticalPossible = high > hLow - kClearance && low < hHigh + kClearance;
+                    verticalCovered = high < hLow + kClearance && low > hHigh - kClearance;
+                    // Raised banks and cuttings block one entire side of the road.
+                    if (hHigh >= HeightRange.RaisedThreshold && hLow < HeightRange.BridgeThreshold)
+                        verticalPossible |= low < Math.Min(hHigh, HeightRange.BridgeThreshold) + kClearance;
+                    if (hHigh > HeightRange.TunnelThreshold && hLow <= -HeightRange.RaisedThreshold)
+                        verticalPossible |= high > Math.Max(hLow, HeightRange.TunnelThreshold) - kClearance;
+                    if (LevelPlanner.BandOf(hLow) == LevelPlanner.BandOf(hHigh))
+                    {
+                        if (LevelPlanner.BandOf(hLow) == ElevationBand.Raised) verticalCovered |= high < hLow + kClearance;
+                        if (LevelPlanner.BandOf(hLow) == ElevationBand.Cutting) verticalCovered |= low > hHigh - kClearance;
+                    }
+                }
+                if (!verticalPossible) continue;
+                if (maxDistance <= reach + 0.0001f && verticalCovered) return 1;
+                possible = true;
+            }
+            if (collision)
+                foreach (var pillar in m_Pillars!)
+                {
+                    if (low > pillar.Top - 1f) continue;
+                    float distance = DistanceToSegment(center.X, center.Z,
+                        (pillar.CX - pillar.DX * pillar.HalfLength, pillar.CZ - pillar.DZ * pillar.HalfLength),
+                        (pillar.CX + pillar.DX * pillar.HalfLength, pillar.CZ + pillar.DZ * pillar.HalfLength));
+                    float reach = kPillarThickness / 2f + Margin + extra;
+                    if (distance - radius > reach) continue;
+                    float maxDistance = 0f;
+                    foreach (var p in controls)
+                        maxDistance = Math.Max(maxDistance, DistanceToSegment(p.X, p.Z,
+                            (pillar.CX - pillar.DX * pillar.HalfLength, pillar.CZ - pillar.DZ * pillar.HalfLength),
+                            (pillar.CX + pillar.DX * pillar.HalfLength, pillar.CZ + pillar.DZ * pillar.HalfLength)));
+                    if (maxDistance <= reach + 0.0001f && high <= pillar.Top - 1f) return 1;
+                    possible = true;
+                }
+            return possible ? 0 : -1;
+        }
 
         /// <summary>
         /// 按参数 t（0 到 1）判断在不在范围内（inside），求在范围外的参数区间（按顺序）；区间端点用二分法求到约 1e-4。

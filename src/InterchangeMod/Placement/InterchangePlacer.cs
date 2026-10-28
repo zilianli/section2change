@@ -70,7 +70,8 @@ namespace InterchangeMod.Placement
                     continue;
                 }
 
-                // 游戏按实际离地高度（路面减脚下地形）选高架 / 地面 / 隧道版本并检查范围
+                // Actual terrain elevation selects geometry; signed course restrictions
+                // are distinct from the toolbar's water/ground-relative offsets.
                 var w = worlds[i];
                 float e0 = TerrainElevation(w.a, ref terrain), e1 = TerrainElevation(w.b, ref terrain);
                 float e2 = TerrainElevation(w.c, ref terrain), e3 = TerrainElevation(w.d, ref terrain);
@@ -78,10 +79,9 @@ namespace InterchangeMod.Placement
                 if (!prefabs.TryGetEntityForElevation(prefab, min, max, out prefabEntities[i], out string error))
                     elevationErrors.Add($"{segment.Name}：{error}");
             }
-            // 高度超出道路允许范围：多半是地形起伏大（局部有坑或高起，平面贴不住），合成一条说明
+            // Physical course restrictions differ from the toolbar's adjustable offsets.
             if (elevationErrors.Count > 0)
-                errors.Add($"有 {elevationErrors.Count} 段路离地太高或太深（如 {elevationErrors[0]}）：立交范围内地形起伏太大，" +
-                    "请先平整地形或换到较平的地方（道路坡度最好在 8% 以内）");
+                errors.Add($"有 {elevationErrors.Count} 段路不符合道路的地上/地下高度限制（如 {elevationErrors[0]}），请调整层高或道路类型");
             if (errors.Count > 0)
                 return errors;
 

@@ -158,8 +158,9 @@ namespace InterchangeMod.Generation.Tests
             var street = Bezier3.Line(new Vec3(0, 0, -100), new Vec3(0, 0, 100));
             var outside = corridor.OutsideIntervals(street, 64, 5f);
             Assert.Equal(2, outside.Count);
-            Assert.Equal(83f / 200f, outside[0].End, 2);
-            Assert.Equal(117f / 200f, outside[1].Start, 2);
+            // Conservative unresolved intervals may cut up to 1 cm farther out.
+            Assert.InRange(outside[0].End * 200f, 82.99f, 83f);
+            Assert.InRange(outside[1].Start * 200f, 117f, 117.01f);
             Assert.False(corridor.Intersects(Bezier3.Line(new Vec3(-100, 0, 30), new Vec3(100, 0, 30)), 64, 5f));
         }
 

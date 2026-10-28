@@ -59,8 +59,9 @@ namespace InterchangeMod.Placement
             && (road.m_Flags & (RoadFlags.DefaultIsForward | RoadFlags.DefaultIsBackward)) != 0;
 
         /// <summary>
-        /// 返回能放在 [minElevation, maxElevation] 高度的预制体实体。
-        /// 不能自动限制高度：限制一端会让节点坐标对不上，所以超出范围时报错而不是改高度。
+        /// 按世界曲线的实际离地高度选择预制体，遵循 CourseSplitSystem.LimitElevation：
+        /// 非负下限和负上限约束地上/地下道路；工具栏的正上限不限制桥墩到河床的距离。
+        /// 保持世界坐标不变，不钳制桥面高度。
         /// </summary>
         public bool TryGetEntityForElevation(NetPrefab prefab, float minElevation, float maxElevation, out Entity entity, out string error)
         {
@@ -77,7 +78,8 @@ namespace InterchangeMod.Placement
                     placeable = undergroundPlaceable;
             }
 
-            if (minElevation < placeable.m_ElevationRange.min - 0.01f || maxElevation > placeable.m_ElevationRange.max + 0.01f)
+            if (!InterchangeMod.Generation.Geometry.PhysicalElevation.Allowed(minElevation, maxElevation,
+                placeable.m_ElevationRange.min, placeable.m_ElevationRange.max))
             {
                 error = $"{prefab.name} 离地 {minElevation:F0}–{maxElevation:F0} 米，超出这种道路允许的 {placeable.m_ElevationRange.min:F0}–{placeable.m_ElevationRange.max:F0} 米";
                 return false;

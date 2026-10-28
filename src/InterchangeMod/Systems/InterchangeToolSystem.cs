@@ -109,6 +109,7 @@ namespace InterchangeMod.Systems
         private bool m_ZoomBarrierChecked;
         private float m_Yaw;
         private bool m_HasPreview;
+        private bool m_HasPreviewResult;
         /// <summary>预览已固定（左键）：不再跟随鼠标，等面板确认放置。</summary>
         private bool m_Pinned;
         /// <summary>固定时对准了已有路口：朝向跟随匹配结果，旋转键不起作用。</summary>
@@ -350,6 +351,7 @@ namespace InterchangeMod.Systems
             base.OnStartRunning();
             m_HasPreview = false;
             m_Pinned = false;
+            m_HasPreviewResult = false;
             browsing = true;
             m_ConfirmRequested = false;
             m_LastReportedErrors = null;
@@ -486,7 +488,7 @@ namespace InterchangeMod.Systems
             }
 
             var key = new PreviewKey(origin.xz, yaw, m_SettingsVersion);
-            if (m_HasPreview && !m_ForceUpdate && key.Equals(m_LastKey))
+            if (m_HasPreviewResult && !m_ForceUpdate && key.Equals(m_LastKey))
             {
                 applyMode = ApplyMode.None;
                 // 游戏对预览的检查结果要过几帧才出来，定期读一次给面板显示
@@ -991,6 +993,16 @@ namespace InterchangeMod.Systems
                 InterchangePlacer.RoadSamples = retrofit ? SampleMatchedRoads() : null;
                 errors = InterchangePlacer.CreateDefinitions(commandBuffer, segments,
                     origin, yaw, ref terrain, m_PrefabResolver, m_SelectedRoad, m_RandomSeed);
+                if (setting.DebugLogging)
+                {
+                    var waterSystem = World.GetOrCreateSystemManaged<WaterSystem>();
+                    var water = waterSystem.GetSurfaceData(out JobHandle waterDeps);
+                    waterDeps.Complete();
+                    WaterPlacementAudit.Log(segments, origin, yaw, ref terrain, ref water,
+                        m_PrefabResolver, m_PrefabSystem, m_SelectedRoad);
+                    // Synchronous reads have finished; no job retains the surface data.
+                    waterSystem.AddSurfaceReader(default);
+                }
                 if (errors.Count == 0 && retrofit)
                 {
                     // 凸包按中心线算，要再放宽最宽那条新路的半宽：否则范围外保留的原有道路在凸包边上切断，它的末端（半个路宽的圆头）
@@ -1000,23 +1012,20 @@ namespace InterchangeMod.Systems
                     var corridor = Footprint.Corridor(segments.Select(s => (s.Curve, HalfWidthOf(s.Prefab))), kRemovalMargin);
                     var netTree = m_NetSearchSystem.GetNetSearchTree(readOnly: true, out JobHandle treeDeps);
                     treeDeps.Complete();
-                    // 新立交两层所在的高度都清理：被替换的高架（或下穿道路）和地面道路。
-                    // 立体交叉时两条原有道路原来的高度也清理：新立交的层不一定和它们同高（如定向 T 型的支路改到主线那一层），
-                    // 否则范围内离交叉点稍远的原有路段会留在原地、和新立交叠在一起
-                    var levels = new List<float> { p.Levels[0].Elevation, p.Levels[1].Elevation };
-                    if (m_Match.Crossing)
-                        levels.AddRange(new[] { m_Match.Main.Elevation, m_Match.Cross.Elevation });
-                    List<Entity> removed = RoadRemover.FindEdges(EntityManager, netTree, m_RemovalFootprint, corridor, origin, yaw,
-                        levels, ref terrain, m_Match.Crossing ? m_CrossingEdges : m_MatchRoadEdges, m_Match.Crossing ? m_CrossingEdges : null,
-                        out HashSet<Entity> converted);
+                    // Matched chains are replaced throughout the footprint, including
+                    // graded bridge approaches. Other roads still use corridor clearance.
                     RoadRemover.Debug = setting.DebugLogging;
+                    List<Entity> removed = RoadRemover.FindEdges(EntityManager, netTree, m_RemovalFootprint, corridor, origin, yaw,
+                        ref terrain, m_Match.Crossing ? m_CrossingEdges : m_MatchRoadEdges, m_Match.Crossing ? m_CrossingEdges : null,
+                        out HashSet<Entity> converted);
                     snapshot.ConnectedEnds = RoadRemover.CreateDefinitions(commandBuffer, EntityManager, removed, m_RemovalFootprint, corridor,
-                        converted, InterchangeLayout.LegEnds(segments), origin, yaw, ref terrain, m_RandomSeed + segments.Count);
+                        converted, segments, m_PrefabSystem, m_RoadsByName, m_SelectedRoad, origin, yaw, ref terrain, m_RandomSeed + segments.Count, errors);
                     snapshot.RemovedRoads = removed.Count;
                 }
             }
 
             m_HasPreview = errors.Count == 0;
+            m_HasPreviewResult = true;
             snapshot.Errors.AddRange(errors);
             this.snapshot = snapshot;
             ReportErrors(errors);
@@ -1697,6 +1706,7 @@ namespace InterchangeMod.Systems
 
         private JobHandle Clear(JobHandle inputDeps)
         {
+            m_HasPreviewResult = false;
             applyMode = ApplyMode.Clear;
             return DestroyDefinitions(m_DefinitionQuery, m_ToolOutputBarrier, inputDeps);
         }

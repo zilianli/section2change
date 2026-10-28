@@ -8,6 +8,7 @@ src/InterchangeMod.UI/build/
 .idea/
 *.log
 src/InterchangeMod/Library/
+.artifacts/
 
 # 原始截图（太大，不进仓库）
 src/InterchangeMod/Properties/Screenshots/raw/

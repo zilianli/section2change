@@ -87,20 +87,21 @@
 		<UIBuildDir>$(UIProjectDir)\build</UIBuildDir>
 	</PropertyGroup>
 
-	<Target Name="BuildUI" BeforeTargets="DeployWIP" Inputs="@(UISource)" Outputs="$(UIBuildDir)\InterchangeMod.mjs" Condition="Exists('$(UIProjectDir)\node_modules')">
+	<Target Name="BuildUI" BeforeTargets="DeployWIP" Inputs="@(UISource)" Outputs="$(UIBuildDir)\InterchangeMod.mjs" Condition="'$(NeedBuild)' == 'true' And Exists('$(UIProjectDir)\node_modules')">
 		<Message Text="Building UI module" Importance="high" />
 		<Exec Command="npm run build" WorkingDirectory="$(UIProjectDir)" />
 	</Target>
 
-	<Target Name="WarnUIDependencies" BeforeTargets="DeployWIP" Condition="!Exists('$(UIProjectDir)\node_modules')">
+	<Target Name="WarnUIDependencies" BeforeTargets="DeployWIP" Condition="'$(NeedBuild)' == 'true' And !Exists('$(UIProjectDir)\node_modules')">
 		<Warning Text="UI module skipped: run 'npm install' in $(UIProjectDir) first" />
 	</Target>
 
-	<Target Name="DeployUI" AfterTargets="DeployWIP" Condition="Exists('$(UIBuildDir)')">
+	<Target Name="DeployUI" AfterTargets="DeployWIP" DependsOnTargets="PrepareModDeployment" Condition="'$(NeedBuild)' == 'true' And Exists('$(UIBuildDir)')">
 		<ItemGroup>
 			<UIFilesToDeploy Include="$(UIBuildDir)\**\*.*" Exclude="$(UIBuildDir)\**\*.LICENSE.txt" />
 		</ItemGroup>
 		<Copy SourceFiles="@(UIFilesToDeploy)" DestinationFiles="@(UIFilesToDeploy->'$(DeployDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
+		<Copy SourceFiles="$(UIProjectDir)\mod.json" DestinationFolder="$(DeployDir)" />
 	</Target>
 
 	<ItemGroup>
@@ -111,5 +112,26 @@
 		<None Include="$(ModPropsFile)" Link="Properties\Mod.props" />
 		<None Include="$(ModTargetsFile)" Link="Properties\Mod.targets" />
 	</ItemGroup>
+
+	<!-- Override the toolchain's destructive deployment target. Ordinary builds stage
+	     artifacts; game deployment must be explicit and refuses a running game. -->
+	<Target Name="PrepareModDeployment" Condition="'$(NeedBuild)' == 'true'">
+		<PropertyGroup Condition="'$(DeployToGame)' != 'true'">
+			<DeployDir>$(MSBuildProjectDirectory)\..\..\.artifacts\staging</DeployDir>
+		</PropertyGroup>
+		<PropertyGroup Condition="'$(DeployToGame)' == 'true'">
+			<DeployDir>$(LocalModsPath)\$(TargetName)</DeployDir>
+		</PropertyGroup>
+		<Error Condition="'$(DeployToGame)' == 'true' And '$(LocalModsPath)' == ''" Text="Game mod directory is not configured." />
+		<Exec Condition="'$(DeployToGame)' == 'true'" Command="powershell -NoProfile -NonInteractive -Command &quot;if (Get-Process Cities2 -ErrorAction SilentlyContinue) { throw 'Close Cities2 before deploying the mod.' }&quot;" />
+	</Target>
+	<Target Name="DeployWIP" AfterTargets="AfterBuild" DependsOnTargets="PrepareModDeployment" Condition="'$(NeedBuild)' == 'true'">
+		<ItemGroup>
+			<FilesToDeploy Include="$(OutDir)\**\*.*" />
+		</ItemGroup>
+		<Message Text="Copy output to $(DeployDir) (DeployToGame=$(DeployToGame))" Importance="high" />
+		<RemoveDir Directories="$(DeployDir)" />
+		<Copy SourceFiles="@(FilesToDeploy)" DestinationFiles="@(FilesToDeploy->'$(DeployDir)\%(RecursiveDir)%(Filename)%(Extension)')" />
+	</Target>
 
 </Project>
