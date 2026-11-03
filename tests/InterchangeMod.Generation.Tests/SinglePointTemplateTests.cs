@@ -121,11 +121,12 @@ namespace InterchangeMod.Generation.Tests
 
         [Theory]
         [InlineData(90f)]
-        [InlineData(60f)]
-        [InlineData(120f)]
+        [InlineData(80f)]
+        [InlineData(100f)]
         public void GameSizedRoads_Fit(float angle)
         {
-            // 游戏内截图的组合：4 车道公路（20 米）双幅、分隔带 8 米，2 车道匝道（12 米），被交道路 Large Road（30 米）
+            // 游戏内截图的组合：4 车道公路（20 米）双幅、分隔带 8 米，2 车道匝道（12 米），被交道路 Large Road（30 米）。
+            // 更斜时（如 60°）中心节点处匝道与被交道路夹角太小，见 WideCrossRoadAtAcuteAngle_IsRejected
             var p = Make(angle);
             p.RampWidth = 12f;
             p.RampSideGap = 1f;
@@ -134,6 +135,31 @@ namespace InterchangeMod.Generation.Tests
             p.Levels[0].Elevation = 11f;
             Assert.Empty(_template.ValidateParams(p));
             Assert.Empty(InterchangeLayout.ValidateGeometry(_template.Generate(p), p));
+        }
+
+        /// <summary>
+        /// 游戏内：70° 配 40 米被交道路（XL Road Divided）、110° 配 32 米（Large Road Divided）中心报形状无效，放置前提示；
+        /// 110° 配 24 米、90° 配 32 米正常。
+        /// </summary>
+        [Theory]
+        [InlineData(70f, 40f, true)]
+        [InlineData(110f, 40f, true)]
+        [InlineData(110f, 32f, true)]
+        [InlineData(60f, 30f, true)]
+        [InlineData(110f, 24f, false)]
+        [InlineData(90f, 32f, false)]
+        public void WideCrossRoadAtAcuteAngle_IsRejected(float angle, float crossWidth, bool rejected)
+        {
+            var p = Make(angle);
+            p.RampWidth = 12f;
+            p.RampSideGap = 4f;
+            p.SetRoad(0, 2, RoadForm.Dual, 20f, 8f, "Highway Oneway - 4 lanes");
+            p.SetRoad(1, 3, RoadForm.TwoWay, crossWidth, 0f, "Cross");
+            var errors = _template.ValidateParams(p);
+            if (rejected)
+                Assert.Contains(errors, e => e.Contains("交角需在") || e.Contains("被交道路太宽"));
+            else
+                Assert.Empty(errors);
         }
 
         [Fact]
