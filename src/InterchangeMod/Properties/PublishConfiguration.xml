@@ -4,7 +4,7 @@
 	<!--Name of the mod to display to players-->
 	<DisplayName Value="section2change 平改立 (Beta)" />
 	<!--Short description of the mod-->
-	<ShortDescription Value="Turn a junction into a complete interchange in one placement (平改立)" />
+	<ShortDescription Value="Replace a junction or connect open road ends with a complete interchange, 13 types (平改立)" />
 	<!--Long description of the mod. Single line or multi line. Supports minimal markdown subset-->
 	<!--LongDescription Value="This is a long description" /-->
 	<LongDescription>

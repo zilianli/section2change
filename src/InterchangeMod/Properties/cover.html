@@ -1,0 +1,55 @@
+<!doctype html>
+<!-- Paradox Mods 封面源文件（1024×1024）。用浏览器无头截图生成 Thumbnail.png：
+     msedge --headless=new --hide-scrollbars --screenshot=Thumbnail.png --window-size=1024,1024 file:///.../cover.html
+     背景是游戏内定向立交实拍（Screenshots/08-stack.jpg），上下加深色渐变放标题和标语。 -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>section2change cover</title>
+<style>
+  html, body { margin: 0; width: 1024px; height: 1024px; overflow: hidden; background: #0a1630; }
+  body { font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif; color: #fff; position: relative; }
+  /* 实拍铺满，按立交中心裁成正方形 */
+  .hero { position: absolute; inset: 0; width: 1024px; height: 1024px; object-fit: cover; object-position: 60% 50%; }
+  .shade { position: absolute; inset: 0;
+    background:
+      linear-gradient(180deg, rgba(8,18,40,.92) 0%, rgba(8,18,40,.70) 22%, rgba(8,18,40,0) 42%),
+      linear-gradient(0deg, rgba(8,18,40,.95) 0%, rgba(8,18,40,.80) 20%, rgba(8,18,40,0) 44%); }
+
+  .title { position: absolute; top: 40px; width: 100%; text-align: center; }
+  .title .cn { font-size: 168px; font-weight: 700; letter-spacing: 26px; line-height: 1; text-shadow: 0 8px 26px rgba(0,0,0,.6); }
+  .title .en { margin-top: 14px; font-size: 50px; font-weight: 700; letter-spacing: 8px; color: #d7e6ff; font-family: "Segoe UI", sans-serif;
+    text-shadow: 0 4px 16px rgba(0,0,0,.6); }
+  .title .en b { color: #ff7a2f; }
+
+  /* 底部：一句标语 + 两种用法（替换蓝、连接青，与游戏内面板同色），不展开说明 */
+  .slogan { position: absolute; left: 0; right: 0; bottom: 56px; text-align: center; }
+  .slogan .main { display: inline-block; padding: 18px 56px; border-radius: 60px; font-size: 64px; font-weight: 700; letter-spacing: 10px;
+    background: rgba(10,22,48,.80); border: 3px solid rgba(255,138,58,.9); box-shadow: 0 10px 28px rgba(0,0,0,.5); }
+  .slogan .main b { color: #ffb347; }
+  .modes { margin-top: 22px; display: flex; justify-content: center; }
+  .mode { margin: 0 14px; padding: 10px 30px; border-radius: 40px; font-size: 38px; font-weight: 700; letter-spacing: 4px;
+    background: rgba(10,22,48,.80); box-shadow: 0 8px 22px rgba(0,0,0,.45); }
+  .mode small { margin-left: 10px; font-size: 20px; letter-spacing: 3px; font-family: "Segoe UI", sans-serif; opacity: .9; }
+  .mode.replace { color: #8ccbff; border: 3px solid rgba(80,160,255,.9); }
+  .mode.connect { color: #6fe6d0; border: 3px solid rgba(40,200,170,.9); }
+</style>
+</head>
+<body>
+  <img class="hero" src="Screenshots/08-stack.jpg">
+  <div class="shade"></div>
+
+  <div class="title">
+    <div class="cn">平改立</div>
+    <div class="en">SECTION <b>2</b> CHANGE</div>
+  </div>
+
+  <div class="slogan">
+    <div class="main">路口<b>一键升级</b>立交</div>
+    <div class="modes">
+      <div class="mode replace">替换<small>REPLACE</small></div>
+      <div class="mode connect">连接<small>CONNECT</small></div>
+    </div>
+  </div>
+</body>
+</html>
