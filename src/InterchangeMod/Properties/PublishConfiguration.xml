@@ -2,25 +2,28 @@
 	<!--Id must be set in order to update existed mod. it is not required for publishing mod for the first time-->
 	<ModId Value="165223" />
 	<!--Name of the mod to display to players-->
-	<DisplayName Value="section2change (Beta)" />
+	<DisplayName Value="section2change 平改立 (Beta)" />
 	<!--Short description of the mod-->
 	<ShortDescription Value="Turn a junction into a complete interchange in one placement (平改立)" />
 	<!--Long description of the mod. Single line or multi line. Supports minimal markdown subset-->
 	<!--LongDescription Value="This is a long description" /-->
 	<LongDescription>
-**section2change (平改立)** places a whole interchange in one go: pick a type, aim at an existing junction, crossing or road (or empty ground), check the preview, confirm.
+**section2change (平改立)** places a whole interchange in one go. Two categories:
+- **Replace**: pick a type, aim at an existing junction, crossing or road (or empty ground), check the preview, confirm
+- **Connect**: select open road endpoints and the whole interchange is solved and connected to them
 
-**13 interchange types**
+**14 interchange types**
 - Four-way: diamond, single-point, Chinese expressway node, cloverleaf, partial cloverleaf, roundabout, stack, turbine
 - Three-way: expressway T, trumpet, semi-directional T, directional T
 - Wye (three roads at about 120°)
+- Compact grid (connect mode only)
 
 **Features**
 - Upgrade existing junctions: matches roads, levels and angle, removes the old junction and reconnects every leg; roads under bridges with enough clearance are kept
 - Follows curved roads (radius 150 m or more) and places the interchange on the roads' grade
 - Lane balance with edge-aligned lane drops, pillars kept clear of roads below, grade and clearance checked before placing
-- Auto mode (point and confirm) or manual mode (every parameter adjustable); Chinese and English UI
-- Node mode: select open road endpoints to solve and place cloverleaf, stack, turbine, trumpet, directional T, semi-directional T, wye, compact grid or roundabout; two-way, divided and mixed inputs with bounded approach reconstruction
+- Replace and Connect each have Auto (point and confirm) and Manual (every parameter adjustable); Chinese and English UI
+- Connect mode: select open road endpoints to solve and place cloverleaf, stack, turbine, trumpet, directional T, semi-directional T, wye, compact grid or roundabout; two-way, divided and mixed inputs with bounded approach reconstruction
 - Colored endpoint feedback, lane matching, smoother curved connections, and cancellable background solving for two-way/mixed stacks
 
 **How to use**
@@ -34,7 +37,38 @@
 - Trumpet, directional types, stack, turbine and wye support right-hand traffic only
 - Beta: report problems on GitHub with a screenshot and the mod log (turn on debug logging in the settings first)
 
-**平改立**：一次放下一整座立交。保留自动和手动模式；新增点选开放节点，按实际端点重新求解并确认放置。节点模式支持苜蓿叶、定向、涡轮、喇叭、定向T、半定向T、Y型、井字和环岛，以及双向、双幅和混合道路的有界退接。放置后不能撤销，请先存档；实际道路须满足车道匹配、坡度、净空和游戏原生检查。问题请到 GitHub 附截图和日志反馈。
+---
+
+**平改立（中文说明）**
+
+一次放下一整座立交。分两大类：
+- **替换**：选立交类型，对准已有路口、立体交叉或道路（也可以在空地上），确认预览后放置；拆掉原路口并接回各臂
+- **连接**：点选道路的开放端点，按实际端点求解整座立交并连接起来
+
+**14 种立交**
+- 四向：菱形、单点、中式快速路节点、苜蓿叶、部分苜蓿叶、环岛、定向、涡轮
+- 三向：快速路 T 型、喇叭形、半定向 T、定向 T
+- Y 型分向（三条路约 120° 汇合）
+- 井字紧凑立交（仅连接模式）
+
+**功能**
+- 平改立：对准已有路口，自动匹配道路、层高和交角，拆掉原路口并接回各臂；桥下净空够的道路保留
+- 弯道（半径 150 米以上）上整体顺着道路弯曲，坡道上按原有道路的坡度整体放置
+- 车道平衡（边缘对齐的减车道）、立柱避开下层道路、放置前检查坡度和净空
+- 连接模式：苜蓿叶、定向、涡轮、喇叭、定向 T、半定向 T、Y 型、井字和环岛，支持双向、双幅和混合道路的有界退接、端点颜色反馈和车道匹配
+- 替换和连接都分自动（一指即放）和手动（可调所有参数）；中英文界面
+
+**使用方法**
+1. 点左上角按钮或按 Shift + I 打开工具
+2. 选立交类型，鼠标对准路口、道路或空地
+3. 左键固定预览，查看面板里的结果和报错，点“确认放置”；右键退出
+
+**注意事项**
+- 放置后不能撤销（游戏不支持撤销），必要时先存档
+- 最好在平地、平直且坡度均匀的道路上使用；地形起伏大时请先整平
+- 立交范围内的道路类型、曲率不要突变，不支持短距离内的 S 形弯
+- 喇叭形、定向类、涡轮和 Y 型目前只支持右侧通行
+- 测试版：遇到问题请到 GitHub 提交 issue，附截图和 mod 日志（先在设置里打开调试日志）
 	</LongDescription>
 	<!--Thumbnail-->
 	<Thumbnail Value="Properties/Thumbnail.png" />

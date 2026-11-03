@@ -118,6 +118,23 @@ namespace InterchangeMod.Generation.Tests
             Assert.Contains(_template.ValidateParams(p), e => e.Contains(error));
         }
 
+        /// <summary>游戏内：被交道路（辅路所在层）是 20 米高架时辅路、匝道汇入段都成了桥，立柱互相冲突，放置前提示。</summary>
+        [Theory]
+        [InlineData(30f, 20f, true)]
+        [InlineData(15f, 5f, true)]
+        [InlineData(10f, 0f, false)]
+        public void ElevatedGroundLevel_IsRejected(float mainElevation, float crossElevation, bool rejected)
+        {
+            var p = Make();
+            p.Levels[0].Elevation = mainElevation;
+            p.Levels[1].Elevation = crossElevation;
+            var errors = _template.ValidateParams(p);
+            if (rejected)
+                Assert.Contains(errors, e => e.Contains("需要在地面上"));
+            else
+                Assert.DoesNotContain(errors, e => e.Contains("需要在地面上"));
+        }
+
         [Fact]
         public void TwoWayMain_IsRejected()
         {

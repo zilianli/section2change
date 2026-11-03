@@ -81,6 +81,10 @@ namespace InterchangeMod.Generation.Templates
                 errors.Add($"主线比地面道路高 {hMain - hGround:F1} 米，至少需要 {gap:F1} 米净空：主线要在上层");
             else if (LevelPlanner.BandOf(hMain) != ElevationBand.Elevated)
                 errors.Add($"主线离地 {hMain:F1} 米会建成路堤（挡土墙），被交道路无法穿过：主线需要至少 {HeightRange.BridgeThreshold:F1} 米");
+            // 辅路、匝道汇入段和被交道路在同一层：这一层是高架时它们都成了并排的桥，立柱压到旁边的桥面，辅路与被交道路的路口
+            // 也报形状无效（游戏内：主线 30 米、被交道路 20 米的公路立体交叉）
+            if (LevelPlanner.BandOf(hGround) != ElevationBand.Ground)
+                errors.Add($"中式快速路的辅路和被交道路需要在地面上（这里被交道路离地 {hGround:F1} 米）：请换到地面道路处放置，或选择其他立交类型");
 
             // 匝道比它分出/并入的路还宽时，游戏无法生成分流节点的形状
             if (p.RampWidth > legs[0].RoadWidth)

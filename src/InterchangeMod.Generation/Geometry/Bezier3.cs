@@ -97,6 +97,27 @@ namespace InterchangeMod.Generation.Geometry
             return max;
         }
 
+        /// <summary>参数 t 处的水平曲率（1 / 半径，取绝对值）。</summary>
+        public float Curvature(float t)
+        {
+            float u = 1f - t;
+            Vec3 d = Derivative(t);
+            Vec3 a = 6f * u * (P2 - 2f * P1 + P0) + 6f * t * (P3 - 2f * P2 + P1);
+            float speed = MathF.Sqrt(d.X * d.X + d.Z * d.Z);
+            if (speed < 1e-4f)
+                return float.PositiveInfinity;
+            return MathF.Abs(d.X * a.Z - d.Z * a.X) / (speed * speed * speed);
+        }
+
+        /// <summary>采样得到的最大水平曲率（1 / 最小半径）。</summary>
+        public float MaxCurvature(int samples = 64)
+        {
+            float max = 0f;
+            for (int i = 0; i <= samples; i++)
+                max = MathF.Max(max, Curvature(i / (float)samples));
+            return max;
+        }
+
         /// <summary>先绕 Y 轴旋转 yaw 弧度，再平移到 position。</summary>
         public Bezier3 Place(Vec3 position, float yaw) => new Bezier3(
             P0.RotateY(yaw) + position, P1.RotateY(yaw) + position,

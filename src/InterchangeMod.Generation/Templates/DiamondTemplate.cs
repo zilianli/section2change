@@ -401,15 +401,17 @@ namespace InterchangeMod.Generation.Templates
                 ? new Bezier3(curve.P0, curve.P1, curve.P2 + shift, curve.P3 + shift)
                 : new Bezier3(curve.P0 + shift, curve.P1 + shift, curve.P2, curve.P3);
             var pieces = MainElevated(p)
-                ? ElevatedDiverge(curve, nodeAtEnd, RampClear(p) - RampAlign(p))
+                ? ElevatedDiverge(curve, nodeAtEnd, RampClear(p) - RampAlign(p), p.Legs[0].MaxElevatedEdgeLength)
                     ?? InterchangeLayout.SplitAtClear(curve, nodeAtEnd, RampClear(p), p.Legs[0].MaxElevatedEdgeLength)
                 : new List<Bezier3> { curve };
             for (int i = 0; i < pieces.Count; i++)
             {
                 bool atNode = nodeAtEnd ? i == pieces.Count - 1 : i == 0;
+                // 离节点第几段（节点那段是 0）：之后的段叫 name-clear、name-clear2……
+                int fromNode = nodeAtEnd ? pieces.Count - 1 - i : i;
                 segments.Add(atNode
                     ? new RoadSegmentSpec(name, RoadRole.Ramp, pieces[i], p.RampPrefab, nodeAtEnd ? (Vec3?)null : node, nodeAtEnd ? node : (Vec3?)null)
-                    : new RoadSegmentSpec($"{name}-clear", RoadRole.Ramp, pieces[i], p.RampPrefab));
+                    : new RoadSegmentSpec(fromNode == 1 ? $"{name}-clear" : $"{name}-clear{fromNode}", RoadRole.Ramp, pieces[i], p.RampPrefab));
             }
         }
 
@@ -426,9 +428,11 @@ namespace InterchangeMod.Generation.Templates
         /// <summary>
         /// 把匝道曲线（起点在主线节点处、与主线相切；nodeAtEnd 时反过来）换成：圆弧横移 rise（到不再压着主线处），
         /// 再接一段曲线到原来的终点、终点方向不变。原曲线本身就只横移 rise 时（菱形：分流段就是这段圆弧）只有圆弧。
+        /// 圆弧转过的角度要以同样的半径转回来，还要再横移 rise：终点横向不到 2·rise 时（中式快速路、单点：匝道平行贴着
+        /// 主线外 rise 处走）圆弧之后只能冲过终点再急弯拐回，改用 ShiftDiverge 的 S 形。
         /// 横向走不到 rise、或剩下的长度不够转回来时返回 null。
         /// </summary>
-        private static List<Bezier3>? ElevatedDiverge(Bezier3 curve, bool nodeAtEnd, float rise)
+        private static List<Bezier3>? ElevatedDiverge(Bezier3 curve, bool nodeAtEnd, float rise, float maxEdge)
         {
             var c = nodeAtEnd ? curve.Reverse() : curve;
             Vec3 start = c.P0, far = c.P3;
@@ -442,6 +446,22 @@ namespace InterchangeMod.Generation.Templates
             }
             if (rise < 0.1f || farLateral < rise - 0.01f)
                 return null;
+            var pieces = ArcDiverge(start, travel, side, far, farDir, farLateral, rise);
+            // 圆弧之后转不回来（终点横向不到 2·rise）或转得太急时改用 S 形
+            if (pieces == null || pieces.Max(b => b.MaxCurvature()) > 1f / kMinShiftRadius)
+                pieces = ShiftDiverge(start, travel, side, far, farDir, rise, maxEdge) ?? pieces;
+            if (pieces == null || !nodeAtEnd)
+                return pieces;
+            pieces.Reverse();
+            return pieces.Select(b => b.Reverse()).ToList();
+        }
+
+        /// <summary>
+        /// ElevatedDiverge 的圆弧做法（start 在主线节点、沿 travel 出发）：圆弧横移 rise，剩下一段转回终点方向。
+        /// 剩下那段的两个控制柄在一组长度里选最缓的、横向不冲过终点的一组。剩下的长度不够时返回 null。
+        /// </summary>
+        private static List<Bezier3>? ArcDiverge(Vec3 start, Vec3 travel, Vec3 side, Vec3 far, Vec3 farDir, float farLateral, float rise)
+        {
             var (angle, along) = ElevatedArc(rise);
             Vec3 heading = travel * MathF.Cos(angle) + side * MathF.Sin(angle);
             Vec3 arcEnd = start + travel * along + side * rise;
@@ -449,23 +469,97 @@ namespace InterchangeMod.Generation.Templates
             var arc = Bezier3.FromTangents(start, travel, arcEnd, heading, kElevatedDivergeRadius * 4f / 3f * MathF.Tan(angle / 4f));
             var pieces = new List<Bezier3> { arc };
             float lateralLeft = farLateral - rise, alongLeft = Directions.Dot(far - start, travel) - along;
-            if (lateralLeft > 0.05f || alongLeft > 1f)
+            if (lateralLeft <= 0.05f && alongLeft <= 1f)
+                return pieces;
+            if (alongLeft < 3f * lateralLeft || alongLeft < kMinRestLength)
+                return null;
+            // 剩下的横向正好用一段反向圆弧转回终点方向（半径不小于 kMinShiftRadius）、再直线接到终点时，用圆弧加直线
+            Vec3 farSide = Directions.RightOf(farDir);
+            if (Directions.Dot(farSide, side) < 0f)
+                farSide = -farSide;
+            float turn = (float)Math.Acos(Math.Max(-1f, Math.Min(1f, Directions.Dot(heading, farDir))));
+            float offset = Directions.Dot(far - arcEnd, farSide);
+            if (turn > 0.01f && offset > 0.05f)
             {
-                if (alongLeft < 3f * lateralLeft || alongLeft < kMinRestLength)
-                    return null;
-                // 剩下一段：从圆弧终点沿圆弧方向出发，转回原来的终点方向；起点控制柄不让横向冲过终点
-                float length = Vec3.Distance(arcEnd, far);
-                float h0 = Math.Max(length / 10f, Math.Min(length / 3f, 0.9f * lateralLeft / MathF.Sin(angle)));
-                Vec3 p1 = arcEnd + heading * h0, p2 = far - farDir * (length / 3f);
+                float radius = offset / (1f - MathF.Cos(turn));
+                float straight = Directions.Dot(far - arcEnd, farDir) - radius * MathF.Sin(turn);
+                if (radius >= kMinShiftRadius && (straight < 0.5f || straight >= kMinRestLength))
+                {
+                    // 高度按水平长度分摊到圆弧和直线
+                    Vec3 turnEnd = straight < 0.5f ? far : far - farDir * straight;
+                    float arcLength = radius * turn;
+                    turnEnd.Y = start.Y + (far.Y - start.Y) * arcLength / (arcLength + Math.Max(0f, straight));
+                    pieces.Add(Bezier3.FromTangents(arcEnd, heading, turnEnd, farDir, radius * 4f / 3f * MathF.Tan(turn / 4f)));
+                    if (straight >= 0.5f)
+                        pieces.Add(Bezier3.Line(turnEnd, far));
+                    return pieces;
+                }
+            }
+            // 否则剩下一段曲线：从圆弧终点沿圆弧方向出发，转回原来的终点方向
+            float length = Vec3.Distance(arcEnd, far);
+            Bezier3 Rest(float h0, float h1)
+            {
+                Vec3 p1 = arcEnd + heading * h0, p2 = far - farDir * h1;
                 p1.Y = start.Y + (far.Y - start.Y) / 3f;
                 p2.Y = start.Y + (far.Y - start.Y) * 2f / 3f;
-                pieces.Add(new Bezier3(arcEnd, p1, p2, far));
+                return new Bezier3(arcEnd, p1, p2, far);
             }
-            if (!nodeAtEnd)
-                return pieces;
-            pieces.Reverse();
-            return pieces.Select(b => b.Reverse()).ToList();
+            bool Overshoots(Bezier3 b) => Enumerable.Range(1, 15).Any(i => Directions.Dot(b.Evaluate(i / 16f) - start, side) > farLateral + 0.05f);
+            // 旧做法（起点控制柄不让横向冲过终点）作为找不到时的退路
+            var best = Rest(Math.Max(length / 10f, Math.Min(length / 3f, 0.9f * lateralLeft / MathF.Sin(angle))), length / 3f);
+            float bestK = best.MaxCurvature();
+            for (float f0 = 0.1f; f0 <= 0.5f; f0 += 0.05f)
+                for (float f1 = 0.1f; f1 <= 0.5f; f1 += 0.05f)
+                {
+                    var rest = Rest(length * f0, length * f1);
+                    float k = rest.MaxCurvature();
+                    if (k < bestK && !Overshoots(rest))
+                    {
+                        best = rest;
+                        bestK = k;
+                    }
+                }
+            pieces.Add(best);
+            return pieces;
         }
+
+        /// <summary>
+        /// 匝道终点只比 rise 远一点时的分出：一段 S 形曲线从主线节点相切出发（起点半径不大于 kElevatedDivergeRadius，
+        /// 离开主线不比圆弧慢），在横向离开 rise 处已经转回终点方向（在那里分段），之后沿终点方向直线接到终点。
+        /// S 形尽量长（弯得最缓），但不长于一条游戏路段（maxEdge − 5），最小半径不小于 kMinShiftRadius。放不下时返回 null。
+        /// </summary>
+        private static List<Bezier3>? ShiftDiverge(Vec3 start, Vec3 travel, Vec3 side, Vec3 far, Vec3 farDir, float rise, float maxEdge)
+        {
+            float total = Directions.Dot(far - start, travel);
+            for (float back = 0f; back < total; back += 1f)
+            {
+                // 直线的剩余段要么没有，要么不短于 kMinRestLength
+                if (back > 0f && back < kMinRestLength)
+                    back = kMinRestLength;
+                Vec3 q = far - farDir * back;
+                q.Y = start.Y;
+                float along = Directions.Dot(q - start, travel);
+                if (along < 1f || Directions.Dot(q - start, side) < rise - 0.01f)
+                    break;
+                var shift = Bezier3.FromTangents(start, travel, q, farDir, along / 3f);
+                if (shift.Length() > maxEdge - 5f)
+                    continue;
+                float k = shift.MaxCurvature();
+                // 越往回越短、越急：半径已经小于下限就不用再找了
+                if (k > 1f / kMinShiftRadius)
+                    break;
+                if (shift.Curvature(0f) < 1f / kElevatedDivergeRadius - 1e-4f)
+                    continue;
+                var pieces = new List<Bezier3> { shift };
+                if (back > 0f)
+                    pieces.Add(Bezier3.Line(q, far));
+                return pieces;
+            }
+            return null;
+        }
+
+        /// <summary>ShiftDiverge 的 S 形最小半径（米）。</summary>
+        private const float kMinShiftRadius = 40f;
 
         /// <summary>ElevatedDiverge 圆弧之后那段的最小长度（米）。</summary>
         private const float kMinRestLength = 20f;

@@ -101,6 +101,9 @@ namespace InterchangeMod.Systems
         /// <summary>主线是否在上层：中式快速路节点和单点立交的主线总是高架。</summary>
         private bool MainOnTop => IsCloverleaf || IsParclo || IsRoundabout ? !effective.CloverleafCrossOnTop : !IsTrumpet && !IsDirectionalT && !IsStack && (IsExpressway || IsSinglePoint || effective.MainOnTop);
 
+        /// <summary>主线在上层、下层都能做的类型（上下层由面板选）：对准立体交叉时高度照原有道路，主线按道路等级选。</summary>
+        private bool LevelOrderFree => IsDiamond || IsCloverleaf || IsParclo || IsRoundabout;
+
         private RoadPrefab m_SelectedRoad;
         private ProxyAction m_RotateLeftAction;
         private ProxyAction m_RotateRightAction;
@@ -651,6 +654,10 @@ namespace InterchangeMod.Systems
                 else
                     swap = choice == "lower" ? mainUpper : !mainUpper;
             }
+            else if (LevelOrderFree && match.Main.IsHighway != match.Cross.IsHighway)
+                // 上下层都能做的类型：一条是公路、另一条不是时主线取公路（匝道接公路），高度照原有道路，不按面板“上层道路”
+                // （游戏内菱形：公路高架跨地面 Large Road，按默认“被交道路在上层”选成了地面那条当主线）
+                swap = !match.Main.IsHighway;
             else
                 swap = stacked && mainUpper != MainOnTop;
             if (!swap)
@@ -741,8 +748,12 @@ namespace InterchangeMod.Systems
                 var netTree = m_NetSearchSystem.GetNetSearchTree(readOnly: true, out JobHandle treeDeps);
                 treeDeps.Complete();
                 m_PartnerMedian = JunctionReader.MeasureDualMedian(EntityManager, m_PrefabSystem, netTree, hitEntity, m_RoadsByName,
-                    !m_CityConfigurationSystem.leftHandTraffic);
+                    !m_CityConfigurationSystem.leftHandTraffic, out Entity partner);
                 m_Match = MatchEdges(cursor);
+                // 普通道路（不是路口）上的双幅：对向那一幅也是被改造的道路，在凸包内整段拆掉、在臂端接回。否则它只在被新路压到处
+                // 拆，新主线高架跨过的地方留下一段段旧路面，主线立柱落在上面（游戏内弯道上的菱形、快速路：与现有物体重叠、净空不足）
+                if (m_Match.RoadOnly && m_Match.Error == null && partner != Entity.Null && !m_MatchRoadEdges.Contains(partner))
+                    m_MatchRoadEdges.Add(partner);
                 if (setting.DebugLogging)
                     Mod.log.Info($"[debug] junction: {m_MatchEdges.Count} edges, {m_Match.LegCount} legs, " +
                         (m_Match.Error ?? (m_Match.RoadOnly
@@ -1434,7 +1445,7 @@ namespace InterchangeMod.Systems
                     p.Legs[index].ExternalElevation = !m_Match.Crossing ? m_Match.LowestElevation
                         : mainLeg ? m_Match.Main.Elevation : m_Match.Cross.Elevation;
                 }
-                if (m_Match.Crossing && MainOnTop && m_Match.Main.Elevation < m_Match.Cross.Elevation)
+                if (m_Match.Crossing && MainOnTop && !LevelOrderFree && m_Match.Main.Elevation < m_Match.Cross.Elevation)
                     errors.Add("这处立体交叉里被交道路在上层：该立交类型的主线必须在上层，请换成菱形立交");
             }
             ChooseRamp(p, mainName, errors, snapshot);

@@ -439,10 +439,13 @@ namespace InterchangeMod.Placement
         /// 鼠标指着双幅道路中的一幅（单行道路）时，找出对向的那一幅，量出实际分隔带宽度：
         /// 附近与它平行、行驶方向相反、在它左侧（右侧通行；左侧通行时在右侧）的单行道路，取最近的一条。
         /// 中心线距离减去两幅半宽之和就是分隔带。找不到（或指着的不是单行道路）时返回 null。
+        /// partner 收到对向那一幅在这里的路段（找不到时为 Entity.Null）。
         /// </summary>
         public static float? MeasureDualMedian(EntityManager entityManager, PrefabSystem prefabSystem,
-            NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree, Entity hit, IReadOnlyDictionary<string, RoadInfo> roads, bool rightHandTraffic)
+            NativeQuadTree<Entity, QuadTreeBoundsXZ> netTree, Entity hit, IReadOnlyDictionary<string, RoadInfo> roads, bool rightHandTraffic,
+            out Entity partner)
         {
+            partner = Entity.Null;
             if (hit != Entity.Null && entityManager.Exists(hit) && entityManager.HasComponent<Temp>(hit))
                 hit = entityManager.GetComponentData<Temp>(hit).m_Original;
             if (hit == Entity.Null || !entityManager.Exists(hit) || !TryGetRoadEdge(entityManager, hit, out _, out Curve curve)
@@ -475,7 +478,10 @@ namespace InterchangeMod.Placement
                         continue;
                     float median = across - (self.Width + info.Width) / 2f;
                     if (median >= 0f && (best == null || median < best))
+                    {
                         best = median;
+                        partner = candidate;
+                    }
                 }
             }
             finally

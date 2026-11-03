@@ -29,6 +29,12 @@ namespace InterchangeMod.Generation.Templates
         private const float kPillarLegHalf = 1.5f;
         /// <summary>地面转弯段的圆弧半径（米）。</summary>
         private const float kTurnRadius = 30f;
+        /// <summary>
+        /// 锐角象限里匝道边缘与被交道路边缘相交处离中心节点的最大距离（米）：(被交道路半宽 + 匝道半宽) / sin(交角 / 2)。
+        /// 游戏内：70° 交角、40 米被交道路、12 米匝道（45.3 米）和 110°、32 米（38.4 米）中心报形状无效；
+        /// 110°、24 米（31.4 米）与 90°、32 米（31.1 米）正常。取两者之间。
+        /// </summary>
+        private const float kMaxCenterCorner = 35f;
         /// <summary>桥面宽于这个值（米）时节点立柱是门式（两条腿在桥面边缘），否则是中心一根。</summary>
         private const float kPortalMinWidth = 10f;
         /// <summary>匝道边缘与立柱腿之间至少留的距离（米）。</summary>
@@ -69,6 +75,21 @@ namespace InterchangeMod.Generation.Templates
                 errors.Add("单点立交的主线需要是双幅（两条对向单行道路）：请把主线形式改为双幅，或选择单行的公路");
             if (legs[1].Form != RoadForm.TwoWay)
                 errors.Add("单点立交的被交道路需要是双向道路（双幅时中心会变成两个节点、两组信号灯）");
+            else
+            {
+                // 锐角象限里匝道沿角平分线进出中心节点，与被交道路夹角只有交角的一半：被交道路越宽、夹角越小，
+                // 两者边缘相交处离中心越远，超过 kMaxCenterCorner 时游戏生成不了中心节点的形状
+                float half = Math.Min(crossing, 180f - crossing) / 2f * Directions.DegToRad;
+                float reach = legs[1].HalfExtent + p.RampWidth / 2f;
+                if (reach / MathF.Sin(half) > kMaxCenterCorner)
+                {
+                    float needed = 2f * (float)Math.Asin(Math.Min(1f, reach / kMaxCenterCorner)) / Directions.DegToRad;
+                    errors.Add(needed >= 90f
+                        ? $"单点立交的被交道路太宽（{legs[1].RoadWidth:F0} 米）：中心节点处匝道与它边缘重叠太多，游戏无法生成路口形状，请换较窄的被交道路或其他立交类型"
+                        : $"单点立交的被交道路较宽（{legs[1].RoadWidth:F0} 米）时交角需在 {needed:F0}°–{180f - needed:F0}° 之间（当前 {crossing:F0}°）：" +
+                          "否则中心节点处匝道与被交道路夹角太小，游戏无法生成路口形状。请调整交角、换较窄的被交道路或其他立交类型");
+                }
+            }
 
             float hMain = p.ElevationOf(legs[0]), hGround = p.ElevationOf(legs[1]);
             float gap = DiamondTemplate.RequiredGap(p);
