@@ -20,6 +20,8 @@ namespace InterchangeMod.Placement
         public bool Blocking;
         /// <summary>同类错误各个图标的位置（世界坐标）。</summary>
         public List<float3> Positions;
+        /// <summary>Debug-only source entities, parallel to Positions. Not sent to UI.</summary>
+        public List<string> Sources;
 
         public override string ToString() => $"{(Blocking ? "error" : "warning")} {Type}: {Road} (elevation {Elevation:F1} m)";
     }
@@ -32,7 +34,7 @@ namespace InterchangeMod.Placement
     public static class PlacementErrorReader
     {
         /// <param name="iconQuery">提示图标查询：Icon + Owner + PrefabRef。</param>
-        public static List<GameError> Read(EntityManager entityManager, PrefabSystem prefabSystem, EntityQuery iconQuery)
+        public static List<GameError> Read(EntityManager entityManager, PrefabSystem prefabSystem, EntityQuery iconQuery, bool debug = false)
         {
             var errors = new List<GameError>();
             var seen = new HashSet<string>();
@@ -60,8 +62,91 @@ namespace InterchangeMod.Placement
                 var iconData = entityManager.GetComponentData<Icon>(icon);
                 bool blocking = iconData.m_Priority >= IconPriority.Error;
                 if (seen.Add($"{type}|{road}|{blocking}"))
-                    errors.Add(new GameError { Type = type, Road = road, Elevation = elevation, Blocking = blocking, Positions = new List<float3>() });
-                errors.Find(e => e.Type == type && e.Road == road && e.Blocking == blocking).Positions.Add(iconData.m_Location);
+                    errors.Add(new GameError { Type = type, Road = road, Elevation = elevation, Blocking = blocking, Positions = new List<float3>(), Sources = new List<string>() });
+                var group = errors.Find(e => e.Type == type && e.Road == road && e.Blocking == blocking);
+                group.Positions.Add(iconData.m_Location);
+                if (debug)
+                {
+                    string source = $"owner={owner.Index}:{owner.Version}";
+                    try
+                    {
+                        var temp = entityManager.GetComponentData<Temp>(owner);
+                        source += $", original={temp.m_Original.Index}:{temp.m_Original.Version}, flags={temp.m_Flags}";
+                        if (entityManager.HasComponent<Curve>(owner))
+                        {
+                            var c = entityManager.GetComponentData<Curve>(owner).m_Bezier;
+                            source += $", worldCurve=[{c.a};{c.b};{c.c};{c.d}]";
+                        }
+                        Entity current=owner;
+                        for(int depth=0;depth<3 && entityManager.Exists(current);depth++)
+                        {
+                            if(entityManager.HasComponent<Node>(current))
+                                source+=$", parent{depth}Node={current.Index}:{current.Version} at {entityManager.GetComponentData<Node>(current).m_Position}";
+                            if(entityManager.HasComponent<Game.Objects.Transform>(current))
+                                source+=$", object{depth}Position={entityManager.GetComponentData<Game.Objects.Transform>(current).m_Position}";
+                            if(!entityManager.HasComponent<Owner>(current))break;
+                            current=entityManager.GetComponentData<Owner>(current).m_Owner;
+                            source+=$", parent{depth+1}={current.Index}:{current.Version}";
+                        }
+                    }
+                    catch (System.Exception ex)
+                    {
+                        source += $", ownerDiagnosticError={ex.GetType().Name}: {ex.Message}";
+                    }
+                    // ValidationSystem preserves the collision counterpart on the icon,
+                    // independently of the Temp object which owns the error.
+                    try
+                    {
+                        if (!entityManager.HasComponent<Target>(icon))
+                            source += ", target=(none)";
+                        else
+                        {
+                            Entity target = entityManager.GetComponentData<Target>(icon).m_Target;
+                            source += $", target={target.Index}:{target.Version}";
+                            if (target == Entity.Null)
+                                source += " (null)";
+                            else if (!entityManager.Exists(target))
+                                source += " (missing)";
+                            else
+                            {
+                                string targetPrefab = "(none)";
+                                if (entityManager.HasComponent<PrefabRef>(target))
+                                {
+                                    Entity prefab = entityManager.GetComponentData<PrefabRef>(target).m_Prefab;
+                                    targetPrefab = prefabSystem.TryGetPrefab(prefab, out PrefabBase resolved)
+                                        ? resolved.name : $"{prefab.Index}:{prefab.Version} (unresolved)";
+                                }
+                                source += $", targetPrefab={targetPrefab}, targetHidden={entityManager.HasComponent<Hidden>(target)}";
+                                if (entityManager.HasComponent<Temp>(target))
+                                {
+                                    var targetTemp = entityManager.GetComponentData<Temp>(target);
+                                    source += $", targetOriginal={targetTemp.m_Original.Index}:{targetTemp.m_Original.Version}, targetFlags={targetTemp.m_Flags}";
+                                }
+                                else source += ", targetTemp=(none)";
+                                if (entityManager.HasComponent<Owner>(target))
+                                {
+                                    Entity targetOwner = entityManager.GetComponentData<Owner>(target).m_Owner;
+                                    source += $", targetOwner={targetOwner.Index}:{targetOwner.Version}";
+                                }
+                                else source += ", targetOwner=(none)";
+                                if (entityManager.HasComponent<Node>(target))
+                                    source += $", targetNode={entityManager.GetComponentData<Node>(target).m_Position}";
+                                if (entityManager.HasComponent<Curve>(target))
+                                {
+                                    var c = entityManager.GetComponentData<Curve>(target).m_Bezier;
+                                    source += $", targetCurve=[{c.a};{c.b};{c.c};{c.d}]";
+                                }
+                                if (entityManager.HasComponent<Game.Objects.Transform>(target))
+                                    source += $", targetPosition={entityManager.GetComponentData<Game.Objects.Transform>(target).m_Position}";
+                            }
+                        }
+                    }
+                    catch (System.Exception ex)
+                    {
+                        source += $", targetDiagnosticError={ex.GetType().Name}: {ex.Message}";
+                    }
+                    group.Sources.Add(source);
+                }
             }
             return errors;
         }

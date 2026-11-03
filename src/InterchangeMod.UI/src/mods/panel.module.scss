@@ -17,10 +17,65 @@
   max-height: 520rem;
 }
 
+.nodeContent {
+  max-height: 400rem;
+}
+
+.nodeActions {
+  padding: 6rem;
+  border-top: 1rem solid rgba(255, 255, 255, 0.2);
+  background-color: rgba(0, 0, 0, 0.25);
+}
+
+.nodeStatus {
+  font-size: 14rem;
+  color: rgba(220, 238, 255, 0.95);
+  max-height: 100rem;
+}
+
+.nodeFeedback {
+  margin-top: 5rem;
+}
+
+.nodeFailure {
+  margin-top: 6rem;
+  padding: 8rem;
+  border: 1rem solid rgba(255, 110, 100, 0.85);
+  border-radius: 4rem;
+  background-color: rgba(150, 35, 30, 0.8);
+}
+
+.nodeFailure .nodeStatus {
+  font-size: 15rem;
+  color: white;
+}
+
+.nodeFailureTitle {
+  margin-bottom: 5rem;
+  font-size: 17rem;
+  font-weight: bold;
+  color: white;
+}
+
+.nodeRetryButton {
+  width: 100%;
+  margin-top: 8rem;
+  padding: 6rem;
+  font-size: 14rem;
+  color: white;
+  background-color: rgba(255, 255, 255, 0.16);
+  border-radius: 4rem;
+}
+
 // 错误区固定在设置区下面，分隔线隔开；错误很多时自己滚动
-.status {
+.status,
+.nodeOtherStatus {
   max-height: 200rem;
   border-top: 1rem solid rgba(255, 255, 255, 0.15);
+}
+
+.nodeOtherStatus {
+  max-height: 120rem;
 }
 
 .section {

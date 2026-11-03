@@ -9,6 +9,7 @@ using Game.Prefabs;
 using Game.Simulation;
 using Game.Tools;
 using InterchangeMod.Generation;
+using InterchangeMod.Generation.Endpoints;
 using InterchangeMod.Generation.Geometry;
 using InterchangeMod.Generation.Junctions;
 using InterchangeMod.Generation.Roads;
@@ -69,6 +70,7 @@ namespace InterchangeMod.Systems
         private readonly IInterchangeTemplate m_Turbine = new StackTemplate(turbine: true);
         private readonly IInterchangeTemplate m_SemiDirectionalT = new DirectionalTTemplate(directional: false);
         private readonly IInterchangeTemplate m_Wye = new WyeTemplate();
+        private readonly IInterchangeTemplate m_NodeOnlyTemplate = new NodeOnlyInterchangeTemplate();
 
         /// <summary>面板选的立交类型。</summary>
         /// <summary>中式快速路节点（十字或 T 型）：有地面辅路。</summary>
@@ -90,9 +92,10 @@ namespace InterchangeMod.Systems
 
         /// <summary>Y 型分向：三条路约 120° 汇于一处，三条臂互不相对（不是“主线 + 支路”）。</summary>
         private bool IsWye => setting?.InterchangeType == "Wye";
+        private bool NodeOnlyType => System.Enum.TryParse(setting?.InterchangeType,out InterchangeType type)&&EndpointTypeCatalog.Find(type)?.NodeOnly==true;
         /// <summary>有环道的类型（喇叭形、苜蓿叶）：环道半径可自动；双向被交道路在立交内拆成双幅。</summary>
         private bool HasLoops => IsTrumpet || IsCloverleaf || IsParclo || IsRoundabout;
-        private IInterchangeTemplate CurrentTemplate => IsWye ? m_Wye : IsTurbine ? m_Turbine : IsStack ? m_Stack : setting?.InterchangeType == "DirectionalT" ? m_DirectionalT
+        private IInterchangeTemplate CurrentTemplate => NodeOnlyType ? m_NodeOnlyTemplate : IsWye ? m_Wye : IsTurbine ? m_Turbine : IsStack ? m_Stack : setting?.InterchangeType == "DirectionalT" ? m_DirectionalT
             : setting?.InterchangeType == "SemiDirectionalT" ? m_SemiDirectionalT : IsRoundabout ? m_Roundabout : IsParclo ? m_Parclo : IsCloverleaf ? m_Cloverleaf : IsTrumpet ? m_Trumpet : IsExpresswayT ? m_ExpresswayT : IsExpressway ? m_Expressway : IsSinglePoint ? m_SinglePoint : m_Diamond;
 
         /// <summary>主线是否在上层：中式快速路节点和单点立交的主线总是高架。</summary>
@@ -190,7 +193,7 @@ namespace InterchangeMod.Systems
         public string selectedRoadName => m_SelectedRoad?.name ?? "";
 
         /// <summary>面板改了参数：下一帧重建预览。</summary>
-        public void NotifySettingsChanged() => m_SettingsVersion++;
+        public void NotifySettingsChanged() { m_SettingsVersion++; InvalidateNodeConfirmation(); InvalidateNodeSolve(); }
 
         /// <summary>预览已固定，等待确认放置。</summary>
         public bool pinned => m_Pinned;
@@ -205,6 +208,8 @@ namespace InterchangeMod.Systems
         public void Browse(bool on)
         {
             browsing = on;
+            InvalidateNodeSolve();
+            InvalidateNodeConfirmation();
             if (on)
                 Unpin();
             m_SettingsVersion++;
@@ -217,7 +222,12 @@ namespace InterchangeMod.Systems
         public bool headingFree => !m_Pinned && (m_Match == null || m_Match.Error != null);
 
         /// <summary>面板“确认放置”：下一次更新时放置固定的预览（游戏报错阻止放置时不放）。</summary>
-        public void RequestConfirm() => m_ConfirmRequested = true;
+        public void RequestConfirm()
+        {
+            // Legacy UI events carry no visible node revision and cannot confirm node previews.
+            if(nodeMode)return;
+            m_ConfirmRequested=true;
+        }
 
         /// <summary>面板“取消固定”：预览重新跟随鼠标。</summary>
         public void Unpin()
@@ -236,6 +246,7 @@ namespace InterchangeMod.Systems
             m_NetSearchSystem = World.GetOrCreateSystemManaged<Game.Net.SearchSystem>();
             m_SimulationSystem = World.GetOrCreateSystemManaged<SimulationSystem>();
             m_DefinitionQuery = GetDefinitionQuery();
+            CreateNodePlacementQuery();
             m_IconQuery = GetEntityQuery(ComponentType.ReadOnly<Icon>(), ComponentType.ReadOnly<Owner>(), ComponentType.ReadOnly<PrefabRef>());
             m_PrefabResolver = new PrefabResolver(m_PrefabSystem);
             m_Random = new Random(0x1A2B3C4Du);
@@ -245,6 +256,7 @@ namespace InterchangeMod.Systems
 
         protected override void OnDestroy()
         {
+            m_MixedNodeSolve.Dispose();
             m_ZoomBarrier?.Dispose();
             m_ToolSystem.EventPrefabChanged -= OnPrefabChanged;
             base.OnDestroy();
@@ -339,7 +351,7 @@ namespace InterchangeMod.Systems
             base.InitializeRaycast();
             m_ToolRaycastSystem.typeMask = TypeMask.Terrain;
             // 路口匹配：同时检测道路，鼠标指着已有道路时对准它所在的路口
-            if (setting != null && effective.MatchJunctions)
+            if (nodeMode || (setting != null && effective.MatchJunctions))
             {
                 m_ToolRaycastSystem.typeMask |= TypeMask.Net;
                 m_ToolRaycastSystem.netLayerMask = Layer.Road;
@@ -349,11 +361,13 @@ namespace InterchangeMod.Systems
         protected override void OnStartRunning()
         {
             base.OnStartRunning();
+            InvalidateNodeSolve();
             m_HasPreview = false;
             m_Pinned = false;
             m_HasPreviewResult = false;
             browsing = true;
             m_ConfirmRequested = false;
+            ResetNodePreview();
             m_LastReportedErrors = null;
             m_RotateLeftAction = setting.GetAction(Mod.kRotateLeftActionName);
             m_RotateRightAction = setting.GetAction(Mod.kRotateRightActionName);
@@ -373,6 +387,7 @@ namespace InterchangeMod.Systems
 
         protected override void OnStopRunning()
         {
+            InvalidateNodeSolve(); m_NodeGenerate = false;
             m_RotateLeftAction.shouldBeEnabled = false;
             m_RotateRightAction.shouldBeEnabled = false;
             if (m_ZoomBarrier != null)
@@ -388,6 +403,19 @@ namespace InterchangeMod.Systems
             if (m_FocusChanged || m_SelectedRoad == null)
                 return inputDeps;
             EnsureRoadCatalog();
+
+            if(NodeOnlyType&&!nodeMode)SetNodeMode(true);
+            if (m_NodeWasMode != nodeMode)
+            {
+                m_NodeWasMode = nodeMode;
+                ResetNodePreview();
+                m_NodeDirty = true;
+                m_HasPreview = false; m_HasOrigin = false; m_Pinned = false; m_ConfirmRequested = false;
+                m_LastSegments = null;
+                snapshot = null;
+                return Clear(inputDeps);
+            }
+            if (nodeMode) return UpdateNodeMode(inputDeps);
 
             // 右键：固定时取消固定（预览重新跟随鼠标），否则退出工具
             if (cancelAction.WasPressedThisFrame())
@@ -554,6 +582,7 @@ namespace InterchangeMod.Systems
         /// <summary>放置当前预览；游戏报错阻止放置时记下原因并返回 null。</summary>
         private JobHandle? TryApply(JobHandle inputDeps)
         {
+            if (nodeMode) return null;
             if (GetAllowApply())
             {
                 applyMode = ApplyMode.Apply;
@@ -847,12 +876,32 @@ namespace InterchangeMod.Systems
         /// </summary>
         private void LogErrorLocations(List<GameError> errors)
         {
+            if(nodeMode && m_NodeSpatialPreview!=null)
+            {
+                foreach(var error in errors)
+                    for(int sample=0;sample<error.Positions.Count;sample++)
+                    {
+                        var world=error.Positions[sample];string nearest="?";float best=float.MaxValue;
+                        foreach(var segment in m_NodeSpatialPreview.Segments)
+                            for(int i=0;i<=32;i++)
+                            {
+                                var p=segment.WorldCurve.Evaluate(i/32f);
+                                float d=(p.X-world.x)*(p.X-world.x)+(p.Z-world.z)*(p.Z-world.z);
+                                if(d<best) {best=d;nearest=$"arm={segment.SourceArm+1}, {segment.Kind}, curve={segment.WorldCurve}";}
+                            }
+                        Mod.log.Info($"[autochange-error] {error.Type} {error.Road}, world={world}, nearest={nearest}, horizontalDistance={System.Math.Sqrt(best):F2}m");
+                        if(error.Sources!=null&&sample<error.Sources.Count)
+                            Mod.log.Info($"[error-source] {error.Type}: {error.Sources[sample]}");
+                    }
+                return;
+            }
             if (m_LastSegments == null)
                 return;
             foreach (var error in errors)
             {
-                foreach (float3 world in error.Positions)
+                for (int sample = 0; sample < error.Positions.Count; sample++)
                 {
+                    float3 world = error.Positions[sample];
                     var local = new Vec3(world.x - m_LastOrigin.x, world.y, world.z - m_LastOrigin.z).RotateY(-m_LastYaw);
                     string nearest = "?";
                     float best = float.MaxValue;
@@ -870,6 +919,8 @@ namespace InterchangeMod.Systems
                         }
                     }
                     Mod.log.Info($"[debug]   {error.Type} {error.Road} at local ({local.X:F1}, {local.Z:F1}), height {world.y:F1}: nearest segment {nearest} ({System.Math.Sqrt(best):F1} m)");
+                    if (error.Sources != null && sample < error.Sources.Count)
+                        Mod.log.Info($"[error-source] {error.Type}: {error.Sources[sample]}; previewOrigin={m_LastOrigin}, yaw={m_LastYaw:F6}");
                 }
             }
         }
@@ -879,16 +930,13 @@ namespace InterchangeMod.Systems
         {
             if (snapshot == null)
                 return;
-            if (m_ErrorQuery.IsEmptyIgnoreFilter)
-            {
-                if (snapshot.GameErrors.Count > 0)
-                    snapshot.GameErrors = new List<GameError>();
-                return;
-            }
-            snapshot.GameErrors = PlacementErrorReader.Read(EntityManager, m_PrefabSystem, m_IconQuery);
+            // Native Error components and tool-error icons arrive through different
+            // command buffers. An empty Error query must not hide a live warning/error icon.
+            bool nodeDiagnostics=nodeMode&&setting.InterchangeType=="Stack";
+            snapshot.GameErrors = PlacementErrorReader.Read(EntityManager, m_PrefabSystem, m_IconQuery, setting.DebugLogging||nodeDiagnostics);
             // 调试：错误变化时记下每个错误的位置和最近的路段，不用点击放置也能查
-            string summary = string.Join("; ", snapshot.GameErrors);
-            if (setting.DebugLogging && summary != m_LastLoggedGameErrors)
+            string summary = (nodeDiagnostics?$"revision={m_NodePlacement.Revision}; ":"")+string.Join("; ", snapshot.GameErrors);
+            if ((setting.DebugLogging||nodeDiagnostics) && summary != m_LastLoggedGameErrors)
             {
                 m_LastLoggedGameErrors = summary;
                 if (snapshot.GameErrors.Count > 0)
@@ -971,6 +1019,11 @@ namespace InterchangeMod.Systems
                         Mod.log.Info($"[debug] curve: bent in {watch.ElapsedMilliseconds} ms, grade {p.MaxGrade:P1} -> {used.MaxGrade:P1}");
                 }
                 m_LastSegments = segments;
+                // Report actual reduced sections, rather than only an available prefab.
+                if (!segments.Any(s => s.Role == RoadRole.MainRoad && s.Prefab == snapshot.MainReducedRoad))
+                { snapshot.MainReducedRoad = ""; snapshot.MainReducedLanes = 0; }
+                if (!segments.Any(s => s.Role == RoadRole.CrossRoad && s.Prefab == snapshot.CrossReducedRoad))
+                { snapshot.CrossReducedRoad = ""; snapshot.CrossReducedLanes = 0; }
                 var geometryErrors = InterchangeLayout.ValidateGeometry(segments, p);
                 if (geometryErrors.Count > 0 && !warp.IsIdentity)
                     errors.Add("弯道上放不下（弯道内侧的匝道坡度超限）：请先把立交范围内的道路调整得平直一些，或加大最大坡度、换一种立交类型");
@@ -1019,7 +1072,7 @@ namespace InterchangeMod.Systems
                         ref terrain, m_Match.Crossing ? m_CrossingEdges : m_MatchRoadEdges, m_Match.Crossing ? m_CrossingEdges : null,
                         out HashSet<Entity> converted);
                     snapshot.ConnectedEnds = RoadRemover.CreateDefinitions(commandBuffer, EntityManager, removed, m_RemovalFootprint, corridor,
-                        converted, segments, m_PrefabSystem, m_RoadsByName, m_SelectedRoad, origin, yaw, ref terrain, m_RandomSeed + segments.Count, errors);
+                        converted, segments, m_PrefabSystem, m_RoadsByName, m_SelectedRoad, origin, yaw, ref terrain, m_RandomSeed + segments.Count, errors, snapshot.Warnings);
                     snapshot.RemovedRoads = removed.Count;
                 }
             }
@@ -1427,7 +1480,13 @@ namespace InterchangeMod.Systems
                 string config = $"main {Describe(p.Legs[0])}; cross {Describe(p.Legs[1])}; " +
                     $"ramp '{snapshot.RampRoad}' {snapshot.RampLanes} lanes (target {snapshot.RampTarget}{(snapshot.RampAuto ? ", auto" : "")})";
                 if (config != m_LastDebugConfig)
+                {
                     Mod.log.Info($"[debug] {config}");
+                    for (int leg = 0; leg < p.Legs.Count; leg++)
+                        Mod.log.Info($"[road-geometry] leg={leg}, groundHeight={p.Legs[leg].GroundHeight.Min:F4}..{p.Legs[leg].GroundHeight.Max:F4}, " +
+                            $"elevatedHeight={p.Legs[leg].ElevatedHeight.Min:F4}..{p.Legs[leg].ElevatedHeight.Max:F4}, " +
+                            $"middlePillarSpacing={p.Legs[leg].MiddlePillarSpacing}, maxElevatedEdge={p.Legs[leg].MaxElevatedEdgeLength:F4}");
+                }
                 m_LastDebugConfig = config;
             }
             return p;
@@ -1624,6 +1683,15 @@ namespace InterchangeMod.Systems
             {
                 p.CrossReducedPrefab = crossReduced.Name;
                 p.CrossReducedWidth = m_PrefabResolver.GetWidth(crossReducedPrefab);
+                snapshot.CrossReducedRoad = crossReduced.Name;
+                snapshot.CrossReducedLanes = crossReduced.LanesPerDirection;
+            }
+            if (IsStack)
+            {
+                if (p.Legs[0].Form == RoadForm.Dual && p.MainReducedPrefab == null)
+                    snapshot.Warnings.Add("主线未启用减车道：现有车道数减去匝道车道数后无可用道路，请检查匝道车道数和道路选择");
+                if (p.Legs[1].Form == RoadForm.Dual && p.CrossReducedPrefab == null)
+                    snapshot.Warnings.Add("被交道路未启用减车道：现有车道数减去匝道车道数后无可用道路，请检查匝道车道数和道路选择");
             }
 
             if (IsExpressway && m_RoadsByName.TryGetValue(p.FrontagePrefab ?? "", out RoadInfo frontage)
@@ -1761,6 +1829,8 @@ namespace InterchangeMod.Systems
         /// <summary>车道平衡：主线中段和辅路加宽段实际用的道路；未启用或找不到合适道路时为空。</summary>
         public string MainReducedRoad = "";
         public int MainReducedLanes;
+        public string CrossReducedRoad = "";
+        public int CrossReducedLanes;
         public string FrontageWidenedRoad = "";
         public int FrontageWidenedLanes;
         /// <summary>主线外部双向道路名：立交内部改用双幅并在臂端过渡时非空。</summary>
@@ -1785,6 +1855,7 @@ namespace InterchangeMod.Systems
         public float RampLength;
         /// <summary>生成前我们自己检查出的问题（参数、坡度、预制体）。</summary>
         public List<string> Errors = new List<string>();
+        public List<string> Warnings = new List<string>();
         /// <summary>游戏对预览报的问题（重叠、高度不足等），由工具定期读取。</summary>
         public List<GameError> GameErrors = new List<GameError>();
         /// <summary>三向立交对准了十字路口：去掉鼠标对面那条臂。</summary>

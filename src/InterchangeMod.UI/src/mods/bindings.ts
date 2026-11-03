@@ -5,7 +5,7 @@ const GROUP = "interchangeMod";
 
 export type RoadForm = "Auto" | "TwoWay" | "Dual";
 
-export type InterchangeType = "Diamond" | "ExpresswayNode" | "ExpresswayT" | "SinglePoint" | "Trumpet" | "Cloverleaf" | "PartialCloverleaf" | "Roundabout" | "DirectionalT" | "SemiDirectionalT" | "Stack" | "Turbine" | "Wye";
+export type InterchangeType = "Diamond" | "ExpresswayNode" | "ExpresswayT" | "SinglePoint" | "Trumpet" | "Cloverleaf" | "PartialCloverleaf" | "Roundabout" | "DirectionalT" | "SemiDirectionalT" | "Stack" | "Turbine" | "Wye" | "CompactGrid";
 
 export interface PanelSettings {
   /** 基层（下层）离地高度。 */
@@ -116,6 +116,8 @@ export interface Resolved {
   /** 车道平衡实际用的道路；为空表示没有变化。 */
   mainReducedRoad: string;
   mainReducedLanes: number;
+  crossReducedRoad: string;
+  crossReducedLanes: number;
   frontageWidenedRoad: string;
   frontageWidenedLanes: number;
   mainElevation: number;
@@ -140,11 +142,15 @@ export interface Resolved {
   loopRadius: number;
   /** 生成前检查出的问题（参数、坡度、预制体）。 */
   errors: string[];
+  warnings: string[];
   /** 游戏对预览报的问题：type 是游戏 ErrorType 名，elevation 是该处离地高度。 */
   gameErrors: { type: string; road: string; elevation: number; blocking: boolean }[];
 }
 
 export interface PanelState {
+  nodes?: { enabled: boolean; activeArm: number; grade: number; retreatLimit?: number; failure: boolean; message: string;
+    hasPreview?: boolean; canConfirm?: boolean; revision?: number;
+    arms: { index: number; ports: { id: number; road: string; direction: string; height: number }[] }[] };
   active: boolean;
   locale?: string;
   selectedRoad?: string;
@@ -180,6 +186,12 @@ export interface RoadRow {
 
 export const state$ = bindValue<string>(GROUP, "state", '{"active":false}');
 export const roads$ = bindValue<string>(GROUP, "roads", "[]");
+export const nodeMode = (enabled: boolean) => trigger(GROUP, "nodeMode", enabled);
+export const nodeArm = (arm: number) => trigger(GROUP, "nodeArm", arm);
+export const nodeClear = (arm: number) => trigger(GROUP, "nodeClear", arm);
+export const nodeGrade = (grade: number) => trigger(GROUP, "nodeGrade", grade);
+export const nodeRetreat = (distance: number) => trigger(GROUP, "nodeRetreat", distance);
+export const nodePreview = () => trigger(GROUP, "nodePreview");
 
 // Anarchy 模组（无视碰撞）自己的绑定：组 "Anarchy"，值 AnarchyEnabled，触发 AnarchyToggled。
 // 没装 Anarchy 时这个值一直是默认的 false，面板也不显示开关。
@@ -202,6 +214,11 @@ export function toggleTool() {
 /** 放置固定的预览。 */
 export function confirmPlacement() {
   trigger(GROUP, "confirm");
+}
+
+/** Confirm exactly the node preview revision displayed by this render. */
+export function confirmNodePlacement(displayedRevision: number) {
+  trigger(GROUP, "confirmNode", displayedRevision);
 }
 
 /** 取消固定：预览重新跟随鼠标。 */

@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.0.9-beta — 2026-11-03
+
+- Archive the autochange node-selected interchange workflow: colored open-endpoint selection, complete constrained solving, preview and native-gated confirmed placement.
+- Support cloverleaf (ordinary/hug-loop), stack (right/left exits), turbine, trumpet, directional T, semi-directional T, wye, compact grid and roundabout (circle/racetrack). Skip the previously excluded node-mode types and remove compact plum.
+- Match symmetric two-way, divided and mixed inputs by exact lanes; add bounded real-road reconstruction, retained tails, curve/mixed-height adaptation, lane balance and bridge/clearance checks.
+- Improve stack right-ramp curvature continuity and width-safe short-tail cut selection. Move two-way/mixed stack solving to a single cancellable background worker, discard stale requests and revalidate source geometry before native submission.
+- Read native error icons independently of Error-component timing and improve diagnostics and panel feedback. Preserve actual game placement eligibility.
+- Validation: the archived functional baseline passed 2319 automated checks with no failures or skipped tests. The user confirmed the latest stack test scenes passed and authorized version 1.0.9-beta. This confirmation does not certify every road combination, traffic scenario or save/load path.
+- 本地版本归档；是否公开发布、提交或推送不包含在此次版本归档操作内。
+
+## autochange v0.0.1beta (0.0.1-beta) — 2026-10-29
+
+- Initialize the independent `autochange` development branch, preserving the uncommitted 1.0.8.1-beta fixes as its working baseline.
+- Design target: select open road endpoints and solve the whole interchange against endpoint constraints, starting with cloverleaf. Permit bounded approach reconstruction and an optional free-mode grade limit of 30%.
+- Development setup and design only: node selection and the new solver are not implemented or game-tested in this version.
+
+## 1.0.8.1-beta — 2026-10-29
+
+- Ground merge hotfix: keep stack/turbine ground courses below the observed game subdivision length, avoid ramp overlap zones when placing main-road nodes, and shorten excessively long ground merge curves. The user confirmed error-free pinned previews for automatic stack and two-way turbine in the original test scene.
+- Regression hotfix: retained-road geometry checks now accept either curve parameter orientation. Incoming roads no longer fail the legal local-join exemption; traffic direction checks and collisions with other roads/pillars remain enforced.
+
+- Audit all 13 templates for two-way, dual-carriageway and mixed external roads; document unsupported transitions separately from game-tested scenarios.
+- Fix stack/turbine forcing wide internal carriageways into narrow external two-way roads with parallel node alignment; use width-aware split/merge transitions.
+- Verify left-exit/left-entry reduced sections and preserved outer edges; display the actual reduced cross road and explain when no matching reduced road is available.
+- Block failed required reconnections and conflicts between retained original roads and other new roads/pillars; warn for manual connections in mixed layouts.
+- Further gameplay coverage remains pending, including actual placement, traffic, left-exit/left-entry and the full mixed-road matrix. Known SinglePoint/Trumpet external two-way main-road transitions remain unsupported and are now explicitly rejected; see the support audit.
+
 ## 1.0.8-beta — 2026-10-28
 
 - Fix water bridge previews incorrectly blocked by applying toolbar elevation offsets to the bridge-to-riverbed distance; preserve world geometry and actual terrain elevation.

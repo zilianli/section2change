@@ -47,6 +47,8 @@ namespace InterchangeMod.Generation.Templates
                 return errors;
 
             var legs = p.Legs;
+            if (legs[0].NeedsDualToTwoWayTransition || legs[2].NeedsDualToTwoWayTransition)
+                errors.Add("单点立交暂不支持主线外部双向道路转接，请使用双幅主线或其他立交类型");
             if (Directions.AngleBetween(legs[0].Angle, legs[2].Angle) < 180f - kOppositeTolerance
                 || Directions.AngleBetween(legs[1].Angle, legs[3].Angle) < 180f - kOppositeTolerance)
                 errors.Add("单点立交要求主线（臂 0/2）和被交道路（臂 1/3）各自是直线");

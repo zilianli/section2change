@@ -8,6 +8,7 @@ import { Choice, SpacingStepper, Stepper } from "./Stepper";
 import { thumbnails } from "./thumbs";
 import closeIcon from "./icons/interchange-close.svg";
 import styles from "./panel.module.scss";
+import { nodeMode, nodeArm, nodeClear, nodeGrade, nodePreview, nodeRetreat, confirmNodePlacement } from "./bindings";
 
 type PickerSlot = "main" | "cross" | "ramp" | "frontage" | null;
 
@@ -15,8 +16,9 @@ type PickerSlot = "main" | "cross" | "ramp" | "frontage" | null;
 // 所以凡是一行文字都先拼成一个字符串再放进元素。
 
 /** 首页的类型：四向、三向两组（顺序同原来的类型按钮）。 */
-const fourWayTypes = ["Diamond", "ExpresswayNode", "SinglePoint", "Cloverleaf", "PartialCloverleaf", "Roundabout", "Stack", "Turbine"];
+const fourWayTypes = ["Diamond", "ExpresswayNode", "SinglePoint", "Cloverleaf", "PartialCloverleaf", "Roundabout", "Stack", "Turbine", "CompactGrid"];
 const threeWayTypes = ["ExpresswayT", "Trumpet", "SemiDirectionalT", "DirectionalT", "Wye"];
+const nodeOnlyTypes = ["CompactGrid"];
 
 // 使用指南各节按轻重给标题配色：重要提醒红、注意事项橙、说明蓝、其他灰
 const guideLevelClass: Record<string, string> = {
@@ -30,7 +32,7 @@ const typeNameOf = (t: Strings, type: string) =>
     Diamond: t.typeDiamond, ExpresswayNode: t.typeExpressway, SinglePoint: t.typeSinglePoint, Cloverleaf: t.typeCloverleaf,
     PartialCloverleaf: t.typeParclo, Roundabout: t.typeRoundabout, Stack: t.typeStack, Turbine: t.typeTurbine,
     ExpresswayT: t.typeExpresswayT, Trumpet: t.typeTrumpet, SemiDirectionalT: t.typeSemiDirectionalT, DirectionalT: t.typeDirectionalT,
-    Wye: t.typeWye,
+    Wye: t.typeWye, CompactGrid: t.typeCompactGrid,
   } as Record<string, string>)[type] ?? t.typeDiamond;
 
 const introOf = (t: Strings, type: string) =>
@@ -38,7 +40,7 @@ const introOf = (t: Strings, type: string) =>
     Diamond: t.introDiamond, ExpresswayNode: t.introExpresswayNode, SinglePoint: t.introSinglePoint, Cloverleaf: t.introCloverleaf,
     PartialCloverleaf: t.introPartialCloverleaf, Roundabout: t.introRoundabout, Stack: t.introStack, Turbine: t.introTurbine,
     ExpresswayT: t.introExpresswayT, Trumpet: t.introTrumpet, SemiDirectionalT: t.introSemiDirectionalT, DirectionalT: t.introDirectionalT,
-    Wye: t.introWye,
+    Wye: t.introWye, CompactGrid: t.introCompactGrid,
   } as Record<string, string>)[type] ?? "";
 
 /** 注意事项（设置页里默认收起）：每种立交的结构、要求和交角范围。 */
@@ -47,7 +49,7 @@ const notesOf = (t: Strings, type: string) =>
     Diamond: t.diamondNote, ExpresswayNode: t.expresswayNote, SinglePoint: t.singlePointNote, Cloverleaf: t.cloverleafNote,
     PartialCloverleaf: t.parcloNote, Roundabout: t.roundaboutNote, Stack: t.stackNote, Turbine: t.turbineNote,
     ExpresswayT: t.expresswayTNote, Trumpet: t.trumpetNote, SemiDirectionalT: t.semiDirectionalTNote, DirectionalT: t.directionalTNote,
-    Wye: t.wyeNote,
+    Wye: t.wyeNote, CompactGrid: t.compactGridNote,
   } as Record<string, string>)[type] ?? "";
 
 /**
@@ -116,6 +118,7 @@ export const InterchangePanel = () => {
   if (state.browsing) {
     const open = (type: string) => {
       if (type !== settings.InterchangeType) setValue("InterchangeType", type);
+      if (nodeOnlyTypes.includes(type)) nodeMode(true);
       setShowNotes(false);
       setPicker(null);
       browseTypes(false);
@@ -152,8 +155,11 @@ export const InterchangePanel = () => {
 
   // 设置页模式：自动时参数全部用默认值（C# 同样处理），只显示提示、结果和报错；手动时显示全部设置
   const manual = settings.ManualMode === true;
-  const s = manual ? settings : autoSettings(settings);
+  const s = manual || state.nodes?.enabled ? settings : autoSettings(settings);
+  const compactGrid = s.InterchangeType === "CompactGrid";
+  const nodeOnly = compactGrid;
   const r = state.resolved;
+  const nodeRevision = state.nodes?.revision;
   const match = state.match;
   const matched = match?.state === "matched";
   // 只对齐了一条普通道路：主线跟随它，被交道路仍按面板
@@ -183,7 +189,7 @@ export const InterchangePanel = () => {
   // 立交内主线总是双幅（双向主线自动拆成双幅、两端过渡）
   const mainAlwaysDual = cloverleaf || parclo || roundabout || stack || turbine || wye;
   // 车道平衡：部分苜蓿叶、环岛式没有用到
-  const laneBalanceUsed = !parclo && !roundabout && !(stack && s.StackLeftExit) && !wye;
+  const laneBalanceUsed = !parclo && !roundabout && !wye;
   // 相交角度可调范围
   const [angleMin, angleMax] = cloverleaf ? [35, 145] : parclo || roundabout || flyoverT || stack ? [60, 120] : turbine ? [70, 110] : [45, 135];
   const tee = expresswayT || trumpet || flyoverT;
@@ -245,7 +251,7 @@ export const InterchangePanel = () => {
     <div className={styles.container}>
       <Panel className={styles.panel}>
         {titleBar(`${t.title} · ${typeName}`, true)}
-        <Scrollable className={styles.content} vertical trackVisibility="scrollable">
+        <Scrollable className={state.nodes?.enabled ? styles.nodeContent : styles.content} vertical trackVisibility="scrollable">
           {/* 缩略图、简介；注意事项默认收起 */}
           <div className={styles.hero}>
             <img className={styles.heroThumb} src={thumbnails[s.InterchangeType]} />
@@ -262,14 +268,51 @@ export const InterchangePanel = () => {
 
           {/* 主开关：自动 / 手动 */}
           <div className={styles.modeRow}>
-            <Button variant="flat" selected={!manual} className={manual ? styles.modeButton : styles.modeButtonSelected}
-              onSelect={() => manual && setValue("ManualMode", false)}>{t.modeAuto}</Button>
-            <Button variant="flat" selected={manual} className={manual ? styles.modeButtonSelected : styles.modeButton}
-              onSelect={() => !manual && setValue("ManualMode", true)}>{t.modeManual}</Button>
+            <Button variant="flat" disabled={nodeOnly} selected={!manual && !state.nodes?.enabled} className={manual || state.nodes?.enabled ? styles.modeButton : styles.modeButtonSelected}
+              onSelect={() => { nodeMode(false); setValue("ManualMode", false); }}>{t.modeAuto}</Button>
+            <Button variant="flat" disabled={nodeOnly} selected={manual && !state.nodes?.enabled} className={manual && !state.nodes?.enabled ? styles.modeButtonSelected : styles.modeButton}
+              onSelect={() => { nodeMode(false); setValue("ManualMode", true); }}>{t.modeManual}</Button>
+            <Button variant="flat" selected={!!state.nodes?.enabled} className={state.nodes?.enabled ? styles.modeButtonSelected : styles.modeButton}
+              onSelect={() => nodeMode(true)}>点选节点</Button>
           </div>
 
+          {state.nodes?.enabled && <Section title="开放节点 · 实验预览">
+            {compactGrid && <div className={styles.note}>井字支持四方向双向、双幅或混合输入，每方向至少3车道；需精确匹配直行和两倍匝道车道数的内侧集散道。4车道通常分为直行2、左转1、右转1；当前只提供点选节点模式。</div>}
+            {roundabout && <div className={styles.note}>{t.roundaboutPreviewNote}</div>}
+            <div className={styles.note}>{`${nodeOnly ? "将四条臂分别归组，可从任一方向开始；选齐后自动按方位排序，颜色编号同步调整，方向1/3和2/4分别相对。" : s.InterchangeType === "Wye" ? "将三条臂分别归组，三条臂无主次，可从任一方向开始。" : state.nodes.arms.length === 3 ? "将三条臂分别归组，可从任一方向开始。选齐后自动识别相对主线，调整为方向 1/3，支路为方向 2；颜色和编号同步调整。" : "按顺时针归入四个方向；方向 1/3 为主线两端。"}每个方向选一个对称双向端点，或一进一出的两个单向端点，可混合选择。${state.nodes.arms.length === 3 ? "三个方向共3～6个端点。" : "四个方向共4～8个端点。"}双向道路按每方向车道数精确匹配单向道路，缺少匹配时会提示更换道路。灰色为可选端点，青色为悬停，选中后按方向着色并标号。选齐后自动尝试预览；重复点击取消，右键清空当前方向。`}</div>
+            {s.InterchangeType === "Wye" && <div className={styles.note}>Y型支持三方向双向、双幅或混合输入，相邻交角90°～150°；三条臂每方向车道数须相同且为偶数，自动匹配半车道数匝道。三个端部可不同高程，由接路过渡。</div>}
+            {state.nodes.arms.map(a => <div key={a.index}>
+              <Button variant="flat" className={state.nodes?.activeArm === a.index ? styles.modeButtonSelected : styles.modeButton} selected={state.nodes?.activeArm === a.index} onSelect={() => nodeArm(a.index)}>{`${["① 金色", "② 蓝色", "③ 紫色", "④ 绿色"][a.index]} · ${a.ports.length} 个端点`}</Button>
+              <Button variant="flat" className={styles.modeButton} onSelect={() => nodeClear(a.index)}>清空</Button>
+              {a.ports.map(p => <div key={p.id} className={styles.note}>{`${p.direction} · ${p.road} · 海拔 ${p.height.toFixed(1)} m · #${p.id}`}</div>)}
+            </div>)}
+            <Stepper label="最大坡度" value={state.nodes.grade} min={3} max={30} step={1} unit="%" onChange={nodeGrade} />
+            {state.nodes.grade > 18 && <div className={styles.warnings}>{t.nodeHighGradeHint}</div>}
+            {trumpet && <Choice label={t.loopUse} value={s.TrumpetLoopForExit ? "exit" : "entry"}
+              options={[{value:"exit",text:t.loopExit},{value:"entry",text:t.loopEntry}]}
+              onChange={v=>setValue("TrumpetLoopForExit",v==="exit")} />}
+            {flyoverT && <Choice label={t.flyoverLevels} value={s.DirectionalTwoLevel ? "two" : "three"}
+              options={[{value:"two",text:t.twoLevels},{value:"three",text:t.threeLevels}]}
+              onChange={v=>setValue("DirectionalTwoLevel",v==="two")} />}
+            {cloverleaf && <Choice label={t.rightTurnRamp} value={s.CloverleafHugLoop ? "hug" : "outer"}
+              options={[{value:"outer",text:t.rightTurnOuter},{value:"hug",text:t.rightTurnHug}]}
+              onChange={v=>setValue("CloverleafHugLoop",v==="hug")} />}
+            {cloverleaf && s.CloverleafHugLoop && <div className={styles.note}>{t.rightTurnHugNote}</div>}
+            {roundabout && <Choice label={t.ringShape} value={s.RoundaboutRacetrack ? "racetrack" : "circle"}
+              options={[{value:"circle",text:t.ringCircle},{value:"racetrack",text:t.ringRacetrack}]}
+              onChange={v=>setValue("RoundaboutRacetrack",v==="racetrack")} />}
+            {stack && <Choice label={t.leftTurnRamps} value={s.StackLeftExit ? "left" : "right"}
+              options={[{value:"right",text:t.rightOutRightIn},{value:"left",text:t.leftOutLeftIn}]}
+              onChange={v=>setValue("StackLeftExit",v==="left")} />}
+            {stack && <div className={styles.note}>{s.StackLeftExit?t.stackLeftExitNote:t.stackRightExitNote}</div>}
+            <Stepper label="自动退接上限/臂" value={state.nodes.retreatLimit ?? 1000} min={0} max={1000} step={50} unit=" m" onChange={nodeRetreat} />
+            <Stepper label="基层高程偏移" value={s.BaseElevation} min={-30} max={30} step={.5} unit=" m" onChange={v => setValue("BaseElevation",v)} />
+            <Stepper label={compactGrid ? "相邻层高差（0 = 自动）" : "两层高差（0 = 自动）"} value={s.LevelGap} min={0} max={30} step={.5} unit=" m" onChange={v => setValue("LevelGap",v)} />
+            <div className={styles.note}>空间不足时沿真实同路型道路向外退接，遇路口或尽头停止。白点显示新接点，虚线显示改造范围。{compactGrid ? "井字采用两层转向集散、两层外侧直行；相邻层差自动至少10米，并按实际净空增大。原路端高程由接路保留。" : roundabout ? t.roundaboutHeightNote : s.InterchangeType === "Wye" ? "Y型基层采用六端点平均高程加偏移；自动层差至少10米，并按道路结构净空增大。原路端部高差由接路过渡。" : "自动层高优先保留已有高差，不足时使用10米。"}原生检查通过后可在面板确认放置；确认前会重新检查原路是否变化。</div>
+          </Section>}
+
           {/* 自动：对准路口照常，道路、匝道、分层等全部自动；只显示提示和结果（报错在底部） */}
-          {!manual && (
+          {!manual && !state.nodes?.enabled && (
             <>
               <Section title={t.hints}>
                 <div className={styles.note}>{t.autoNote}</div>
@@ -291,7 +334,7 @@ export const InterchangePanel = () => {
             </>
           )}
 
-          {manual && (
+          {manual && !state.nodes?.enabled && (
             <>
 
           {hasOptions && (
@@ -560,20 +603,38 @@ export const InterchangePanel = () => {
             </>
           )}
         </Scrollable>
+        {state.nodes?.enabled && <div className={styles.nodeActions}>
+          <Button variant="flat" className={styles.modeButton} onSelect={nodePreview}>生成预览</Button>
+          <div className={state.nodes.failure ? styles.nodeFailure : styles.nodeFeedback}>
+            {state.nodes.failure ? <div className={styles.nodeFailureTitle}>无法生成预览</div> : null}
+            <Scrollable className={styles.nodeStatus} vertical trackVisibility="scrollable">
+              <div>{state.nodes.message}</div>
+            </Scrollable>
+            {state.nodes.failure && (state.nodes.retreatLimit ?? 500) < 1000 ? (
+              <Button variant="flat" className={styles.nodeRetryButton}
+                onSelect={() => { nodeRetreat(1000); nodePreview(); }}>上限改为1000米并重试</Button>
+            ) : null}
+          </div>
+        </div>}
         {/* 错误和警告放在滚动区外面单独一块，滚动或调参数时始终看得到 */}
-        <Scrollable className={styles.status} vertical trackVisibility="scrollable">
+        <Scrollable className={state.nodes?.enabled ? styles.nodeOtherStatus : styles.status} vertical trackVisibility="scrollable">
           {state.anarchy && anarchyOn && <div className={styles.errors}>{t.anarchyWarning}</div>}
           {/* 喇叭形交角很斜（偏离 90° 超过 45°）时，节点和立柱容易压到被拆道路的切断端或新路：提示开启无碰撞放置 */}
           {loops && steepSkew && !anarchyOn && (
             <div className={styles.warnings}>{(state.anarchy ? t.steepSkewAnarchy : t.steepSkewNoAnarchy).replace("{lo}", String(90 - skewLimit)).replace("{hi}", String(90 + skewLimit))}</div>
           )}
-          {!r && <div className={styles.hint}>{t.noPreview}</div>}
+          {!r && !state.nodes?.enabled && <div className={styles.hint}>{t.noPreview}</div>}
           {r && r.errors.length > 0 && (
             <div className={styles.errors}>
               <div className={styles.errorsTitle}>{t.errors}</div>
               {r.errors.map((error, i) => (
                 <div key={i}>{error}</div>
               ))}
+            </div>
+          )}
+          {r && (r.warnings ?? []).length > 0 && (
+            <div className={styles.warnings}>
+              {(r.warnings ?? []).map((warning, i) => <div key={i}>{warning}</div>)}
             </div>
           )}
           {/* 游戏的检查结果分两类：错误阻止放置；警告（如可被覆盖的物体）不阻止 */}
@@ -592,8 +653,18 @@ export const InterchangePanel = () => {
             );
           })}
         </Scrollable>
+        {state.nodes?.enabled && state.nodes.hasPreview && (
+          <div className={styles.confirmRow}>
+            <Button variant="flat" className={styles.confirmButton}
+              onSelect={() => { if (typeof nodeRevision === "number" && nodeRevision >= 0) confirmNodePlacement(nodeRevision); }}
+              disabled={typeof nodeRevision !== "number" || nodeRevision < 0 || !state.nodes.canConfirm || !r || r.errors.length > 0 || r.gameErrors.some((error) => error.blocking)}>
+              {t.confirmPlace}
+            </Button>
+            {!state.nodes.canConfirm && !r?.gameErrors.some((error) => error.blocking) && <div className={styles.note}>{t.nodeAwaitValidation}</div>}
+          </div>
+        )}
         {/* 两步放置：左键固定预览后，在这里确认放置（绿）或取消固定（红） */}
-        {state.pinned && (
+          {state.pinned && !state.nodes?.enabled && (
           <div className={styles.confirmRow}>
             <Button variant="flat" className={styles.confirmButton} onSelect={confirmPlacement}
               disabled={!r || r.errors.length > 0 || r.gameErrors.some((error) => error.blocking)}>
@@ -602,7 +673,7 @@ export const InterchangePanel = () => {
             <Button variant="flat" className={styles.cancelButton} onSelect={unpinPreview}>{t.unpin}</Button>
           </div>
         )}
-        <div className={styles.hint}>{hint}</div>
+        <div className={styles.hint}>{state.nodes?.enabled ? t.nodePlacementHint : hint}</div>
       </Panel>
     </div>
   );
@@ -614,6 +685,8 @@ const bandName = (t: Strings, band: ElevationBand) =>
 /** 例：主线中段：Highway Oneway - 2 lanes（2 车道）· 辅路加宽段：Large Road Oneway（3 车道） */
 const laneBalanceLine = (t: Strings, r: Resolved, expressway: boolean) => {
   const parts = [r.mainReducedRoad ? `${t.mainReduced}：${r.mainReducedRoad}（${r.mainReducedLanes} ${t.lanes}）` : `${t.mainReduced}：${t.laneBalanceNone}`];
+  if (r.crossReducedRoad)
+    parts.push(`${t.crossRoad}：${r.crossReducedRoad}（${r.crossReducedLanes} ${t.lanes}）`);
   if (expressway)
     parts.push(r.frontageWidenedRoad ? `${t.frontageWidened}：${r.frontageWidenedRoad}（${r.frontageWidenedLanes} ${t.lanes}）` : `${t.frontageWidened}：${t.laneBalanceNone}`);
   return parts.join(" · ");

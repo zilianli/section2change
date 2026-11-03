@@ -47,9 +47,16 @@ namespace InterchangeMod.UI
             AddBinding(new TriggerBinding(kGroup, "close", OnClose));
             AddBinding(new TriggerBinding(kGroup, "toggle", OnToggle));
             AddBinding(new TriggerBinding(kGroup, "confirm", () => m_ToolSystem.RequestConfirm()));
+            AddBinding(new TriggerBinding<int>(kGroup, "confirmNode", revision => m_ToolSystem.RequestNodeConfirm(revision)));
             AddBinding(new TriggerBinding(kGroup, "unpin", () => m_ToolSystem.Unpin()));
             AddBinding(new TriggerBinding(kGroup, "pause", () => m_SimulationSystem.selectedSpeed = 0f));
             AddBinding(new TriggerBinding<bool>(kGroup, "browse", on => m_ToolSystem.Browse(on)));
+            AddBinding(new TriggerBinding<bool>(kGroup, "nodeMode", on => m_ToolSystem.SetNodeMode(on)));
+            AddBinding(new TriggerBinding<int>(kGroup, "nodeArm", arm => m_ToolSystem.SetNodeArm(arm)));
+            AddBinding(new TriggerBinding<int>(kGroup, "nodeClear", arm => m_ToolSystem.ClearNodeArm(arm)));
+            AddBinding(new TriggerBinding<int>(kGroup, "nodeGrade", grade => m_ToolSystem.SetNodeGrade(grade)));
+            AddBinding(new TriggerBinding<int>(kGroup, "nodeRetreat", distance => m_ToolSystem.SetNodeRetreatLimit(distance)));
+            AddBinding(new TriggerBinding(kGroup, "nodePreview", () => m_ToolSystem.RequestNodePreview()));
         }
 
         protected override void OnUpdate()
@@ -117,7 +124,27 @@ namespace InterchangeMod.UI
                 .Field("paused", m_SimulationSystem.selectedSpeed == 0f)
                 .Field("heading", m_ToolSystem.headingDegrees)
                 .Field("headingFree", m_ToolSystem.headingFree)
-                .BeginObject("settings")
+                .BeginObject("nodes")
+                .Field("enabled", m_ToolSystem.nodeMode)
+                .Field("activeArm", m_ToolSystem.nodeActiveArm)
+                .Field("grade", m_ToolSystem.nodeGradePercent)
+                .Field("retreatLimit", m_ToolSystem.nodeRetreatLimit)
+                .Field("failure", m_ToolSystem.nodePreviewFailed)
+                .Field("hasPreview", m_ToolSystem.nodeHasPreview)
+                .Field("canConfirm", m_ToolSystem.nodeCanConfirm)
+                .Field("revision", m_ToolSystem.nodePreviewRevision)
+                .Field("message", m_ToolSystem.nodeMessage)
+                .BeginArray("arms");
+            foreach (var arm in m_ToolSystem.nodeArms)
+            {
+                json.BeginObject().Field("index",arm.Index).BeginArray("ports");
+                foreach (var p in arm.Endpoints)
+                    json.BeginObject().Field("id",p.NodeIndex).Field("road",p.Prefab)
+                        .Field("direction",p.OneWay ? (p.TravelOutward ? "驶出" : "驶入") : "双向")
+                        .Field("height",p.Position.Y).EndObject();
+                json.EndArray().EndObject();
+            }
+            json.EndArray().EndObject().BeginObject("settings")
                 .Field(nameof(s.BaseElevation), s.BaseElevation)
                 .Field(nameof(s.LevelGap), s.LevelGap)
                 .Field(nameof(s.MainOnTop), s.MainOnTop)
@@ -181,10 +208,14 @@ namespace InterchangeMod.UI
                     .Field("rampAuto", snap.RampAuto).Field("rampLength", snap.RampLength).Field("loopRadius", snap.LoopRadius)
                     .Field("frontageRoad", snap.FrontageRoad).Field("frontageLanes", snap.FrontageLanes).Field("extraRoad", snap.ExtraRoad)
                     .Field("mainReducedRoad", snap.MainReducedRoad).Field("mainReducedLanes", snap.MainReducedLanes)
+                    .Field("crossReducedRoad", snap.CrossReducedRoad).Field("crossReducedLanes", snap.CrossReducedLanes)
                     .Field("frontageWidenedRoad", snap.FrontageWidenedRoad).Field("frontageWidenedLanes", snap.FrontageWidenedLanes)
                     .BeginArray("errors");
                 foreach (string error in snap.Errors)
                     json.Item(error);
+                json.EndArray().BeginArray("warnings");
+                foreach (string warning in snap.Warnings)
+                    json.Item(warning);
                 json.EndArray().BeginArray("gameErrors");
                 foreach (var error in snap.GameErrors)
                     json.BeginObject().Field("type", error.Type).Field("road", error.Road).Field("elevation", error.Elevation)

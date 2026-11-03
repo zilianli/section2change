@@ -274,7 +274,12 @@ namespace InterchangeMod.Generation.Templates
                     at = straight.End;
                 }
                 arcs.Add(RampPath.Arcs1(at, V, northC - at, R, theta1).Arcs[0]);
-                ring = RampPath.FromArcs(arcs.ToArray());
+                // A circle is one analytic half-arc. Two coincident quarters
+                // would insert an unnecessary node halfway between the divided
+                // cross-road junctions, inside both junction width envelopes.
+                // Racetrack arcs retain their real curve/straight boundaries.
+                ring = a > 0f ? RampPath.FromArcs(arcs.ToArray())
+                    : RampPath.Arcs1(ringStart, Tangent(theta0), southC - ringStart, R, theta1 - theta0);
                 float total = ring.Length;
                 float SouthS(float th) => R * (th - theta0);
                 float NorthS(float th) => R * -theta0 + 2f * a + R * th;
@@ -420,7 +425,7 @@ namespace InterchangeMod.Generation.Templates
                 }
                 var side = new List<RoadSegmentSpec>();
                 AddLine(side, "Main", RoadRole.MainRoad, legs[0].RoadPrefab, mainNodes, t => MainPoint(t, hm), new[] { tDiverge, tMerge, -mainEnd, mainEnd });
-                if (drop > 0f)
+                if (!string.IsNullOrWhiteSpace(p.MainReducedPrefab) && p.MainReducedWidth > 0f && p.MainReducedWidth <= legs[0].RoadWidth)
                 {
                     // 车道平衡：tDiverge ~ tMerge 之间换成减车道的道路，内部节点向中央分隔带平移，两头曲线端点平移、节点不动
                     Vec3 shiftIn = -L * drop;

@@ -29,5 +29,7 @@ namespace InterchangeMod.Generation
         ExpresswayT,
         /// <summary>Y 型分向：三条路约 120° 汇于一处，三向全定向、交点分散（两层）。</summary>
         Wye,
+        /// <summary>井字紧凑立交：两层内侧转向集散、两层外侧直行，点选节点专用。</summary>
+        CompactGrid,
     }
 }

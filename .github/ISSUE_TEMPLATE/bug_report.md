@@ -17,5 +17,5 @@ Roads and angle 道路与交角:
 在 mod 设置里打开调试日志、复现后附上
 `%USERPROFILE%\AppData\LocalLow\Colossal Order\Cities Skylines II\Logs\InterchangeMod.Mod.log`
 
-**Mod version 版本**: 1.0.8-beta
+**Mod version 版本**: 1.0.9-beta (autochange)
 **Other mods 其他 mod** (e.g. Anarchy):

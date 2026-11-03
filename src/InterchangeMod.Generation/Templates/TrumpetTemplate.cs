@@ -62,6 +62,8 @@ namespace InterchangeMod.Generation.Templates
             if (errors.Count > 0)
                 return errors;
             var legs = p.Legs;
+            if (legs[0].NeedsDualToTwoWayTransition || legs[2].NeedsDualToTwoWayTransition)
+                errors.Add("喇叭形暂不支持主线外部双向道路转接，请使用双幅主线或其他立交类型");
             if (!p.RightHandTraffic)
                 errors.Add("喇叭形目前只支持右侧通行");
             if (Directions.AngleBetween(legs[0].Angle, legs[2].Angle) < 180f - kOppositeTolerance)

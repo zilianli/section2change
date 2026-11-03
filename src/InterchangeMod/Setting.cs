@@ -48,7 +48,12 @@ namespace InterchangeMod
         [SettingsUIHidden] public bool GuideSeen { get; set; }
 
         /// <summary>立交类型：Diamond 菱形 / ExpresswayNode 中式快速路节点 / ExpresswayT 快速路 T 型 / SinglePoint 单点立交 / Trumpet 喇叭形。</summary>
-        [SettingsUIHidden] public string InterchangeType { get; set; }
+        private string m_InterchangeType = "Diamond";
+        [SettingsUIHidden] public string InterchangeType
+        {
+            get => m_InterchangeType;
+            set => m_InterchangeType = value == "CompactFlower" ? "Roundabout" : value;
+        }
 
         /// <summary>中式快速路节点的地面辅路（单行道路）预制体名。空 = Medium Road Oneway。</summary>
         [SettingsUIHidden] public string FrontageRoadPrefab { get; set; }
@@ -262,7 +267,10 @@ namespace InterchangeMod
                 case nameof(CrossRoadPrefab): CrossRoadPrefab = value ?? ""; return true;
                 case nameof(RampPrefab): RampPrefab = value ?? ""; return true;
                 case nameof(InterchangeType):
-                    InterchangeType = value == "ExpresswayNode" || value == "ExpresswayT" || value == "SinglePoint" || value == "Trumpet" || value == "Cloverleaf" || value == "PartialCloverleaf" || value == "Roundabout" || value == "DirectionalT" || value == "SemiDirectionalT" || value == "Stack" || value == "Turbine" || value == "Wye" ? value : "Diamond";
+                    value = value == "CompactFlower" ? "Roundabout" : value;
+                    InterchangeType = Enum.TryParse<Generation.InterchangeType>(value,out var selectedType)
+                        &&Enum.GetName(typeof(Generation.InterchangeType),selectedType)==value
+                        &&Generation.Endpoints.EndpointTypeCatalog.Find(selectedType)!=null?value:"Diamond";
                     return true;
                 case nameof(FrontageRoadPrefab): FrontageRoadPrefab = value ?? ""; return true;
                 case nameof(LaneBalance): LaneBalance = value == "true"; return true;

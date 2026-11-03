@@ -181,7 +181,7 @@ namespace InterchangeMod.Generation.Templates
                 var path = RampPath.FromArcs(arcs.ToArray());
 
                 float flatS = Overlap(path, x, Sep(x), true) + kFlatMargin, flatE = Overlap(path, t, Sep(t), false) + kFlatMargin;
-                if ((Elevated(x.Height) > 0f && flatS > 75f) || (Elevated(t.Height) > 0f && flatE > 75f))
+                if (flatS > MaxOverlap(x.Height) || flatE > MaxOverlap(t.Height))
                     return Fail<Ramp>("overlap");
                 var knots = Profile(path, x.Height, t.Height, flatS, flatE, x, t, obstacles);
                 if (knots == null)
@@ -198,7 +198,7 @@ namespace InterchangeMod.Generation.Templates
                 new Vec3(v.X * MathF.Cos(angle) - v.Z * MathF.Sin(angle), 0f, v.X * MathF.Sin(angle) + v.Z * MathF.Cos(angle));
 
             /// <summary>
-            /// 从道路（沿 heading）向右转 beta、横向离开 lateral 米的弯：一段圆弧，或接高架时先一段 kRingElevatedShift 小弧离开到
+            /// 从道路（沿 heading）向右转 beta、横向离开 lateral 米的弯：一段圆弧，或接高架/地面重叠过长时先一段 kRingElevatedShift 小弧离开到
             /// 与道路相距 sep 再接大弧。返回从原点出发的圆弧（reverse 时是从弯的另一头接回道路的顺序：先大弧后小弧，左转方向）。
             /// 横向距离太小、算出的大弧半径比小弧还小时返回 null。
             /// </summary>
@@ -207,7 +207,10 @@ namespace InterchangeMod.Generation.Templates
                 if (lateral < kMinSegment)
                     return null;
                 float rs = kRingElevatedShift;
-                float a0 = elevated ? Math.Min(beta * 0.9f, (float)Math.Acos(Math.Max(-1f, 1f - sep / rs))) : 0f;
+                float naturalRadius = lateral / (1f - MathF.Cos(beta));
+                float naturalOverlap = naturalRadius * (float)Math.Acos(Math.Max(-1f, 1f - Math.Min(sep, lateral) / naturalRadius));
+                bool shortEntry = elevated || naturalOverlap + kFlatMargin > kMaxGroundOverlap;
+                float a0 = shortEntry ? Math.Min(beta * 0.9f, (float)Math.Acos(Math.Max(-1f, 1f - sep / rs))) : 0f;
                 // 横向：小弧 rs(1 − cos a0) + 大弧 ρ(cos a0 − cos beta)
                 float rho = (lateral - rs * (1f - MathF.Cos(a0))) / (MathF.Cos(a0) - MathF.Cos(beta));
                 if (rho < (a0 > 0f ? rs : kRightRadius))
@@ -242,21 +245,35 @@ namespace InterchangeMod.Generation.Templates
                 {
                     var t = RightTarget(x);
                     // 在左转匝道外面：比从同一幅驶出的左转匝道早驶出、比汇入同一幅的左转匝道晚汇入
-                    float latestExit = lefts.Where(l => l.From == x).Min(l => l.FromAt) - kMinSegment;
-                    float earliestEntry = lefts.Where(l => l.To == t).Max(l => l.ToAt) + kMinSegment;
+                    float leftExitAt = lefts.Where(l => l.From == x).Min(l => l.FromAt);
+                    float leftEntryAt = lefts.Where(l => l.To == t).Max(l => l.ToAt);
+                    // A long elevated interval between attachments needs another
+                    // main-road node outside the overlap, with room on both sides.
+                    float AttachGap(Carriageway line, float span) =>
+                        Elevated(line.Height) > 0f && span > kMaxElevatedPiece ? kMinPiece : kMinSegment;
+                    float attachS = RightAttach(x), attachE = RightAttach(t);
+                    float sepS = Sep(x) - attachS, sepE = Sep(t) - attachE;
                     Ramp? TryRadius(float r)
                     {
+                        // Retain an already short ground merge before trying compound end arcs.
+                        foreach (bool shortenGround in new[] { false, true })
                         foreach (float part in new[] { 1f, 0.6f, 0.35f })
                         {
-                            // 接高架那头的半径有上限：并行重叠段（约 √(2·间距·半径)）不超过 kMaxRightOverlap，短于游戏切分高架路段的长度；
+                            // 两头的半径都有上限：并行重叠段（约 √(2·间距·半径)）要短于游戏切分长度。
+                            // 地面同样会自动切分，留出平段余量后再限制端部小弧；中间仍可用大半径。
                             // 转角小、半径大时小弧只转出一部分横距（part），剩下的交给中间的大弧
-                            float rS = Elevated(x.Height) > 0f ? Math.Min(r, kMaxRightOverlap * kMaxRightOverlap / (2f * Sep(x))) : r;
-                            float rE = Elevated(t.Height) > 0f ? Math.Min(r, kMaxRightOverlap * kMaxRightOverlap / (2f * Sep(t))) : r;
+                            float overlapS = Elevated(x.Height) > 0f ? kMaxRightOverlap : kMaxGroundOverlap - kRightFlatMargin - kNodeClearance;
+                            float overlapE = Elevated(t.Height) > 0f ? kMaxRightOverlap : kMaxGroundOverlap - kRightFlatMargin - kNodeClearance;
+                            float rS = Elevated(x.Height) > 0f || shortenGround ? Math.Min(r, overlapS * overlapS / (2f * sepS)) : r;
+                            float rE = Elevated(t.Height) > 0f || shortenGround ? Math.Min(r, overlapE * overlapE / (2f * sepE)) : r;
+                            if (shortenGround && (Elevated(x.Height) > 0f || rS >= r) && (Elevated(t.Height) > 0f || rE >= r))
+                                continue;
                             if (part < 1f && rS >= r && rE >= r)
                                 continue;
-                            var path = RampPath.Fillet(x.Origin, x.Dir, t.Origin, t.Dir, rS, r, rE, Sep(x) * part, Sep(t) * part, out _, out _, out _, out _);
+                            var path = RampPath.Fillet(x.Origin + x.Right * attachS, x.Dir, t.Origin + t.Right * attachE, t.Dir,
+                                rS, r, rE, sepS * part, sepE * part, out _, out _, out _, out _);
                             float flatS = Overlap(path, x, Sep(x), true) + kRightFlatMargin, flatE = Overlap(path, t, Sep(t), false) + kRightFlatMargin;
-                            if ((Elevated(x.Height) > 0f && flatS > 75f) || (Elevated(t.Height) > 0f && flatE > 75f))
+                            if (flatS > MaxOverlap(x.Height) || flatE > MaxOverlap(t.Height))
                                 continue;
                             if (path.Length - flatS - flatE < Math.Abs(t.Height - x.Height) / grade)
                                 continue;
@@ -265,7 +282,8 @@ namespace InterchangeMod.Generation.Templates
                                 Path = path, FlatStart = flatS, FlatEnd = flatE, FlatMargin = kRightFlatMargin, H0 = x.Height, H1 = t.Height,
                                 From = x, To = t, FromAt = x.At(path.Start), ToAt = t.At(path.End), Name = $"Right{x.Name}",
                             };
-                            if (ramp.FromAt + ramp.FlatStart > latestExit || ramp.ToAt - ramp.FlatEnd < earliestEntry)
+                            if (ramp.FromAt + ramp.FlatStart > leftExitAt - AttachGap(x, leftExitAt - ramp.FromAt)
+                                || ramp.ToAt - ramp.FlatEnd < leftEntryAt + AttachGap(t, ramp.ToAt - leftEntryAt))
                                 continue;
                             if (lefts.All(q => PlanApart(ramp, q)) && rights.All(q => Clear(ramp, q))
                                 && AttachmentsApart(lefts.Concat(rights).Append(ramp).ToList()))
@@ -273,9 +291,9 @@ namespace InterchangeMod.Generation.Templates
                         }
                         return null;
                     }
-                    // 半径越大大体越容易放下（驶出越早、离左转匝道越远）：按 8% 一档，跳着加倍找到第一个放得下的，再二分往小找
+                    // 半径越大大体越容易放下：按 2% 一档，避免为主路多留一个节点而把汇入点推远一整档；先跳着找，再二分往小找。
                     var radii = new List<float>();
-                    for (float r = 60f; r <= 3000f; r *= 1.08f)
+                    for (float r = 60f; r <= 3000f; r *= 1.02f)
                         radii.Add(r);
                     Ramp? found = null;
                     int lo = -1, hi = -1;
@@ -471,6 +489,47 @@ namespace InterchangeMod.Generation.Templates
                         knots[i] = old;
                         return false;
                     }
+                }
+                return true;
+            }
+
+            /// <summary>
+            /// Profile sampling can leave two height turns only one sample apart.
+            /// They become distinct bridge nodes, so remove a turn only when the
+            /// changed profile still satisfies grade and all crossing clearances.
+            /// </summary>
+            private bool SeparateProfileKnots(Ramp ramp, IReadOnlyList<Obstacle> lower)
+            {
+                var knots = ramp.Knots!;
+                bool Emitted(float s)=>s>ramp.FlatStart+kMinSegment&&s<ramp.Length-ramp.FlatEnd-kMinSegment;
+                for (int i = 1; i < knots.Count; i++)
+                {
+                    // Knots in the two end buffers shape elevation but are not
+                    // emitted as bridge nodes. Preserve those original profiles.
+                    if(!Emitted(knots[i-1].S)||!Emitted(knots[i].S))continue;
+                    if (Vec3.Distance(ramp.Path.PointAt(knots[i - 1].S), ramp.Path.PointAt(knots[i].S)) >= kMinSegment)
+                        continue;
+                    bool removed = false;
+                    foreach (int index in new[] { i, i - 1 })
+                    {
+                        if (index == 0 || index == knots.Count - 1)
+                            continue;
+                        var old = knots[index];
+                        knots.RemoveAt(index);
+                        ramp.HeightsChanged();
+                        bool withinGrade = Enumerable.Range(1, knots.Count - 1).All(k =>
+                            Math.Abs(knots[k].H - knots[k - 1].H) <= grade * (knots[k].S - knots[k - 1].S) + 1e-4f);
+                        if (withinGrade && ProfileClear(ramp, lower))
+                        {
+                            removed = true;
+                            break;
+                        }
+                        knots.Insert(index, old);
+                        ramp.HeightsChanged();
+                    }
+                    if (!removed)
+                        return false;
+                    i = 0;
                 }
                 return true;
             }

@@ -18,6 +18,13 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="..\..\src\InterchangeMod\Setting.cs" Link="Host\Setting.cs" />
+    <Compile Include="..\..\src\InterchangeMod\Systems\LatestNodeSolve.cs" Link="Host\LatestNodeSolve.cs" />
+    <EmbeddedResource Include="Fixtures\curved-no-preview-20261031.json" />
+    <EmbeddedResource Include="Fixtures\three-way-flat-failure-20261031.json" />
+    <EmbeddedResource Include="Fixtures\grid-order-failure-20261101.json" />
+    <EmbeddedResource Include="Fixtures\twoway-roundabout-20261102.json" />
+    <EmbeddedResource Include="Fixtures\stack-mixed-curved-20261103.json" />
   </ItemGroup>
 
   <ItemGroup>

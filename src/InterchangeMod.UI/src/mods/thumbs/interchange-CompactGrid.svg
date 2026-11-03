@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">
+ <title>井字立交节点预览示意</title>
+ <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <g stroke="#6bc6eb" stroke-width="5">
+   <path d="M74 4V22Q74 30 55 35V125Q74 130 74 138V156M86 156V138Q86 130 105 125V35Q86 30 86 22V4"/>
+   <path d="M4 86H22Q30 86 35 105H125Q130 86 138 86H156M156 74H138Q130 74 125 55H35Q30 74 22 74H4"/>
+  </g>
+  <g stroke="#f2cb67" stroke-width="3.5">
+   <path d="M74 22V62Q74 86 98 86H138M86 138V98Q86 74 62 74H22M22 86H62Q86 86 86 62V22M138 74H98Q74 74 74 98V138"/>
+   <path d="M74 62Q74 74 62 74M98 74Q86 74 86 62M86 98Q86 86 98 86M62 86Q74 86 74 98"/>
+  </g>
+ </g>
+</svg>

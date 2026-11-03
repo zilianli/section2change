@@ -130,23 +130,44 @@ namespace InterchangeMod.Placement
         public static int CreateDefinitions(EntityCommandBuffer commandBuffer, EntityManager entityManager, List<Entity> edges,
             Footprint hull, Footprint corridor, HashSet<Entity> converted, IReadOnlyList<RoadSegmentSpec> segments,
             PrefabSystem prefabSystem, IReadOnlyDictionary<string, RoadInfo> roads, NetPrefab fallback, float3 origin, float yaw,
-            ref TerrainHeightData terrain, int randomSeed, List<string> errors)
+            ref TerrainHeightData terrain, int randomSeed, List<string> errors, List<string> warnings = null)
         {
             // 和立交路段用同一个换算，得到完全相同的世界坐标，游戏才会把两个节点合并
             var ends = new List<ConnectionEnd>();
             foreach (Vec3 end in InterchangeLayout.LegEnds(segments))
             {
-                var owner = segments.First(s => s.StartNode == end || s.EndNode == end);
+                int ownerIndex = Enumerable.Range(0, segments.Count).First(i => segments[i].StartNode == end || segments[i].EndNode == end);
+                var owner = segments[ownerIndex];
                 if (!roads.TryGetValue(owner.Prefab ?? fallback?.name ?? "", out RoadInfo info)) continue;
                 bool atEnd = owner.EndNode == end;
                 ends.Add(new ConnectionEnd {
                     World = InterchangePlacer.ToWorld(end, origin, yaw, ref terrain), Elevation = end.Y,
                     Outward = (owner.Curve.Derivative(atEnd ? 1f : 0f) * (atEnd ? 1f : -1f)).RotateY(yaw),
                     Flow = info.IsOneWay ? (atEnd == (info.ForwardLanes > 0) ? 1 : -1) : 0,
+                    Local = end, LocalOutward = owner.Curve.Derivative(atEnd ? 1f : 0f) * (atEnd ? 1f : -1f),
+                    Owner = ownerIndex, HalfWidth = info.Width / 2f,
                 });
             }
             var used = new bool[ends.Count];
+            var completed = new bool[ends.Count];
             int connected = 0;
+            var obstacles = new List<(Bezier3 Curve, float HalfWidth)>();
+            foreach (var segment in segments)
+            {
+                roads.TryGetValue(segment.Prefab ?? fallback?.name ?? "", out RoadInfo info);
+                obstacles.Add((segment.Curve, info?.Width / 2f ?? 0f));
+            }
+            var safety = new RetainedRoadSafety(obstacles, corridor.Margin);
+            var matchedRoads = new List<MatchedConnectionRoad>();
+            foreach (Entity entity in converted)
+            {
+                if (!entityManager.Exists(entity) || !IsRemovableRoad(entityManager, entity)) continue;
+                Bezier4x3 world = entityManager.GetComponentData<Curve>(entity).m_Bezier;
+                matchedRoads.Add(new MatchedConnectionRoad(WithElevation(ToLocal(world, origin, yaw), world, ref terrain),
+                    HalfWidth(entityManager, entity), OldFlow(entityManager, prefabSystem, roads, entity)));
+            }
+            var required = ends.Select(end => RetainedRoadSafety.ConnectionAt(end.Local, end.LocalOutward,
+                end.Flow, end.HalfWidth, matchedRoads)).ToArray();
 
             // 只按范围切的话，臂端压在整段都在范围里的路段上、或弯道上范围横跨弯道内侧（原有道路出了臂端还在范围里走一段）时，
             // 切断点离臂端远，接不上：所以先按臂端切，保留离立交中心远的一侧
@@ -167,7 +188,14 @@ namespace InterchangeMod.Placement
                 used[i] = true;
             }
             var whole = KeepBeyond(entityManager, edges, attached);
-            edges.RemoveAll(whole.Contains);
+            foreach (var kept in whole)
+            {
+                Bezier4x3 world = entityManager.GetComponentData<Curve>(kept.Key).m_Bezier;
+                if (RetainedCollision(safety, ends[kept.Value], world, HalfWidth(entityManager, kept.Key), origin, yaw, ref terrain))
+                    errors.Add($"臂端 ({ends[kept.Value].World.x:F0}, {ends[kept.Value].World.z:F0}) 外保留的原路与其他新路或立柱相撞：请调整位置、道路或立交尺寸");
+            }
+            if (errors.Count > 0) return 0;
+            edges.RemoveAll(whole.ContainsKey);
             if (Debug && whole.Count > 0)
                 Mod.log.Info($"[debug] kept {whole.Count} edges beyond the leg ends");
 
@@ -224,7 +252,7 @@ namespace InterchangeMod.Placement
                         Entity node = startTarget >= 0 ? edge.m_End : edge.m_Start;
                         var legEnd = startTarget >= 0 ? ends[startTarget] : ends[endTarget];
                         merged = TryMergeThroughNode(commandBuffer, entityManager, node, entity, prefab, edges, legEnd,
-                            prefabSystem, roads, ref terrain, randomSeed++);
+                            prefabSystem, roads, safety, origin, yaw, errors, ref terrain, randomSeed++);
                     }
                     if (!merged && length < kMinRemainderLength)
                     {
@@ -232,25 +260,51 @@ namespace InterchangeMod.Placement
                         if (endTarget >= 0) used[endTarget] = false;
                         continue;
                     }
-                    connected += (startTarget >= 0 ? 1 : 0) + (endTarget >= 0 ? 1 : 0);
                     if (Debug)
                         Mod.log.Info($"[debug] remainder of edge {entity.Index}: {length:F1} m (road {width:F0} m), " +
                             $"start {(startTarget >= 0 ? "leg end" : start <= 0f ? "original node" : "cut")}, " +
                             $"end {(endTarget >= 0 ? "leg end" : end >= 1f ? "original node" : "cut")}{(merged ? ", merged with the next edge" : "")}");
                     if (merged)
+                    {
+                        if (startTarget >= 0) completed[startTarget] = true;
+                        if (endTarget >= 0) completed[endTarget] = true;
                         continue;
+                    }
                     float startElevation = InterchangePlacer.TerrainElevation(part.a, ref terrain), endElevation = InterchangePlacer.TerrainElevation(part.d, ref terrain);
                     if (startTarget >= 0)
                         Snap(ends[startTarget], ref part.a, ref part.b, ref startElevation, ref terrain);
                     if (endTarget >= 0)
                         Snap(ends[endTarget], ref part.d, ref part.c, ref endElevation, ref terrain);
+                    // Attached outer remainders bypass hull clipping, so recheck the
+                    // actual snapped curve against every other new road and pillar.
+                    int target = startTarget >= 0 ? startTarget : endTarget;
+                    if (target >= 0 && RetainedCollision(safety, ends[target], part, width / 2f, origin, yaw, ref terrain))
+                    {
+                        errors.Add($"臂端 ({ends[target].World.x:F0}, {ends[target].World.z:F0}) 外保留的原路与其他新路或立柱相撞：请调整位置、道路或立交尺寸");
+                        continue;
+                    }
                     NetCourseBuilder.CreateSegment(commandBuffer, prefab, part, startElevation, endElevation, randomSeed++,
                         start <= 0f ? edge.m_Start : Entity.Null,
                         end >= 1f ? edge.m_End : Entity.Null);
+                    if (startTarget >= 0) completed[startTarget] = true;
+                    if (endTarget >= 0) completed[endTarget] = true;
                 }
+            }
+            for (int i = 0; i < ends.Count; i++)
+            {
+                if (completed[i]) { connected++; continue; }
+                if (required[i] == ConnectionNeed.Required)
+                    errors.Add($"臂端 ({ends[i].World.x:F0}, {ends[i].World.z:F0}) 未接回附近向外延续的匹配原路：请调整位置、高度或道路布局");
+                else if (required[i] == ConnectionNeed.Manual)
+                    warnings?.Add($"臂端 ({ends[i].World.x:F0}, {ends[i].World.z:F0}) 的原路形式、方向或横向位置不同，未自动接回，放置后需要手动连接");
             }
             return connected;
         }
+
+        private static bool RetainedCollision(RetainedRoadSafety safety, ConnectionEnd end, Bezier4x3 world,
+            float halfWidth, float3 origin, float yaw, ref TerrainHeightData terrain) =>
+            safety.Collides(WithElevation(ToLocal(world, origin, yaw), world, ref terrain), halfWidth,
+                end.Owner, end.Local, end.LocalOutward);
 
         /// <summary>
         /// 臂端压着的那段要拆的原有道路（离中心线不超过 kConnectLateral、同一高度）：投影位置 t，保留离立交中心远的一侧
@@ -311,10 +365,10 @@ namespace InterchangeMod.Placement
         /// 臂端之外沿原路往外：经过普通路中节点的下一段如果也在要拆的路段里（弯道上范围横跨弯道内侧），整段保留，直到路口、
         /// 路的尽头或范围外。返回这些路段。
         /// </summary>
-        private static HashSet<Entity> KeepBeyond(EntityManager entityManager, List<Entity> edges,
+        private static Dictionary<Entity, int> KeepBeyond(EntityManager entityManager, List<Entity> edges,
             Dictionary<Entity, List<(float T, bool KeepAfter, int End)>> attached)
         {
-            var whole = new HashSet<Entity>();
+            var whole = new Dictionary<Entity, int>();
             foreach (var pair in attached)
                 foreach (var a in pair.Value)
                 {
@@ -324,8 +378,9 @@ namespace InterchangeMod.Placement
                     for (int step = 0; step < kMaxKeptEdges; step++)
                     {
                         Entity next = NextAlongRoad(entityManager, node, current);
-                        if (next == Entity.Null || !edges.Contains(next) || attached.ContainsKey(next) || !whole.Add(next))
+                        if (next == Entity.Null || !edges.Contains(next) || attached.ContainsKey(next) || whole.ContainsKey(next))
                             break;
+                        whole.Add(next, a.End);
                         Edge nextEdge = entityManager.GetComponentData<Edge>(next);
                         node = nextEdge.m_Start == node ? nextEdge.m_End : nextEdge.m_Start;
                         current = next;
@@ -434,7 +489,8 @@ namespace InterchangeMod.Placement
         /// </summary>
         private static bool TryMergeThroughNode(EntityCommandBuffer commandBuffer, EntityManager entityManager, Entity node, Entity self,
             Entity prefab, List<Entity> removing, ConnectionEnd legEnd, PrefabSystem prefabs,
-            IReadOnlyDictionary<string, RoadInfo> roads, ref TerrainHeightData terrain, int randomSeed)
+            IReadOnlyDictionary<string, RoadInfo> roads, RetainedRoadSafety safety, float3 origin, float yaw,
+            List<string> errors, ref TerrainHeightData terrain, int randomSeed)
         {
             // 节点是路口（接着不止一段）时不能合并
             Entity next = NextAlongRoad(entityManager, node, self);
@@ -445,19 +501,24 @@ namespace InterchangeMod.Placement
             Bezier4x3 curve = entityManager.GetComponentData<Curve>(next).m_Bezier;
             bool nodeAtStart = nextEdge.m_Start == node;
             if (!Compatible(legEnd, curve, nodeAtStart ? 0f : 1f, nodeAtStart, OldFlow(entityManager, prefabs, roads, next))) return false;
-            CreateDelete(commandBuffer, next, nextEdge, curve);
             float startElevation = InterchangePlacer.TerrainElevation(curve.a, ref terrain), endElevation = InterchangePlacer.TerrainElevation(curve.d, ref terrain);
             if (nodeAtStart)
                 Snap(legEnd, ref curve.a, ref curve.b, ref startElevation, ref terrain);
             else
                 Snap(legEnd, ref curve.d, ref curve.c, ref endElevation, ref terrain);
+            if (RetainedCollision(safety, legEnd, curve, HalfWidth(entityManager, next), origin, yaw, ref terrain))
+            {
+                errors.Add($"臂端 ({legEnd.World.x:F0}, {legEnd.World.z:F0}) 接回时合并的原路与其他新路或立柱相撞：请调整位置、道路或立交尺寸");
+                return false;
+            }
+            CreateDelete(commandBuffer, next, nextEdge, entityManager.GetComponentData<Curve>(next).m_Bezier);
             NetCourseBuilder.CreateSegment(commandBuffer, prefab, curve, startElevation, endElevation, randomSeed,
                 nodeAtStart ? Entity.Null : nextEdge.m_Start, nodeAtStart ? nextEdge.m_End : Entity.Null);
             return true;
         }
 
         /// <summary>和推土机（BulldozeToolSystem）删除路段的写法一样。</summary>
-        private static void CreateDelete(EntityCommandBuffer commandBuffer, Entity entity, Edge edge, Bezier4x3 curve)
+        internal static void CreateDelete(EntityCommandBuffer commandBuffer, Entity entity, Edge edge, Bezier4x3 curve)
         {
             var course = new NetCourse
             {
@@ -511,6 +572,10 @@ namespace InterchangeMod.Placement
             public float Elevation;
             public Vec3 Outward;
             public int Flow;
+            public Vec3 Local;
+            public Vec3 LocalOutward;
+            public int Owner;
+            public float HalfWidth;
         }
 
         private static int? OldFlow(EntityManager em, PrefabSystem prefabs, IReadOnlyDictionary<string, RoadInfo> roads, Entity edge)

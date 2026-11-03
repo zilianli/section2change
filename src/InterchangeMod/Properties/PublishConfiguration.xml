@@ -20,6 +20,8 @@
 - Follows curved roads (radius 150 m or more) and places the interchange on the roads' grade
 - Lane balance with edge-aligned lane drops, pillars kept clear of roads below, grade and clearance checked before placing
 - Auto mode (point and confirm) or manual mode (every parameter adjustable); Chinese and English UI
+- Node mode: select open road endpoints to solve and place cloverleaf, stack, turbine, trumpet, directional T, semi-directional T, wye, compact grid or roundabout; two-way, divided and mixed inputs with bounded approach reconstruction
+- Colored endpoint feedback, lane matching, smoother curved connections, and cancellable background solving for two-way/mixed stacks
 
 **How to use**
 1. Open the tool with the button at the top left or Shift + I
@@ -32,7 +34,7 @@
 - Trumpet, directional types, stack, turbine and wye support right-hand traffic only
 - Beta: report problems on GitHub with a screenshot and the mod log (turn on debug logging in the settings first)
 
-**平改立**：一次放下一整座立交。选类型，对准已有路口、立体交叉或道路（也可以空地），确认预览后放置；自动匹配原有道路、层高和交角，拆掉原路口并接回各臂，弯道和坡道上整体顺着道路放置。放置后不能撤销，请先存档；最好在平地、平直且坡度均匀的道路上使用。问题请到 GitHub 附截图和日志反馈。
+**平改立**：一次放下一整座立交。保留自动和手动模式；新增点选开放节点，按实际端点重新求解并确认放置。节点模式支持苜蓿叶、定向、涡轮、喇叭、定向T、半定向T、Y型、井字和环岛，以及双向、双幅和混合道路的有界退接。放置后不能撤销，请先存档；实际道路须满足车道匹配、坡度、净空和游戏原生检查。问题请到 GitHub 附截图和日志反馈。
 	</LongDescription>
 	<!--Thumbnail-->
 	<Thumbnail Value="Properties/Thumbnail.png" />
@@ -51,7 +53,7 @@
 	<!--Link to the forum post where the mod can be discussed-->
 	<ForumLink Value="" />
 	<!--Version of the mod-->
-	<ModVersion Value="1.0.8-beta" />
+	<ModVersion Value="1.0.9-beta" />
 	<!--Recommended version of the base game to use the mod-->
 	<GameVersion Value="1.0.*" />
 	<!--Dependency for the mod, can be set multiple times-->
@@ -59,7 +61,7 @@
 	<!--Required DLC, can be set multiple times. Supported values are "Landmark Buildings", "San Fransisco Set", "Beach Properties", "Urban Promenades", "Modern Architecture"-->
 	<RequiredDLC Value="" />
 	<!--Change log for new version. Single line or multi line. Supports minimal markdown subset-->
-	<ChangeLog Value="beta 1.0.8: fixes water bridge preview elevation limits and long-arm road reconnection for turbine/stack interchanges; conservative collision detection, matched-road and traffic-direction checks, and diagnostic logging. Water replacement and long-arm preview fixes verified in-game by the user; 989 automated tests passed." />
+	<ChangeLog Value="1.0.9-beta: Add node-selected interchange preview and confirmed placement for cloverleaf, stack, turbine, trumpet, directional T, semi-directional T, wye, compact grid and roundabout. Support exact-lane two-way/divided/mixed approaches, bounded reconstruction, curved and mixed-height connections, lane balance and endpoint feedback. Improve stack ramp curvature and short-tail cut selection; solve two-way/mixed stacks in a cancellable background worker. Keep native placement checks and error diagnostics. 2319 automated checks passed for the archived functional baseline; the latest stack test scenes were confirmed by the user." />
 	<!--<ChangeLog>
 	</ChangeLog>-->
 	<!--External link, can be set multiple times. supported types are "discord", "github", "youtube", "twitch", "x", "paypal", "patreon", "buymeacoffee", "kofi", "crowdin", "gitlab", "gofundme"-->

@@ -55,7 +55,11 @@ namespace InterchangeMod.Generation.Templates
         private const float kMinPiece = 20f;
         /// <summary>高架路段每段的最大长度（米），短于游戏切分高架路段的 80 米。</summary>
         private const float kMaxElevatedPiece = 70f;
-        private const float kMaxGroundPiece = 600f;
+        // Observed game-created ground courses are split at about 200 m. Keep
+        // ownership of those nodes, especially near parallel ramp merges.
+        private const float kMaxGroundPiece = 180f;
+        // Leave room for a separate node outside the overlap on a 180 m course.
+        private const float kMaxGroundOverlap = 150f;
         /// <summary>高架路段放不下立柱时允许的最大长度（米）。</summary>
         private const float kHardMaxPiece = 76f;
         /// <summary>一段路的最大转角（弧度，约 80°）。</summary>
@@ -510,6 +514,7 @@ namespace InterchangeMod.Generation.Templates
             private static float AlongS(float d, float sr) => 2f * sr * MathF.Sin((float)Math.Acos(Math.Max(-1f, 1f - d / (2f * sr))));
 
             private float Elevated(float h) => LevelPlanner.BandOf(h) == ElevationBand.Elevated ? 1f : 0f;
+            private float MaxOverlap(float h) => Elevated(h) > 0f ? 75f : kMaxGroundOverlap;
 
             /// <summary>匝道离开 / 接入一条直线道路时，并行重叠（横向不足 sep）的长度（沿路径，按采样）。</summary>
             private static float Overlap(RampPath path, Carriageway line, float sep, bool fromStart) => Overlap(path, line.Origin, line.Dir, sep, fromStart);
@@ -580,7 +585,7 @@ namespace InterchangeMod.Generation.Templates
                 var trial = Path(kProbe, kProbe);
                 float flatS = Overlap(trial, x, Math.Min(dx, Sep(x)) - 0.5f, true) + kFlatMargin;
                 float flatE = Overlap(trial, t, Math.Min(dt, Sep(t)) - 0.5f, false) + kFlatMargin;
-                if ((Elevated(x.Height) > 0f && flatS > 75f) || (Elevated(t.Height) > 0f && flatE > 75f))
+                if (flatS > MaxOverlap(x.Height) || flatE > MaxOverlap(t.Height))
                     return null;
                 var (first, last) = Marks(trial, flatS, flatE, obstacles);
                 if (first < 0f)
@@ -753,7 +758,7 @@ namespace InterchangeMod.Generation.Templates
                     var (q1, q2) = SCurve(t.Point(0f) + t.Right * dT, t.Dir, -t.Right, dT - et, srT);
                     float flatS = Overlap(RampPath.FromArcs(p1, p2), x, Sep(x), true) + kRightFlatMargin;
                     float flatE = Overlap(RampPath.FromArcs(q1, q2), t, Sep(t), false) + kRightFlatMargin;
-                    if ((Elevated(x.Height) > 0f && flatS > 75f) || (Elevated(t.Height) > 0f && flatE > 75f))
+                    if (flatS > MaxOverlap(x.Height) || flatE > MaxOverlap(t.Height))
                         return false;
                     // 驶出（连同并行段）在左转匝道驶出之前，汇入在左转匝道汇入（连同并行段）之后；转角更远时再早驶出、晚汇入
                     float latestStart = leftOut.FromAt - flatS - kMinSegment, earliestEnd = leftIn.ToAt + kMinSegment + flatE;
@@ -871,7 +876,7 @@ namespace InterchangeMod.Generation.Templates
                     }
                     var trial = Path(kMinSegment, kMinSegment);
                     float flatS = Overlap(trial, x, Sep(x), true) + kRightFlatMargin, flatE = Overlap(trial, t, Sep(t), false) + kRightFlatMargin;
-                    if ((Elevated(x.Height) > 0f && flatS > 75f) || (Elevated(t.Height) > 0f && flatE > 75f))
+                    if (flatS > MaxOverlap(x.Height) || flatE > MaxOverlap(t.Height))
                     {
                         Trace?.Invoke($"corner right turn from {x.Name}: overlap too long");
                         return false;
@@ -960,6 +965,11 @@ namespace InterchangeMod.Generation.Templates
                     Fail("knots");
                     return false;
                 }
+                if (turbine && ramp.Knots != null && !SeparateProfileKnots(ramp, lower))
+                {
+                    Fail("short profile knots");
+                    return false;
+                }
                 if (ramp.Knots != null)
                     required.AddRange(ramp.Knots.Select(k => k.S).Where(k => k > ramp.FlatStart + kMinSegment && k < total - ramp.FlatEnd - kMinSegment));
                 float offset = 0f;
@@ -1027,6 +1037,12 @@ namespace InterchangeMod.Generation.Templates
                     }
                     cuts.Add(target);
                     cur = target;
+                }
+                if (turbine && cuts.Zip(cuts.Skip(1), (a, b) =>
+                    Vec3.Distance(ramp.Path.PointAt(a), ramp.Path.PointAt(b))).Any(distance => distance < kMinSegment - 1e-3f))
+                {
+                    Fail("short cuts");
+                    return false;
                 }
                 ramp.Cuts = cuts;
                 return true;
@@ -1131,6 +1147,23 @@ namespace InterchangeMod.Generation.Templates
                     int i = segments.FindIndex(sg => sg.StartNode.Equals(inStart));
                     if (o < 0 || i < 0)
                         continue;
+                    float offset = (float)Math.Sqrt((outEnd.X - joint.X) * (outEnd.X - joint.X) + (outEnd.Z - joint.Z) * (outEnd.Z - joint.Z));
+                    if (!DiamondTemplate.FitsAligned(leg, offset))
+                    {
+                        // Wide one-way carriageways cannot be forced side by side into
+                        // a narrower two-way section. Use the established split/merge
+                        // transition, retaining exact old endpoints at both joins.
+                        Vec3 side = Directions.RightOf(leg.Direction) * (p.RightHandTraffic ? 1f : -1f);
+                        Vec3 Point(float along, float lateral)
+                        {
+                            if (along == end && lateral == offset) return outEnd;
+                            if (along == end && lateral == -offset) return inStart;
+                            return At(leg.Direction * along + side * lateral, h);
+                        }
+                        DiamondTemplate.AddTransition(segments, $"{forward.Name}-external", segments[o].Role, Point,
+                            1, end, offset, end + leg.StubLength, p.LegTransitionAngle, leg.RoadPrefab, leg.ExternalPrefab);
+                        continue;
+                    }
                     segments[o] = new RoadSegmentSpec(segments[o].Name, segments[o].Role, segments[o].Curve, segments[o].Prefab, segments[o].StartNode, joint);
                     segments[i] = new RoadSegmentSpec(segments[i].Name, segments[i].Role, segments[i].Curve, segments[i].Prefab, joint, segments[i].EndNode);
                     // 臂端双向道路：高架时分成短于游戏切分长度的几段（否则游戏自己加的立柱位置不受控）
@@ -1157,7 +1190,7 @@ namespace InterchangeMod.Generation.Templates
             }
 
             /// <summary>
-            /// 一幅上的节点（沿该幅的位置）：匝道接点、两端；被交道路（第 2 层）跨越主线处按立柱规划；高架时按长度加节点，
+            /// 一幅上的节点（沿该幅的位置）：匝道接点、两端；被交道路（第 2 层）跨越主线处按立柱规划；地面和高架均按长度加节点，
             /// 避开匝道并行重叠段和从下面穿过的匝道。高架段分不开（每段都要短于游戏切分长度）时返回 null。
             /// allowInOverlap：避不开并行重叠段时允许节点落在里面（定向式左出左进时出现过，游戏里可以放置）。
             /// </summary>
@@ -1192,7 +1225,12 @@ namespace InterchangeMod.Generation.Templates
                 }
                 sorted.Sort();
                 if (LevelPlanner.BandOf(line.Height) != ElevationBand.Elevated)
-                    return sorted;
+                {
+                    var groundCuts = Subdivide(sorted, kMaxGroundPiece, attaches.Select(a => (a.Item2, a.Item3)).ToList());
+                    if (groundCuts == null)
+                        Trace?.Invoke($"{line.Name}: ground cuts fail [{string.Join(",", sorted)}] zones [{string.Join(",", attaches)}]");
+                    return groundCuts;
+                }
                 // 高架时按长度加节点（立柱），一定避开从下面穿过的匝道，尽量避开匝道并行重叠段
                 var under = new List<(float, float)>();
                 float reach = line.Width / 2f + rw / 2f + kPillarThickness;
@@ -1207,7 +1245,11 @@ namespace InterchangeMod.Generation.Templates
                 // 那里的节点之后的路段与匝道第一段不共用节点却相互重叠，游戏报“与现有物体重叠”
                 var strict = ramps.Where(r => r.From == line).Select(r => (r.FromAt, r.FromAt + r.FlatStart - r.FlatMargin + kNodeClearance))
                     .Concat(ramps.Where(r => r.To == line).Select(r => (r.ToAt - r.FlatEnd + r.FlatMargin - kNodeClearance, r.ToAt)));
-                var cuts = Subdivide(sorted, kMaxElevatedPiece, under.Concat(attaches.Select(a => (a.Item2, a.Item3))).ToList())
+                var preferredZones = under.Concat(attaches.Select(a => (a.Item2, a.Item3))).ToList();
+                // As for ramp courses, a short span may need the existing 76 m
+                // fallback. Keep all exclusion zones and stay below the game's 80 m split.
+                var cuts = Subdivide(sorted, kMaxElevatedPiece, preferredZones)
+                    ?? Subdivide(sorted, kHardMaxPiece, preferredZones)
                     ?? (allowInOverlap ? Subdivide(sorted, kMaxElevatedPiece, under.Concat(strict).ToList()) : null);
                 if (cuts == null && allowInOverlap)
                 {
@@ -1257,6 +1299,15 @@ namespace InterchangeMod.Generation.Templates
                                         best = c;
                                         break;
                                     }
+                            // A legal interval can be narrower than the 1 m probe
+                            // step, especially just beyond a ramp overlap. Its
+                            // boundary is still usable under the same constraints.
+                            if (float.IsNaN(best))
+                                best = keepWhole.SelectMany(z => new[] { z.Lo, z.Hi })
+                                    .Where(c => Math.Abs(c - target) <= maxLength / 2f && !Inside(c)
+                                        && c - prev >= kMinPiece && c - prev <= maxLength && hi - c >= kMinPiece
+                                        && hi - c <= maxLength * (m - k))
+                                    .OrderBy(c => Math.Abs(c - target)).DefaultIfEmpty(float.NaN).First();
                             if (float.IsNaN(best))
                                 ok = false;
                             else
