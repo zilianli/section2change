@@ -56,6 +56,8 @@ namespace InterchangeMod.Generation
                 cx = cz = 0f;
                 half = halfSize;
             }
+            // 取景越大线越细：按 150 米半边长为基准放粗，各类型的卡片看起来一样粗细
+            float scale = Math.Max(1f, half / 150f);
             var all = segments.SelectMany(s => new[] { s.Curve.P0.Y, s.Curve.P3.Y }).ToList();
             float low = all.Min(), high = Math.Max(low + 1f, all.Max());
 
@@ -64,10 +66,10 @@ namespace InterchangeMod.Generation
             foreach (var s in segments.OrderBy(s => (s.Curve.P0.Y + s.Curve.P3.Y) / 2f).ThenBy(s => s.Role == RoadRole.Ramp ? 1 : 0))
             {
                 float t = ((s.Curve.P0.Y + s.Curve.P3.Y) / 2f - low) / (high - low);
-                float width = s.Role switch { RoadRole.MainRoad => 14f, RoadRole.CrossRoad => 12f, RoadRole.FrontageRoad => 10f, _ => 7f };
+                float width = scale * (s.Role switch { RoadRole.MainRoad => 14f, RoadRole.CrossRoad => 12f, RoadRole.FrontageRoad => 10f, _ => 7f });
                 string color = s.Role == RoadRole.Ramp ? Lerp(0x3F, 0xA9, 0xF5, 0xF5, 0xA6, 0x23, t) : Lerp(0x8C, 0x97, 0xA3, 0xDD, 0xE3, 0xE8, t);
                 string d = "M" + string.Join("L", Sample(s.Curve).Select(v => $"{F(v.X)},{F(-v.Z)}"));
-                sb.Append($"<path d=\"{d}\" stroke=\"#10161d\" stroke-width=\"{F(width + 6f)}\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>");
+                sb.Append($"<path d=\"{d}\" stroke=\"#10161d\" stroke-width=\"{F(width + 6f * scale)}\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>");
                 sb.Append($"<path d=\"{d}\" stroke=\"{color}\" stroke-width=\"{F(width)}\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>");
             }
             sb.Append("</svg>\n");

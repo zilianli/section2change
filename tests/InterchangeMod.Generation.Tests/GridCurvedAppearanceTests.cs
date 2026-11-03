@@ -30,7 +30,8 @@ public class GridCurvedAppearanceTests
     {
         var traces=Captured(rht);var arms=RealCurvedApproachTests.Arms(traces);
         var setup=EndpointCompactGridSetup.Create(arms,GridCurvedMergeTests.Catalog(),0,0,478.6323f);
-        var distances=grade<.2f?new[]{250f,250f,175f,325f}:new[]{175f,200f,100f,250f};
+        // 中心小转弯至少 40 米（EndpointCompactGridCore.kMinSmallTurn）后核心大一圈，基准切点各外移 25 米
+        var distances=grade<.2f?new[]{275f,275f,200f,350f}:new[]{200f,225f,125f,275f};
         var cuts=arms.SelectMany(a=>a.Endpoints.Select(p=>RoadRetreat.Cut(traces.Single(t=>t.Origin.NodeIndex==p.NodeIndex),distances[a.Index]))).ToArray();
         var cutArms=arms.Select(a=>new EndpointArm(a.Index,cuts.Where(c=>a.Endpoints.Any(p=>p.NodeIndex==c.Port!.NodeIndex)).Select(c=>c.Port!))).ToArray();
         SpatialCandidateResult? baseline=null;EndpointApproachQuality? baselineQuality=null;

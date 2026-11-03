@@ -56,6 +56,8 @@ export interface PanelSettings {
   TrumpetNearRampRadius: number;
   /** 设置页模式：false = 自动（只显示提示、结果和报错，参数全部用默认值），true = 手动（显示全部设置）。 */
   ManualMode: boolean;
+  /** 连接（点选开放端点）的模式：false = 自动（坡度、退接、层高、类型选项用默认值），true = 手动（显示全部参数）。 */
+  NodeManualMode: boolean;
   /** 看过使用指南（第一次打开时首页先显示使用指南）。 */
   GuideSeen: boolean;
 }
@@ -150,6 +152,8 @@ export interface Resolved {
 export interface PanelState {
   nodes?: { enabled: boolean; activeArm: number; grade: number; retreatLimit?: number; failure: boolean; message: string;
     hasPreview?: boolean; canConfirm?: boolean; revision?: number;
+    /** 后台求解中的阶段说明（空 = 没有在求解）和已用秒数。 */
+    solveStage?: string; solveSeconds?: number; solveProgress?: number;
     arms: { index: number; ports: { id: number; road: string; direction: string; height: number }[] }[] };
   active: boolean;
   locale?: string;

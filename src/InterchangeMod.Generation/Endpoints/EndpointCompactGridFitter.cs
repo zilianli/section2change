@@ -25,7 +25,9 @@ namespace InterchangeMod.Generation.Endpoints
                 var values=new List<float>();
                 for(float d=0;;d=Math.Min(limit,d+25))
                 {
-                    if(d>=seed.Distances[arm.Index]&&arm.Endpoints.All(p=>EndpointApproachGeometry.HasRetainedRoom(RoadRetreat.Cut(lookup[(p.NodeIndex,p.NodeVersion)],d))))values.Add(d);
+                    // 比种子更长的退接还要满足实际弧长不超过上限（弯道、坡道上弧长比水平距离长）
+                    if(d>=seed.Distances[arm.Index]&&arm.Endpoints.All(p=>{var cut=RoadRetreat.Cut(lookup[(p.NodeIndex,p.NodeVersion)],d);
+                        return EndpointApproachGeometry.HasRetainedRoom(cut)&&(d==seed.Distances[arm.Index]||EndpointMixedRoadSearch.WithinRetreatLimit(cut,maxRetreat));}))values.Add(d);
                     if(d>=limit)break;
                 }
                 return values.ToArray();
@@ -73,8 +75,10 @@ namespace InterchangeMod.Generation.Endpoints
         {
             var original=seed.ToArray();var paired=new[]{Math.Max(seed[0],seed[2]),Math.Max(seed[1],seed[3]),Math.Max(seed[0],seed[2]),Math.Max(seed[1],seed[3])};
             var balanced=Enumerable.Repeat(seed.Max(),4).ToArray();
-            var requests=new[]{original,paired,balanced,original.Select(d=>d+25).ToArray(),paired.Select(d=>d+25).ToArray(),
-                balanced.Select(d=>d+25).ToArray(),original.Select(d=>d+50).ToArray(),paired.Select(d=>d+50).ToArray()};
+            // 先试明显更长的退接：汇入段越长，从井字直行道到原路的横向偏移越平缓（游戏内 25~50 米的加长仍有连续折弯）
+            float[] Plus(float[] v,float d)=>v.Select(x=>x+d).ToArray();
+            var requests=new[]{original,Plus(balanced,100),Plus(paired,100),Plus(balanced,200),Plus(paired,200),
+                paired,balanced,Plus(original,50),Plus(balanced,50),Plus(original,150)};
             var seen=new HashSet<(float,float,float,float)>();
             foreach(var request in requests)
             {

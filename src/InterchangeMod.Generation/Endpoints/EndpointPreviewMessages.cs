@@ -11,6 +11,8 @@ namespace InterchangeMod.Generation.Endpoints
                 reason="本轮搜索次数已用完，尚未找到满足约束的接路方案。";
             else if(result.CoreMatched==false||(result.CoreMatched==null&&result.Attempts==0))
                 reason="内部布局暂未满足道路断面、坡度、净空或桥墩要求，请核对两幅道路是否同款同宽，或调整层差和坡度。";
+            else if(result.ClearanceDetail.Contains("near-orthogonal"))
+                return $"井字要求两条路接近垂直（交角 {EndpointCompactGridCore.kMinGridCrossing:F0}°–{180-EndpointCompactGridCore.kMinGridCrossing:F0}°，相对两臂偏差不超过 20°），这个路口超出范围：请改用定向（标准），或调整端点。";
             else if(result.Attempts==0)
                 reason="已找到安全内部布局，但尚未找到匹配全部端点曲线和方向的接路组合。";
             else

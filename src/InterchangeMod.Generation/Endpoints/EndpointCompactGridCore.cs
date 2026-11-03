@@ -17,6 +17,10 @@ namespace InterchangeMod.Generation.Endpoints
 
     public static class EndpointCompactGridCore
     {
+        /// <summary>Minimum radius (m) of the small quarter turn at the grid centre (right turns in right-hand traffic).</summary>
+        private const float kMinSmallTurn = 40f;
+        /// <summary>Smallest crossing angle (degrees) between the two road families; the largest is 180 minus it.</summary>
+        internal const float kMinGridCrossing = 70f;
         private static bool Finite(float x) => !float.IsNaN(x) && !float.IsInfinity(x);
         private static Vec3 Flat(Vec3 x) => new Vec3(x.X, 0, x.Z);
         private static bool Range(HeightRange? x) => !x.HasValue || Finite(x.Value.Min) && Finite(x.Value.Max) && x.Value.Min <= x.Value.Max;
@@ -76,16 +80,26 @@ namespace InterchangeMod.Generation.Endpoints
                 axes[2]=-axes[0];axes[3]=-axes[1];
             }
             var forward = Vec3.Normalize(axes[0] - axes[2]);
+            // The orthogonal core is turned halfway towards the second family, so a skewed
+            // crossing splits its skew between both pairs of approaches (78 degrees: 6 each)
+            // instead of loading all of it onto the second pair. Orthogonal input is unchanged.
+            var second = Vec3.Normalize(axes[1] - axes[3]);
+            var normal = Directions.RightOf(second);
+            if (Directions.Dot(normal, forward) < 0) normal = -normal;
+            if (Finite(normal.X) && Finite(normal.Z) && normal.Length() > .99f)
+                forward = Vec3.Normalize(forward + normal);
             var right = Directions.RightOf(forward) * (rightHandTraffic ? 1 : -1);
             // Check all four input gaps, including the closing 3 -> 0 gap. A
             // family-average axis can hide an individual arm beyond the contract.
-            // The small dot tolerance covers float normalisation at exactly 80/100.
-            float adjacentDot = (float)Math.Cos(80 * Math.PI / 180) + .000001f;
+            // The small dot tolerance covers float normalisation at exactly 70/110.
+            // The core is laid out orthogonally; the external approaches absorb the skew,
+            // and their curvature, clearance and support checks still reject what does not fit.
+            float adjacentDot = (float)Math.Cos(kMinGridCrossing * Math.PI / 180) + .000001f;
             float oppositeDot = -(float)Math.Cos(20 * Math.PI / 180) + .000001f;
             if (axes.Any(a => !Finite(a.X) || !Finite(a.Z) || a.Length() < .99f)
                 || Directions.Dot(axes[0], axes[2]) > oppositeDot || Directions.Dot(axes[1], axes[3]) > oppositeDot
                 || Enumerable.Range(0, 4).Any(i => Math.Abs(Directions.Dot(axes[i], axes[(i + 1) % 4])) > adjacentDot))
-            { yield return Fail("Compact grid requires two near-orthogonal opposing road families (80 to 100 degrees)."); yield break; }
+            { yield return Fail($"Compact grid requires two near-orthogonal opposing road families ({kMinGridCrossing:F0} to {180 - kMinGridCrossing:F0} degrees)."); yield break; }
             int[] original = Directions.Dot(axes[1], right) > 0 ? new[] { 0, 1, 2, 3 } : new[] { 0, 3, 2, 1 };
             var frame = EndpointFrame.Estimate(selected, InterchangeType.Stack);
             if (!secantReference&&(frame.Failure != EndpointFrameFailure.None || !frame.Center.HasValue))
@@ -117,18 +131,23 @@ namespace InterchangeMod.Generation.Endpoints
             if(bendStrength>0&&(bend==null||bend.IsIdentity))
             {yield return Fail("Cut roads do not define a bounded curved grid reference.");yield break;}
             // A bounded parameter search re-solves the curves. No generated geometry is scaled.
-            foreach (var alternative in new[] { (Gap: 3f, Extra: 0f, Factor: 1f, CollectorOuter:.45f), (Gap: 5f, Extra: 0f, Factor: 1f, CollectorOuter:.45f),
+            // 先试带起始角的大半径横移（Ease 米以上，见 Solve 里 kicked）：单段式横移约 50 米、半径约 40 米，
+            // 游戏内是明显的大 S 弯。同时可把直行道往里收（Extra < 0），横移更小。都过不了检查时退回单段式。
+            // 顺应弯曲（bend）时曲线被拉伸，按 85%、75% 的坡度设计给弯曲留余量（单段式同样有 0.85 的一档）
+            var kickedShift = new[] { 1f, .85f, .75f }.SelectMany(factor => new[] { (Extra: -20f, Ease: 150f), (Extra: -12f, Ease: 150f), (Extra: 0f, Ease: 150f), (Extra: -12f, Ease: 90f), (Extra: 0f, Ease: 90f) }
+                .Select(t => (Gap: 3f, t.Extra, Factor: factor, CollectorOuter: .45f, t.Ease)));
+            foreach (var alternative in kickedShift.Concat(new[] { (Gap: 3f, Extra: 0f, Factor: 1f, CollectorOuter:.45f), (Gap: 5f, Extra: 0f, Factor: 1f, CollectorOuter:.45f),
                 (Gap: 8f, Extra: 0f, Factor: 1f, CollectorOuter:.45f), (Gap: 3f, Extra: 8f, Factor: 1f, CollectorOuter:.45f),
                 (Gap: 3f, Extra: 0f, Factor: .85f, CollectorOuter:.45f), (Gap: 5f, Extra: 8f, Factor: .85f, CollectorOuter:.45f),
                 // Wide street reductions can be as wide as the full source. Keep
                 // the collector's first course beyond the through taper's nose,
                 // so a later course cannot clip the still-diverging terminal.
                 (Gap:3f,Extra:0f,Factor:1f,CollectorOuter:.48f), (Gap:5f,Extra:0f,Factor:1f,CollectorOuter:.48f),
-                (Gap:8f,Extra:0f,Factor:1f,CollectorOuter:.48f) })
+                (Gap:8f,Extra:0f,Factor:1f,CollectorOuter:.48f) }.Select(a => (a.Gap, a.Extra, a.Factor, a.CollectorOuter, Ease: 0f))))
             {
                 var trial = Solve(selected, original, roads.OrderBy(r => r.Arm).ToArray(), center, forward, right, median,
-                    baseHeight, levelGap, terrainHeight, ramp, maxGrade, design, alternative.Gap, alternative.Extra, alternative.Factor,rightHandTraffic,bend,alternative.CollectorOuter);
-                yield return trial.Success ? trial : Fail($"Grid gap {alternative.Gap:F0}m, outer extra {alternative.Extra:F0}m, grade factor {alternative.Factor:F2}: {trial.Diagnostic}");
+                    baseHeight, levelGap, terrainHeight, ramp, maxGrade, design, alternative.Gap, alternative.Extra, alternative.Factor,rightHandTraffic,bend,alternative.CollectorOuter,alternative.Ease);
+                yield return trial.Success ? trial : Fail($"Grid gap {alternative.Gap:F0}m, outer extra {alternative.Extra:F0}m, grade factor {alternative.Factor:F2}, kicked radius {alternative.Ease:F0}m: {trial.Diagnostic}");
             }
         }
 
@@ -217,7 +236,7 @@ namespace InterchangeMod.Generation.Endpoints
 
         private static EndpointStackCoreResult Solve(EndpointArm[] arms, int[] original, EndpointGridArmRoads[] roads,
             Vec3 center, Vec3 forward, Vec3 right, float[] median, float height, float gap, float terrain,
-            RoadInfo ramp, float limit, CloverleafRoadDesign design, float sideGap, float outerExtra, float factor,bool rightHandTraffic,CurveWarp? bend=null,float collectorOuter=.45f)
+            RoadInfo ramp, float limit, CloverleafRoadDesign design, float sideGap, float outerExtra, float factor,bool rightHandTraffic,CurveWarp? bend=null,float collectorOuter=.45f,float easeRadius=0f)
         {
             float low = Math.Max(terrain, height - gap / 2);
             var levels = new[] { low, low + gap, low + 2 * gap, low + 3 * gap };
@@ -225,6 +244,9 @@ namespace InterchangeMod.Generation.Endpoints
             // Opposite large quarter turns have a gap (2sqrt(2)-2)C-2D.
             float c = Math.Max(d + Math.Max(12, ramp.Width * 2),
                 (2 * d + ramp.Width + sideGap) / (2 * (float)Math.Sqrt(2) - 2));
+            // The small quarter turn has radius c - d. Keep it at least kMinSmallTurn
+            // (in game the 26 m right turns of 2-lane ramps looked like kinks).
+            c = Math.Max(c, d + kMinSmallTurn);
             float throughWidth = roads.Max(r => r.Through.Width);
             float o = c + (throughWidth + ramp.Width) / 2 + sideGap + outerExtra;
             float a = o + throughWidth / 2 + 4;
@@ -252,7 +274,40 @@ namespace InterchangeMod.Generation.Endpoints
             // a fixed 20m stub is insufficient for wider full/collector pairs.
             float outerStub = Math.Max(20, arms.Max(arm => arm.Endpoints[0].Width) / 2
                 + roads.Max(road => road.Collector.Width) / 2 + sideGap);
-            float fork=a+length,s=fork-spread,boundary=fork+outerStub;
+            // 分流式横移（easeRadius > 0）：直行道在分叉处先沿一段直的分流楔（斜率随需要让开的距离 0.15 ~ 0.35）离开原路，
+            // 和同高的集散道一开始就线性拉开，再用曲率不超过 1/easeRadius 的曲线横移到外侧。单段式的横移曲线从零角度起步，
+            // 只能靠短而急（半径约 40 米）的 S 弯尽快让开集散道。爬升仍按单段式的节奏从分叉开始。
+            bool kicked = easeRadius > 0;
+            float spread2 = spread, length2 = length;
+            // 直行道（属于 throughArm）在 forkArm 的分叉处要让开该处集散道的横向距离（分叉处两者中心距之外还差多少）
+            float Need(RoadInfo through, int throughArm, int forkArm)
+            {
+                var collector = roads[forkArm].Collector;
+                float throughDrop = (arms[throughArm].Endpoints[0].Width - through.Width) / 2;
+                float collectorDrop = (arms[forkArm].Endpoints[0].Width - collector.Width) / 2;
+                // 多留 3 米：净空检查按圆角包络算，刚好 sideGap 的间距在分叉附近仍会判冲突
+                return (through.Width + collector.Width) / 2 + sideGap + 3 - throughDrop - collectorDrop;
+            }
+            if (kicked)
+            {
+                // 往里收时也不能贴到集散道
+                o = Math.Max(o, d + (throughWidth + roads.Max(road => road.Collector.Width)) / 2 + sideGap);
+                a = o + throughWidth / 2 + 4;
+                spread2 = 0;
+                for (int i = 0; i < 4; i++)
+                {
+                    int arm = original[i], opposite = original[(i + 2) % 4]; var through = roads[arm].Through;
+                    float throughDrop = (arms[arm].Endpoints[0].Width - through.Width) / 2;
+                    foreach (int at in new[] { arm, opposite })
+                    {
+                        float forkCenter = (arms[at].Endpoints[0].Width + median[at]) / 2 + throughDrop;
+                        spread2 = Math.Max(spread2, KickLength(Math.Abs(o - forkCenter), Need(through, arm, at), easeRadius));
+                    }
+                }
+                if (!Finite(spread2)) return Fail("Compact grid kicked through shift has no bounded length.");
+                length2 = Math.Max(spread2 + 20, rise / grade + 2 * (.45f * spread + 20) / 3);
+            }
+            float fork=a+(kicked?length2:length),s=fork-spread,boundary=fork+outerStub;
             if (!Finite(boundary) || boundary > 1400) return Fail("Compact grid exceeds its finite practical core extent.");
             var axes = new[] { Vec3.UnitZ, Vec3.UnitX, -Vec3.UnitZ, -Vec3.UnitX };
             var sides = axes.Select(Directions.RightOf).ToArray();
@@ -293,6 +348,9 @@ namespace InterchangeMod.Generation.Endpoints
             }
             RoadInfo Full(int slot) { var p = arms[original[slot]].Endpoints[0]; return new RoadInfo(p.Prefab, true, p.Lanes, 0, p.Width); }
             float M(int slot) { var p = arms[original[slot]].Endpoints[0]; return (p.Width + median[original[slot]]) / 2; }
+            IEnumerable<Bezier3> ThroughCourse(Vec3 start, Vec3 end, Vec3 direction, float need) => kicked
+                ? ClimbWithShift(start, end, direction, spread2, kickNeed: need, climbEase: .45f * spread)
+                : ClimbWithShift(start, end, direction, spread);
             var incomingFork = Enumerable.Range(0, 4).Select(i => At(i, -M(i), fork, height)).ToArray();
             var outgoingFork = Enumerable.Range(0, 4).Select(i => At(i, M(i), fork, height)).ToArray();
             var innerIn = Enumerable.Range(0, 4).Select(i => At(i, -d, c, levels[i % 2])).ToArray();
@@ -307,11 +365,11 @@ namespace InterchangeMod.Generation.Endpoints
                 // Keep one logical fork, but align the narrower curve surfaces to
                 // opposite edges of the full road, as the established templates do.
                 AddChain(main,i,CloverEdgeKind.Main,actual.Through,
-                    ClimbWithShift(incomingFork[i]-sides[i]*throughDrop,At(i,-o,a,h),-axes[i],spread),logicalStart:incomingFork[i]);
+                    ThroughCourse(incomingFork[i]-sides[i]*throughDrop,At(i,-o,a,h),-axes[i],Need(actual.Through,arm,arm)),logicalStart:incomingFork[i]);
                 Add(main, i, CloverEdgeKind.Main, actual.Through, Bezier3.Line(At(i, -o, a, h), At(i, -o, 0, h)), true);
                 Add(main, i, CloverEdgeKind.Main, actual.Through, Bezier3.Line(At(i, -o, 0, h), At(i, -o, -a, h)), true);
                 AddChain(main,i,CloverEdgeKind.Main,actual.Through,
-                    ClimbWithShift(outgoingFork[opposite]+sides[opposite]*throughDrop,At(opposite,o,a,h),-axes[opposite],spread)
+                    ThroughCourse(outgoingFork[opposite]+sides[opposite]*throughDrop,At(opposite,o,a,h),-axes[opposite],Need(actual.Through,arm,original[opposite]))
                         .Reverse().Select(curve=>new Bezier3(curve.P3,curve.P2,curve.P1,curve.P0)),logicalEnd:outgoingFork[opposite]);
                 Add(main, i, CloverEdgeKind.Main, full, Bezier3.Line(outgoingFork[opposite], exit));
                 var inTangent=bend==null?World(entry-axes[i])-World(entry):WorldCurve(Bezier3.Line(entry,incomingFork[i])).Derivative(0);
@@ -398,15 +456,26 @@ namespace InterchangeMod.Generation.Endpoints
             yield return new Bezier3(b,At(1-2*outer/3,1),At(1-outer/3,1),end);
         }
 
-        internal static IEnumerable<Bezier3> ClimbWithShift(Vec3 start,Vec3 end,Vec3 direction,float spread)
+        /// <summary>
+        /// 一边横移一边爬升。给了 kickNeed 时横移用分流式（Kick：直的分流楔 + 大半径曲线），否则用起止都与道路相切的 Shift；
+        /// climbEase 给了时爬升的缓入长度不随横移长度变长（分叉处靠高差尽快和集散道分开）。
+        /// </summary>
+        internal static IEnumerable<Bezier3> ClimbWithShift(Vec3 start,Vec3 end,Vec3 direction,float spread,float? kickNeed=null,float climbEase=0)
         {
-            float run=Directions.Dot(end-start,direction),ease=.45f*spread;
+            float shifted=spread;
+            float run=Directions.Dot(end-start,direction),ease=climbEase>0?climbEase:.45f*spread;
             float slope=(end.Y-start.Y)/(run-2*(ease+20)/3);
             var flatEnd=new Vec3(end.X,start.Y,end.Z);
-            var shiftEnd=flatEnd-direction*(run-spread);
+            var shiftEnd=flatEnd-direction*(run-shifted);
             var topEase=flatEnd-direction*20;
-            var planar=Shift(start,shiftEnd,direction).ToList();
-            if(run-spread>20.01f)planar.Add(Bezier3.Line(shiftEnd,topEase));
+            // 分流式横移后面的大半径曲线很长：切成约 30 米一段，高度才能按爬升曲线逐段贴合（整段会超坡）。
+            // 分流楔保持一整段：它从分叉节点出发，到末端已让开集散道（净空检查不比较共用分叉节点的两段）。
+            var planar=kickNeed.HasValue?Kick(start,shiftEnd,direction,kickNeed.Value).SelectMany((curve,index)=>
+            {
+                int pieces=index==0&&curve.P0==start&&IsLine(curve)?1:Math.Max(1,(int)Math.Ceiling(curve.Length(32)/30));
+                return Enumerable.Range(0,pieces).Select(j=>curve.Slice(j/(float)pieces,(j+1)/(float)pieces));
+            }).ToList():Shift(start,shiftEnd,direction).ToList();
+            if(run-shifted>20.01f)planar.Add(Bezier3.Line(shiftEnd,topEase));
             else topEase=shiftEnd;
             planar.Add(Bezier3.Line(topEase,flatEnd));
             (float Height,float Grade) At(float d)
@@ -425,6 +494,37 @@ namespace InterchangeMod.Generation.Endpoints
                 var next=i+1==planar.Count?end:new Vec3(c.P3.X,b.Height,c.P3.Z);
                 yield return new Bezier3(previous,p1,p2,next);previous=next;
             }
+        }
+
+        private static bool IsLine(Bezier3 c) => Vec3.Distance(c.P1, c.P0 + (c.P3 - c.P0) * (1f / 3)) < .01f && Vec3.Distance(c.P2, c.P0 + (c.P3 - c.P0) * (2f / 3)) < .01f;
+
+        /// <summary>分流楔的斜率（横移 / 前进）：按要让开的距离在 45 米内拉开，限制在 0.15（约 9°）~ 0.35（约 19°）。</summary>
+        internal static float KickSlope(float need) => Math.Max(.15f, Math.Min(.35f, need / 45));
+
+        /// <summary>
+        /// 分流式横移：先沿直的分流楔（KickSlope 斜率）横移 need 米，再用一条三次曲线（起点与楔相切、终点与 direction 相切）
+        /// 横移到终点。楔不超过总横移的 60%、总长的一半；曲线的切线柄不越过终点的横向位置。
+        /// </summary>
+        internal static IEnumerable<Bezier3> Kick(Vec3 start, Vec3 end, Vec3 direction, float need)
+        {
+            float length = Directions.Dot(end - start, direction);
+            var lateral = end - start - direction * length;
+            float shift = lateral.Length();
+            if (shift < .001f) { yield return new Bezier3(start, start + direction * (length / 3), end - direction * (length / 3), end); yield break; }
+            var side = lateral * (1 / shift);
+            float slope = KickSlope(need), taper = Math.Max(0, Math.Min(need / slope, Math.Min(.5f * length, .6f * shift / slope)));
+            var bend = start + direction * taper + side * (slope * taper);
+            if (taper > .5f) yield return Bezier3.Line(start, bend);
+            float rest = length - taper, handle = Math.Min(rest / 3, .8f * (shift - slope * taper) / slope);
+            yield return new Bezier3(bend, bend + direction * handle + side * (slope * handle), end - direction * (rest / 3), end);
+        }
+
+        /// <summary>分流式横移 shift 米时，曲线部分曲率不超过 1/radius 所需的最短前进长度（找不到返回 NaN）。</summary>
+        internal static float KickLength(float shift, float need, float radius)
+        {
+            for (float length = Math.Max(36, 1.5f * shift); length <= 900; length *= 1.06f)
+                if (Kick(Vec3.Zero, new Vec3(shift, 0, length), Vec3.UnitZ, need).Last().MaxCurvature() <= 1 / radius) return length;
+            return float.NaN;
         }
 
         internal static IEnumerable<Bezier3> Profile(Vec3 start, Vec3 end, Vec3 direction)

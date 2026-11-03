@@ -134,6 +134,9 @@ namespace InterchangeMod.UI
                 .Field("canConfirm", m_ToolSystem.nodeCanConfirm)
                 .Field("revision", m_ToolSystem.nodePreviewRevision)
                 .Field("message", m_ToolSystem.nodeMessage)
+                .Field("solveStage", m_ToolSystem.nodeSolveStage)
+                .Field("solveSeconds", (float)System.Math.Round(m_ToolSystem.nodeSolveSeconds, 1))
+                .Field("solveProgress", m_ToolSystem.nodeSolveProgress)
                 .BeginArray("arms");
             foreach (var arm in m_ToolSystem.nodeArms)
             {
@@ -160,6 +163,7 @@ namespace InterchangeMod.UI
                 .Field(nameof(s.RampPrefab), s.RampPrefab)
                 .Field(nameof(s.MatchJunctions), s.MatchJunctions)
                 .Field(nameof(s.ManualMode), s.ManualMode)
+                .Field(nameof(s.NodeManualMode), s.NodeManualMode)
                 .Field(nameof(s.GuideSeen), s.GuideSeen)
                 .Field(nameof(s.CurveFollow), s.CurveFollow)
                 .Field(nameof(s.InterchangeType), s.InterchangeType ?? "Diamond")

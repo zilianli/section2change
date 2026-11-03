@@ -107,13 +107,15 @@ public sealed class EndpointCompactGridCoreTests
     }
 
     [Theory]
-    [InlineData(true, 250.1f, false)] [InlineData(false, 250.1f, false)]
-    [InlineData(true, 259.9f, false)] [InlineData(false, 259.9f, false)]
+    // 游戏内 78° 的混合道路路口需要放宽到 70°–110°（EndpointCompactGridCore.kMinGridCrossing）；相对两臂偏差仍不超过 20°
+    [InlineData(true, 240f, false)] [InlineData(false, 240f, false)]
+    [InlineData(true, 249.9f, false)] [InlineData(false, 249.9f, false)]
+    [InlineData(true, 255f, true)] [InlineData(false, 255f, true)]
     [InlineData(true, 260f, true)] [InlineData(false, 260f, true)]
     [InlineData(true, 280f, true)] [InlineData(false, 280f, true)]
-    [InlineData(true, 280.1f, false)] [InlineData(false, 280.1f, false)]
-    [InlineData(true, 289.9f, false)] [InlineData(false, 289.9f, false)]
-    public void EnforcesEveryAdjacentArmAngleAtBothEightyAndOneHundredDegreeBoundaries(bool rht, float fourthAngle, bool valid)
+    [InlineData(true, 285f, true)] [InlineData(false, 285f, true)]
+    [InlineData(true, 290.1f, false)] [InlineData(false, 290.1f, false)]
+    public void EnforcesEveryAdjacentArmAngleAtBothSeventyAndOneHundredTenDegreeBoundaries(bool rht, float fourthAngle, bool valid)
     {
         var arms = Arms(rht).Select(arm => {
             if (arm.Index != 3) return arm;
@@ -166,8 +168,9 @@ public sealed class EndpointCompactGridCoreTests
         var narrow = Arms(rht, 4); var wide = Arms(rht, 6);
         var arms = Enumerable.Range(0, 4).Select(i => i % 2 == 0 ? narrow[i] : wide[i]).ToArray();
         var through2 = Road("Through2", 2, 12); var through4 = Road("Through4", 4, 20);
+        // 中间立柱间距 25 米：直行道往里收后核心直段约 60 米，40 米间距不出中间立柱，验证不到非默认立柱规则
         foreach (var road in new[] { through2, through4 })
-        { road.ElevatedLength = 96; road.MiddlePillarSpacing = 40; road.PillarWidth = 4; }
+        { road.ElevatedLength = 96; road.MiddlePillarSpacing = 25; road.PillarWidth = 4; }
         var collector2 = Road("Collector2", 2, 12); collector2.ElevatedLength = 84; collector2.MiddlePillarSpacing = 100; collector2.PillarWidth = 3.5f;
         var ramp = Ramp(); ramp.ElevatedLength = 88; ramp.PillarWidth = 3.5f;
         var roads = Enumerable.Range(0, 4).Select(i => new EndpointGridArmRoads(i,
@@ -184,7 +187,7 @@ public sealed class EndpointCompactGridCoreTests
         Assert.Contains(result.Segments, segment => segment.Prefab == "Full4");
         Assert.Contains(result.Segments, segment => segment.Prefab == "Full6");
         Assert.Contains(result.Segments.Where(segment => segment.Prefab == "Through4"), segment =>
-            PillarPlanner.InnerPillars(0, segment.WorldCurve.Length(64), 40, 96).Count > 0);
+            PillarPlanner.InnerPillars(0, segment.WorldCurve.Length(64), 25, 96).Count > 0);
         Assert.All(result.Segments, segment => Assert.True(segment.WorldCurve.Length(128)
             < supports.Single(rule => rule.Prefab == segment.Prefab).MaxLength));
     }

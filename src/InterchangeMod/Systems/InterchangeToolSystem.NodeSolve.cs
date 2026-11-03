@@ -73,11 +73,11 @@ namespace InterchangeMod.Systems
 
         private string NodeSolveSettingsKey() => string.Join("|", new[] {
             m_SettingsVersion.ToString(CultureInfo.InvariantCulture), setting.InterchangeType, selectedRoadName,
-            nodeGradePercent.ToString(CultureInfo.InvariantCulture), nodeRetreatLimit.ToString(CultureInfo.InvariantCulture),
-            setting.BaseElevation.ToString("R", CultureInfo.InvariantCulture), setting.LevelGap.ToString("R", CultureInfo.InvariantCulture),
-            setting.RampPrefab, setting.CloverleafCrossOnTop.ToString(), setting.CloverleafHugLoop.ToString(),
-            setting.StackLeftExit.ToString(), setting.TrumpetLoopForExit.ToString(), setting.DirectionalTwoLevel.ToString(),
-            setting.RoundaboutRacetrack.ToString(), m_CityConfigurationSystem.leftHandTraffic.ToString()
+            nodeGrade.ToString(CultureInfo.InvariantCulture), nodeRetreat.ToString(CultureInfo.InvariantCulture),
+            nodeSetting.BaseElevation.ToString("R", CultureInfo.InvariantCulture), nodeSetting.LevelGap.ToString("R", CultureInfo.InvariantCulture),
+            nodeSetting.RampPrefab, nodeSetting.CloverleafCrossOnTop.ToString(), nodeSetting.CloverleafHugLoop.ToString(),
+            nodeSetting.StackLeftExit.ToString(), nodeSetting.TrumpetLoopForExit.ToString(), nodeSetting.DirectionalTwoLevel.ToString(),
+            nodeSetting.RoundaboutRacetrack.ToString(), m_CityConfigurationSystem.leftHandTraffic.ToString()
         });
 
         private static RetreatSearchResult SolveMixedNodeSnapshot(MixedNodeSolveInput input, CancellationToken token)
@@ -99,14 +99,16 @@ namespace InterchangeMod.Systems
         {
             m_MixedNodeSolve.Invalidate();
             m_MixedNodeSolvePending = false;
+            InvalidateNodeJob();
         }
 
         private void QueueMixedNodeSolve(EndpointTypeRequest request, EndpointMixedRoadSetup setup,
             IReadOnlyList<RoadApproachTrace> traces, IReadOnlyList<RoadInfo> catalog, float ground)
         {
-            var input = new MixedNodeSolveInput(request, setup, traces, catalog, NodeSolveSettingsKey(), nodeRetreatLimit, ground);
+            var input = new MixedNodeSolveInput(request, setup, traces, catalog, NodeSolveSettingsKey(), nodeRetreat, ground);
             long revision = m_MixedNodeSolve.Request(input);
             m_MixedNodeSolvePending = true;
+            BeginNodeSolveProgress("正在求解定向立交（混合道路）");
             nodePreviewFailed = false;
             nodeMessage = "正在后台计算定向立交预览；可继续操作面板，更改端点或参数会使旧结果失效。";
             Mod.log.Info($"[autochange] mixed Stack queued: revision={revision}; single worker, latest request only");
@@ -118,6 +120,7 @@ namespace InterchangeMod.Systems
         {
             if (!m_MixedNodeSolve.TryTakeCompletion(out var completed)) return false;
             m_MixedNodeSolvePending = false;
+            EndNodeSolveProgress();
             var input = completed.Input;
             if (!isActive || !nodeMode || browsing || !paused || m_NodeDirty
                 || input.SettingsKey != NodeSolveSettingsKey() || !SameNodeSolveArms(input.Request.Arms, nodeArms)

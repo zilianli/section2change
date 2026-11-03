@@ -14,7 +14,6 @@ public class RoundaboutRegistrationTests
         Assert.Equal(4,contract.ArmCount);
         Assert.Equal(12,contract.RequiredMovements.Select(m=>(m.FromArm,m.ToArm)).Distinct().Count());
         Assert.All(contract.RequiredMovements,m=>Assert.NotEqual(m.FromArm,m.ToArm));
-        Assert.Throws<ArgumentOutOfRangeException>(()=>new NodeOnlyInterchangeTemplate(InterchangeType.Roundabout));
         IInterchangeTemplate template=new RoundaboutTemplate();
         Assert.Equal(InterchangeType.Roundabout,template.Type);
         var parameters=new InterchangeParams{Legs=InterchangeParams.CrossLegs(90,0,1),RampWidth=8,LoopRadius=0,

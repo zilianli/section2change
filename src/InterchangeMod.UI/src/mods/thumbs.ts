@@ -1,4 +1,4 @@
-// 首页和设置页的缩略图：普通模板由 ThumbnailTests 生成，节点专用类型使用手绘拓扑示意。
+// 首页和设置页的缩略图：都由 ThumbnailTests 按典型参数生成（井字用替换模式的井字求解器），线宽按取景范围统一。
 import Cloverleaf from "./thumbs/interchange-Cloverleaf.svg";
 import Diamond from "./thumbs/interchange-Diamond.svg";
 import DirectionalT from "./thumbs/interchange-DirectionalT.svg";

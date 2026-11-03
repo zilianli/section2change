@@ -21,6 +21,45 @@ namespace InterchangeMod.Systems
         public int nodeActiveArm { get; private set; }
         public int nodeGradePercent { get; private set; } = 16;
         public int nodeRetreatLimit { get; private set; } = 1000;
+        /// <summary>
+        /// 连接·自动时节点求解用的默认坡度（%）和退接上限（米）；连接·手动时用面板的值。井字的直行道一口气爬到第 3、4 层，
+        /// 坡度越大越陡（16% 时实测 12 ~ 15%），自动时用较缓的 kAutoGridGrade。
+        /// </summary>
+        private const int kAutoNodeGrade = 16, kAutoGridGrade = 10, kAutoNodeRetreat = 1000;
+        private int nodeGrade => setting.NodeManualMode ? nodeGradePercent : IsCompactGrid ? kAutoGridGrade : kAutoNodeGrade;
+
+        /// <summary>
+        /// 求解依次尝试的坡度。井字能否接上随坡度跳变（游戏内 78° 混合路口：12%、15%、18% 能放，10%、16% 放不下），
+        /// 而最大坡度只是上限、更缓同样合规：连接·自动从 kAutoGridGrade 起每次加 1% 到 kAutoNodeGrade；
+        /// 连接·手动从设的坡度起每次减 1%，最多再试 kManualGridSteps 档。其他类型只按设的坡度求解一次。
+        /// </summary>
+        private float[] GradeLadder(InterchangeType type, float grade)
+        {
+            if (type != InterchangeType.CompactGrid)
+                return new[] { grade };
+            if (!setting.NodeManualMode)
+                return Enumerable.Range(kAutoGridGrade, kAutoNodeGrade - kAutoGridGrade + 1).Select(p => p / 100f).ToArray();
+            return Enumerable.Range(0, kManualGridSteps + 1).Select(k => grade - k / 100f).Where(g => g >= .05f - 1e-4f).ToArray();
+        }
+
+        private const int kManualGridSteps = 4;
+
+        private static string GradeFallbackNote(float wanted, float used) =>
+            Math.Abs(used - wanted) > 1e-4f ? $" 按 {wanted * 100f:F0}% 坡度放不下，实际用 {used * 100f:F0}%。" : "";
+        private int nodeRetreat => setting.NodeManualMode ? nodeRetreatLimit : kAutoNodeRetreat;
+        /// <summary>
+        /// 节点求解用的参数（同替换模式的 effective）：连接·自动时用默认值（只照搬立交类型），连接·手动时用面板的设置。
+        /// </summary>
+        private Setting nodeSetting
+        {
+            get
+            {
+                if (setting.NodeManualMode || autoSetting == null)
+                    return setting;
+                autoSetting.InterchangeType = setting.InterchangeType;
+                return autoSetting;
+            }
+        }
         public bool nodePreviewFailed { get; private set; }
         private IReadOnlyList<RoadRetreatResult> m_NodeRetreatPreview;
         private SpatialCandidateResult m_NodeSpatialPreview;
@@ -47,6 +86,69 @@ namespace InterchangeMod.Systems
             if(enabled) nodeMessage="节点模式已开启；选齐有效端点后自动尝试，也可点击底部生成预览。";
         }
         public void SetNodeArm(int arm) { if (arm >= 0 && arm < nodeArms.Count) nodeActiveArm = arm; }
+
+        /// <summary>找双幅另一幅端点的范围（米）。</summary>
+        private const float kPairSearch = 60f;
+
+        /// <summary>
+        /// 选点辅助：点了双幅道路一幅的单行端点、这个方向还只有它时，把附近对向那一幅的开放端点也加进来（一个方向点一次）；
+        /// 这个方向选齐后自动转到下一个没选齐的方向。
+        /// </summary>
+        private void AssistNodeSelection(SelectedEndpoint picked)
+        {
+            int arm = nodeActiveArm;
+            if (picked.OneWay && nodeArms[arm].Endpoints.Count == 1)
+            {
+                var pair = NodeFeedback.OppositeCarriageway(picked, NearbyOpenEndpoints(picked));
+                if (pair != null && m_NodeSelection.Toggle(arm, pair) == EndpointSelectionChange.Added)
+                    nodeMessage = "已加入当前方向，并自动加入对向那一幅。";
+            }
+            if (NodeFeedback.ArmComplete(nodeArms[arm]))
+            {
+                int next = NodeFeedback.NextIncompleteArm(nodeArms, arm);
+                if (next != arm)
+                {
+                    nodeActiveArm = next;
+                    nodeMessage += $" 方向 {arm + 1} 已选齐，转到方向 {next + 1}。";
+                }
+            }
+        }
+
+        /// <summary>端点附近 kPairSearch 米内其他还没被选的开放端点。</summary>
+        private List<SelectedEndpoint> NearbyOpenEndpoints(SelectedEndpoint around)
+        {
+            var result = new List<SelectedEndpoint>();
+            var netTree = m_NetSearchSystem.GetNetSearchTree(readOnly: true, out JobHandle treeDeps);
+            treeDeps.Complete();
+            var candidates = new Unity.Collections.NativeList<Entity>(32, Unity.Collections.Allocator.Temp);
+            try
+            {
+                var center = new float2(around.Position.X, around.Position.Z);
+                var iterator = new RoadRemover.BoundsIterator { m_Bounds = new Colossal.Mathematics.Bounds2(center - kPairSearch, center + kPairSearch), m_Result = candidates };
+                netTree.Iterate(ref iterator);
+                var seen = new HashSet<Entity>();
+                var selected = nodeArms.SelectMany(a => a.Endpoints).ToList();
+                foreach (Entity edgeEntity in candidates)
+                {
+                    if (!EntityManager.HasComponent<Game.Net.Edge>(edgeEntity))
+                        continue;
+                    var edge = EntityManager.GetComponentData<Game.Net.Edge>(edgeEntity);
+                    foreach (Entity node in new[] { edge.m_Start, edge.m_End })
+                    {
+                        if (!seen.Add(node))
+                            continue;
+                        if (OpenEndpointReader.TryRead(EntityManager, m_PrefabSystem, m_RoadsByName, node, out var port, out _)
+                            && !selected.Any(x => OpenEndpointReader.SameNode(x, port)))
+                            result.Add(port);
+                    }
+                }
+            }
+            finally
+            {
+                candidates.Dispose();
+            }
+            return result;
+        }
         public void SetNodeGrade(int grade)
         {
             int next=Math.Max(3,Math.Min(30,grade)); if(next==nodeGradePercent) return;
@@ -97,7 +199,7 @@ namespace InterchangeMod.Systems
             }
             if (browsing || !paused)
             {
-                if(m_MixedNodeSolvePending)InvalidateNodeSolve();
+                if(m_MixedNodeSolvePending||nodeSolving)InvalidateNodeSolve();
                 m_NodeGenerate = false;
                 if (m_HasPreview || m_NodeDirty || nodePreviewFailed)
                 {
@@ -129,6 +231,7 @@ namespace InterchangeMod.Systems
                             nodeMessage = change == EndpointSelectionChange.Added ? "已加入当前方向。选齐后点击生成预览。"
                                 : change == EndpointSelectionChange.Removed ? "已取消该端点。"
                                 : change == EndpointSelectionChange.ArmFull ? "每个方向最多两个端点。" : "该端点已在其他方向，请先清除原分组。";
+                            if(change==EndpointSelectionChange.Added) AssistNodeSelection(port);
                             if(NodeFeedback.SelectionChanged(change)) { m_NodeDirty = true; InvalidateNodeConfirmation(); InvalidateNodeSolve(); nodePreviewFailed=false; }
                             if(change==EndpointSelectionChange.Added && Enum.TryParse(setting.InterchangeType,out InterchangeType readyType)
                                 && NodeFeedback.ReadyForAutoPreview(readyType,nodeArms))
@@ -150,11 +253,12 @@ namespace InterchangeMod.Systems
                     Mod.log.Info("[autochange] preview dispatch: entering solver");
                     m_NodeGenerate = false;
                     nodePreviewFailed=false;
-                    try { BuildNodePreview(); nodePreviewFailed=!m_HasPreview&&!m_MixedNodeSolvePending; }
+                    try { BuildNodePreview(); nodePreviewFailed=!m_HasPreview&&!m_MixedNodeSolvePending&&!nodeSolving; }
                     catch (Exception ex) { InvalidateNodeSolve(); m_NodeDirty = true; m_HasPreview=false; nodePreviewFailed=true; nodeMessage = "节点预览异常，详情已记录到日志。"; Mod.log.Error(ex); }
                 }
                 return deps;
             }
+            if(FinishNodeJob())return deps;
             if(FinishCompletedMixedNodeSolve())return deps;
             UpdateNodeNativeEligibility();
             if(m_ConfirmRequested)
@@ -172,14 +276,14 @@ namespace InterchangeMod.Systems
         {
             if (!Enum.TryParse(setting.InterchangeType,out InterchangeType type)) { nodeMessage = "未知立交类型。"; return; }
             var frozen = nodeArms;
-            Mod.log.Info($"[autochange] preview attempt: type={type}, grade={nodeGradePercent}%, offset={setting.BaseElevation}, gap={setting.LevelGap}; "
+            Mod.log.Info($"[autochange] preview attempt: type={type}, grade={nodeGrade}%, offset={nodeSetting.BaseElevation}, gap={nodeSetting.LevelGap}; "
                 +string.Join("; ",frozen.SelectMany(a=>a.Endpoints.Select(p=>$"arm={a.Index+1}, node={p.NodeIndex}:{p.NodeVersion}, pos={p.Position}, tangent={p.OutwardTangent}, outward={p.TravelOutward}, width={p.Width}, prefab={p.Prefab}"))));
             foreach (var a in frozen)
                 foreach (var p in a.Endpoints)
                     if (!OpenEndpointReader.TryRead(EntityManager,m_PrefabSystem,m_RoadsByName,NodeEntity(p),out var fresh,out _) || !OpenEndpointReader.SameNode(p,fresh))
                     { nodeMessage = "已选道路发生变化，请清空对应方向并重新选择。"; return; }
             var request = EndpointTypeRequest.Create(type,frozen,m_CityConfigurationSystem.leftHandTraffic == false,
-                nodeGradePercent / 100f,Enumerable.Repeat((float)nodeRetreatLimit,frozen.Count).ToArray());
+                nodeGrade / 100f,Enumerable.Repeat((float)nodeRetreat,frozen.Count).ToArray());
             if(request.Arms.Any(a=>!a.Endpoints.SequenceEqual(frozen.First(old=>old.Index==a.Index).Endpoints)))
             {
                 var reordered=new EndpointSelection(request.Arms.Count);
@@ -222,28 +326,28 @@ namespace InterchangeMod.Systems
                 if (from.Prefab!=to.Prefab || from.Width!=to.Width)
                 { nodeMessage="首轮预览要求每条贯通车流两端使用相同道路（预制体与宽度），变断面转换尚未接入。"; return; }
             }
-            var gridSetup=grid?EndpointCompactGridSetup.Create(frozen,m_RoadCatalog,setting.BaseElevation,setting.LevelGap,ground,setting.RampPrefab):null;
+            var gridSetup=grid?EndpointCompactGridSetup.Create(frozen,m_RoadCatalog,nodeSetting.BaseElevation,nodeSetting.LevelGap,ground,nodeSetting.RampPrefab,ordinaryAutomaticRoads:true):null;
             if(grid&&!gridSetup.Success){nodeMessage=gridSetup.Diagnostic;return;}
-            var roundaboutSetup=roundabout?EndpointRoundaboutSetup.Create(frozen,m_RoadCatalog,setting.BaseElevation,setting.LevelGap,ground,setting.RampPrefab):null;
+            var roundaboutSetup=roundabout?EndpointRoundaboutSetup.Create(frozen,m_RoadCatalog,nodeSetting.BaseElevation,nodeSetting.LevelGap,ground,nodeSetting.RampPrefab,ordinaryAutomaticRoads:true):null;
             if(roundabout&&!roundaboutSetup.Success){nodeMessage=roundaboutSetup.Diagnostic;return;}
-            var wyeSetup=wye?EndpointWyeSetup.Create(frozen,m_RoadCatalog,setting.BaseElevation,setting.LevelGap,ground,setting.RampPrefab):null;
+            var wyeSetup=wye?EndpointWyeSetup.Create(frozen,m_RoadCatalog,nodeSetting.BaseElevation,nodeSetting.LevelGap,ground,nodeSetting.RampPrefab,ordinaryAutomaticRoads:true):null;
             if(wye&&!wyeSetup.Success){nodeMessage=wyeSetup.Diagnostic;return;}
-            var ramp = roundabout?roundaboutSetup.Ramp:grid?gridSetup.Ramp:wye?wyeSetup.Ramp:m_RoadCatalog.FirstOrDefault(r=>r.Name == setting.RampPrefab && r.IsOneWay && r.ForwardLanes>0)
+            var ramp = roundabout?roundaboutSetup.Ramp:grid?gridSetup.Ramp:wye?wyeSetup.Ramp:m_RoadCatalog.FirstOrDefault(r=>r.Name == nodeSetting.RampPrefab && r.IsOneWay && r.ForwardLanes>0)
                 ?? m_RoadCatalog.Where(r=>r.IsOneWay && r.ForwardLanes>0 && r.LanesPerDirection==1 && r.IsHighway).OrderBy(r=>r.Width).FirstOrDefault();
             if (ramp == null) { nodeMessage = "找不到正向单车道公路匝道，请在手动模式选择单向匝道道路。"; return; }
             IReadOnlyList<EndpointLaneBalance> balances=roundabout?roundaboutSetup.Design.Balances:wye||grid?Array.Empty<EndpointLaneBalance>():EndpointLaneBalance.Select(frozen,m_RoadCatalog,ramp);
-            var shared=type==InterchangeType.Cloverleaf&&setting.CloverleafHugLoop?CloverleafRoadDesign.SelectSharedRamp(m_RoadCatalog,ramp):null;
-            if(type==InterchangeType.Cloverleaf&&setting.CloverleafHugLoop&&shared==null)
+            var shared=type==InterchangeType.Cloverleaf&&nodeSetting.CloverleafHugLoop?CloverleafRoadDesign.SelectSharedRamp(m_RoadCatalog,ramp):null;
+            if(type==InterchangeType.Cloverleaf&&nodeSetting.CloverleafHugLoop&&shared==null)
             {nodeMessage="贴环道需要每方向车道数与匝道相等的双向道路，当前未找到；请选择其他匝道道路，或切回外侧大弧线。";return;}
             var balanceWarnings=wye||grid||roundabout?Array.Empty<string>():frozen.Where(a=>!balances.Any(b=>b.Arm==a.Index)).Select(a=>$"方向 {a.Index+1}：未找到精确减车道道路，保留全宽。").ToArray();
             Mod.log.Info("[autochange] lane balance: "+string.Join("; ",balances.Select(b=>$"arm={b.Arm+1}, reduced={b.Prefab}, lanes={b.Lanes}, width={b.Width}, rampLanes={b.RampLanes}")));
-            var levels=wye||grid||roundabout?null:EndpointLevels.Resolve(frozen,setting.CloverleafCrossOnTop,setting.BaseElevation,setting.LevelGap,ground);
+            var levels=wye||grid||roundabout?null:EndpointLevels.Resolve(frozen,nodeSetting.CloverleafCrossOnTop,nodeSetting.BaseElevation,nodeSetting.LevelGap,ground);
             float main=roundabout?roundaboutSetup.MainHeight:grid?gridSetup.BaseHeight:wye?wyeSetup.BaseHeight:levels.Main,
                 cross=roundabout?roundaboutSetup.CrossHeight:grid?gridSetup.Layers[3]:wye?wyeSetup.UpperHeight:levels.Cross;
             float terrainLift=levels?.TerrainLift??0;
             if(wye)Mod.log.Info($"[autochange] wye setup: ramp={ramp.Name}, lanesPerRamp={ramp.LanesPerDirection}, requiredClearance={wyeSetup.RequiredClearance:F3}");
-            if(roundabout)Mod.log.Info($"[autochange] roundabout setup: ramp={ramp.Name}, lanesPerRamp={ramp.LanesPerDirection}, ring={roundaboutSetup.Ring.Name}, ringLanes={roundaboutSetup.Ring.LanesPerDirection}, requiredClearance={roundaboutSetup.RequiredClearance:F3}, racetrack={setting.RoundaboutRacetrack}");
-            if(threeWay&&!wye&&type!=InterchangeType.Trumpet&&setting.DirectionalTwoLevel
+            if(roundabout)Mod.log.Info($"[autochange] roundabout setup: ramp={ramp.Name}, lanesPerRamp={ramp.LanesPerDirection}, ring={roundaboutSetup.Ring.Name}, ringLanes={roundaboutSetup.Ring.LanesPerDirection}, requiredClearance={roundaboutSetup.RequiredClearance:F3}, racetrack={nodeSetting.RoundaboutRacetrack}");
+            if(threeWay&&!wye&&type!=InterchangeType.Trumpet&&nodeSetting.DirectionalTwoLevel
                 &&LevelPlanner.BandOf(main-ground)==ElevationBand.Elevated)
             {nodeMessage="主线在高架上时，两层T型不能下穿；请切换为三层后重新生成预览。";return;}
             // Plan the higher crossing conservatively for every road family. A center
@@ -259,7 +363,7 @@ namespace InterchangeMod.Systems
                 return new EndpointPrefabSupportRule(name,road.ElevatedLength>0?road.ElevatedLength:80,
                     road.MiddlePillarSpacing,road.PillarWidth>0?road.PillarWidth:4);
             }).ToArray();
-            var design=grid?gridSetup.Design:roundabout?roundaboutSetup.Design:new CloverleafRoadDesign(balances,bridgeRules:bridgeRules,hugLoops:type==InterchangeType.Cloverleaf&&setting.CloverleafHugLoop,
+            var design=grid?gridSetup.Design:roundabout?roundaboutSetup.Design:new CloverleafRoadDesign(balances,bridgeRules:bridgeRules,hugLoops:type==InterchangeType.Cloverleaf&&nodeSetting.CloverleafHugLoop,
                 sharedRampPrefab:shared?.Name,sharedRampWidth:shared?.Width??0,supportRules:supportRules);
             Mod.log.Info("[autochange] bridge rules: "+string.Join("; ",bridgeRules.Select(r=>$"arm={r.Arm+1}, maxEdge={r.MaxLength}, middleSpacing={r.MiddleSpacing?.ToString()??"none"}, width={r.Width}")));
             Mod.log.Info($"[autochange] levels: main={main:F3}, cross={cross:F3}, centerTerrain={ground:F3}, autoLift={terrainLift:F3}, axisResidual={frame.ResidualRms:F3}");
@@ -267,77 +371,87 @@ namespace InterchangeMod.Systems
             foreach(var a in frozen)
                 foreach(var p in a.Endpoints)
                 {
-                    var trace=RoadApproachReader.Read(EntityManager,m_PrefabSystem,m_RoadsByName,p,nodeRetreatLimit,out var reason);
-                    traces.Add(trace);boundaries.Add($"方向{a.Index+1} #{p.NodeIndex} 可退接{Math.Max(0,Math.Min(nodeRetreatLimit,trace.Length-10)):F0}m ({reason})");
+                    var trace=RoadApproachReader.Read(EntityManager,m_PrefabSystem,m_RoadsByName,p,nodeRetreat,out var reason);
+                    traces.Add(trace);boundaries.Add($"方向{a.Index+1} #{p.NodeIndex} 可退接{Math.Max(0,Math.Min(nodeRetreat,trace.Length-10)):F0}m ({reason})");
                 }
             Mod.log.Info("[autochange] traced corridors: "+string.Join("; ",boundaries));
             if(grid)Mod.log.Info($"[autochange] grid setup: layers=[{string.Join(",",gridSetup.Layers)}], ramp={ramp.Name}, rampLanes={ramp.LanesPerDirection}, requiredClearance={gridSetup.RequiredClearance:F3}; "+string.Join("; ",gridSetup.Roads.Select(r=>$"arm={r.Arm+1}, through={r.Through.Name}, throughLanes={r.Through.LanesPerDirection}, collector={r.Collector.Name}, collectorLanes={r.Collector.LanesPerDirection}")));
-            var search=roundabout?EndpointRoundaboutSearch.Search(frozen,traces,request.RightHandTraffic,main,cross,ramp,roundaboutSetup.Ring,
-                    request.MaxGrade,nodeRetreatLimit,design,verticalClearance:roundaboutSetup.RequiredClearance,terrainHeight:ground,racetrack:setting.RoundaboutRacetrack)
+            // 搜索在后台线程跑（面板显示阶段和已用时间），这里先取好它要用的设置
+            int retreat=nodeRetreat;
+            bool racetrack=nodeSetting.RoundaboutRacetrack,leftExit=nodeSetting.StackLeftExit,loopExit=nodeSetting.TrumpetLoopForExit,
+                twoLevel=nodeSetting.DirectionalTwoLevel,debug=setting.DebugLogging;
+            var ladder=GradeLadder(type,request.MaxGrade);float usedGrade=ladder[0];
+            RetreatSearchResult SolveAt(float g)=>roundabout?EndpointRoundaboutSearch.Search(frozen,traces,request.RightHandTraffic,main,cross,ramp,roundaboutSetup.Ring,
+                    g,retreat,design,verticalClearance:roundaboutSetup.RequiredClearance,terrainHeight:ground,racetrack:racetrack)
                 :grid?EndpointCompactGridSearch.Search(frozen,traces,request.RightHandTraffic,main,gridSetup.LevelGap,ramp,gridSetup.Roads,
-                    request.MaxGrade,nodeRetreatLimit,design,terrainHeight:ground):stacked
-                ?EndpointStackFitter.Search(frozen,traces,type,request.RightHandTraffic,main,cross,ramp,request.MaxGrade,nodeRetreatLimit,design,setting.StackLeftExit,
-                    diagnostic:setting.DebugLogging?(Action<string>)(message=>Mod.log.Info("[autochange-fit] "+message)):null)
-                :threeWay?EndpointThreeWaySearch.Search(frozen,traces,type,request.RightHandTraffic,main,cross,ramp,request.MaxGrade,nodeRetreatLimit,design,
-                    setting.TrumpetLoopForExit,setting.DirectionalTwoLevel,terrainHeight:ground)
-                :RetreatCloverleafSearch.Search(frozen,traces,request.RightHandTraffic,main,cross,ramp.Width,request.MaxGrade,nodeRetreatLimit,design:design);
-            Mod.log.Info($"[autochange] search: attempts={search.Attempts}, clearanceRejected={search.ClearanceRejected}, lastClearance={search.ClearanceDetail}, supportRejected={search.SupportRejected}, lastSupport={search.SupportDetail}");
-            if(search.Failure!=RetreatSearchFailure.None || search.Spatial==null)
+                    g,retreat,design,terrainHeight:ground):stacked
+                ?EndpointStackFitter.Search(frozen,traces,type,request.RightHandTraffic,main,cross,ramp,g,retreat,design,leftExit,
+                    diagnostic:debug?(Action<string>)(message=>Mod.log.Info("[autochange-fit] "+message)):null)
+                :threeWay?EndpointThreeWaySearch.Search(frozen,traces,type,request.RightHandTraffic,main,cross,ramp,g,retreat,design,
+                    loopExit,twoLevel,terrainHeight:ground)
+                :RetreatCloverleafSearch.Search(frozen,traces,request.RightHandTraffic,main,cross,ramp.Width,g,retreat,design:design);
+            StartNodeJob("正在求解立交布局和退接位置",report=>SolveOnGradeLadder(ladder,SolveAt,report,"正在求解立交布局和退接位置",g=>usedGrade=g),search=>
             {
-                if(stacked||threeWay||grid||roundabout)
+                var completionTerrain=m_TerrainSystem.GetHeightData();
+                Mod.log.Info($"[autochange] search: attempts={search.Attempts}, clearanceRejected={search.ClearanceRejected}, lastClearance={search.ClearanceDetail}, supportRejected={search.SupportRejected}, lastSupport={search.SupportDetail}");
+                if(search.Failure!=RetreatSearchFailure.None || search.Spatial==null)
                 {
-                    try
+                    if(stacked||threeWay||grid||roundabout)
                     {
-                        var lines=EndpointTraceDump.Encode(traces);
-                        var fingerprint=string.Join("\n",lines);
-                        if(!string.Equals(lastTraceDumpFingerprint,fingerprint,StringComparison.Ordinal))
+                        try
                         {
-                            foreach(var line in lines) Mod.log.Info("[autochange-trace] "+line);
-                            lastTraceDumpFingerprint=fingerprint;
+                            var lines=EndpointTraceDump.Encode(traces);
+                            var fingerprint=string.Join("\n",lines);
+                            if(!string.Equals(lastTraceDumpFingerprint,fingerprint,StringComparison.Ordinal))
+                            {
+                                foreach(var line in lines) Mod.log.Info("[autochange-trace] "+line);
+                                lastTraceDumpFingerprint=fingerprint;
+                            }
                         }
+                        catch(ArgumentException ex)
+                        { Mod.log.Info("[autochange] real-road trace dump rejected: "+ex.Message); }
                     }
-                    catch(ArgumentException ex)
-                    { Mod.log.Info("[autochange] real-road trace dump rejected: "+ex.Message); }
+                    nodeMessage=stacked||threeWay||grid||roundabout
+                        ?EndpointPreviewMessages.StackFailure(search,nodeRetreat)
+                        :$"自动退接未找到预览（{search.Attempts} 个候选，{search.Failure}）：{PlanarReason(search.LastPlanarFailure)}；纵断面 {search.LastSpatialFailure}，空间检查拒绝 {search.ClearanceRejected} 个，桥墩检查拒绝 {search.SupportRejected} 个。上限每臂{nodeRetreat}m；遇路口/尽头会停止。详细结果已写入日志。";
+                    return;
                 }
-                nodeMessage=stacked||threeWay||grid||roundabout
-                    ?EndpointPreviewMessages.StackFailure(search,nodeRetreatLimit)
-                    :$"自动退接未找到预览（{search.Attempts} 个候选，{search.Failure}）：{PlanarReason(search.LastPlanarFailure)}；纵断面 {search.LastSpatialFailure}，空间检查拒绝 {search.ClearanceRejected} 个，桥墩检查拒绝 {search.SupportRejected} 个。上限每臂{nodeRetreatLimit}m；遇路口/尽头会停止。详细结果已写入日志。";
-                return;
-            }
-            var candidate=search.Spatial;
-            if((stacked||grid||roundabout)&&search.ApproachQuality!=null)
-                Mod.log.Info($"[autochange-fit] selected: fromCuts={search.ReferenceFromCuts}, curvedCore={search.CoreFollowsCurve}, center={search.ReferenceCenter}, peakCurvature={search.ApproachQuality.PeakCurvature:F6}, curvatureJump={search.ApproachQuality.CurvatureJump:F6}, score={search.ApproachQuality.Score:F4}");
-            var errors=PrepareNodePreview(search,traces,ramp.Name,ref terrain,out var sources,out var prepared);
-            snapshot.Warnings.AddRange(balanceWarnings);
-            if(grid&&EndpointPlacementHints.ShouldSuggestNoCollisionForCompactGrid(search.Arms))
-                snapshot.Warnings.Add(EndpointPlacementHints.CompactGridNoCollisionHint);
-            if(terrainLift>0)snapshot.Warnings.Add($"混合高度自动整体抬高 {terrainLift:F1} m，使上层跨线段达到高架桥阈值；外部接点保留原高程。");
-            if (errors.Count != 0) { nodeMessage = string.Join("；",errors); return; }
-            snapshot.Warnings.Add("节点预览按真实原路退接；确认后将改造虚线范围内的原路并保留外侧尾段。请检查原生错误、接回位置和桥墩后在面板确认，实际通行仍需游戏验证。");
-            if(grid)snapshot.Warnings.Add($"井字四层标高：{string.Join(" / ",gridSetup.Layers.Select(h=>$"{h:F1}"))} m；各原路端点高程由外部接路保留。");
-            if(roundabout)snapshot.Warnings.Add($"环岛两层标高：主线 {main:F1} m，环道 {cross:F1} m；核心按退接道路割线确定中心与方向，外围有界平滑接路保留原端点高程。预览检查要求12种非同臂流向，环道允许合法绕行掉头；实际车道连接与通行待游戏验证。");
-            if(roundabout)snapshot.Warnings.Add($"实际环道：{roundaboutSetup.Ring.Name}，{roundaboutSetup.Ring.LanesPerDirection}车道；实际匝道：{ramp.Name}，{ramp.LanesPerDirection}车道。");
-            if(grid)snapshot.Warnings.Add($"实际匝道：{ramp.Name}；"+string.Join("；",gridSetup.Roads.GroupBy(r=>(r.Through.Name,r.Collector.Name)).Select(g=>
-                $"方向{string.Join("/",g.Select(r=>r.Arm+1))}直行：{g.Key.Item1}，集散：{g.Key.Item2}")));
-            if(stacked)snapshot.Warnings.Add(search.ReferenceFromCuts
-                ?search.CoreFollowsCurve?"已按退接道路弯曲主线与相邻匝道，并优化外部接路。":"已按退接后的道路重新确定中心与方向，并优化接路曲率；本次保留直线核心。"
-                :"本轮未找到更平滑的安全布局，保留原有预览方案。");
-            if(threeWay)snapshot.Warnings.Add(wye?"Y型三条臂无主次，已按各臂断面和交角重新求解；原有高差由外部接路过渡，各端保留原路高程。":"三向核心已按道路断面和交角重新求解；主支路原有高差由外部接路过渡，各端保留原路高程。");
-            snapshot.Warnings.Add(grid
-                ?"井字车道分配（N=T+2R）："+string.Join("；",gridSetup.Roads.Select(r=>$"方向{r.Arm+1}直行{r.Through.LanesPerDirection}车道+集散{r.Collector.LanesPerDirection}车道，集散再分为左右各{ramp.LanesPerDirection}车道"))+"。实际车道连接待游戏验证。"
-                :roundabout
-                ?"环岛主线车道分配（N−R）："+string.Join("；",balances.Select(b=>$"方向{b.Arm+1}：{frozen.First(a=>a.Index==b.Arm).Endpoints.First(p=>!p.TravelOutward).Lanes}−{b.RampLanes}={b.Lanes}车道，驶出至汇入间使用{b.Prefab}"))+"；方向2/4直接连接环道。实际车道连接待游戏验证。"
-                :wye
-                ?$"Y型车道分配：每幅{ramp.LanesPerDirection*2}车道分为两条{ramp.LanesPerDirection}车道匝道；已匹配{ramp.Name}，不设贯通减车道段。实际车道连接待游戏验证。"
-                :threeWay
-                ?$"车道平衡匹配 {balances.Count}/3 幅；按该T型模板应用分合流和匝道外缘对齐，实际车道连接待游戏验证。"
-                :stacked
-                ?$"车道平衡匹配 {balances.Count}/4 幅：{(type==InterchangeType.Stack&&setting.StackLeftExit?"左转驶出至汇入间减车道，外侧直行边缘保持":"右转驶出至汇入间减车道")}；分合流及实际车道连接待游戏验证。"
-                :$"车道平衡已启用 {balances.Count}/4 幅：分流至汇入间减车道，中央交织段保持全宽；匝道外缘对齐。");
-            if(shared!=null)snapshot.Warnings.Add($"贴环道：右转与环道共用双向 {shared.Name}，每方向 {shared.LanesPerDirection} 车道；共享弧线和分合流仍需游戏验证。");
-            FinishNodePreview(search,sources,ramp.Name,prepared,type);
-            if(grid)nodeMessage+=search.CoreFollowsCurve?" 已随原路曲线匹配。":" 采用平直布局，外围接回原路。";
-            if(roundabout)nodeMessage+=$" 环岛两层{(setting.RoundaboutRacetrack?"跑道形":"圆形")}预览，按原路割线确定核心方向，外围有界接回原路。";
+                var candidate=search.Spatial;
+                if((stacked||grid||roundabout)&&search.ApproachQuality!=null)
+                    Mod.log.Info($"[autochange-fit] selected: fromCuts={search.ReferenceFromCuts}, curvedCore={search.CoreFollowsCurve}, center={search.ReferenceCenter}, peakCurvature={search.ApproachQuality.PeakCurvature:F6}, curvatureJump={search.ApproachQuality.CurvatureJump:F6}, score={search.ApproachQuality.Score:F4}");
+                var errors=PrepareNodePreview(search,traces,ramp.Name,ref completionTerrain,out var sources,out var prepared);
+                snapshot.Warnings.AddRange(balanceWarnings);
+                if(grid&&EndpointPlacementHints.ShouldSuggestNoCollisionForCompactGrid(search.Arms))
+                    snapshot.Warnings.Add(EndpointPlacementHints.CompactGridNoCollisionHint);
+                if(terrainLift>0)snapshot.Warnings.Add($"混合高度自动整体抬高 {terrainLift:F1} m，使上层跨线段达到高架桥阈值；外部接点保留原高程。");
+                if (errors.Count != 0) { nodeMessage = string.Join("；",errors); return; }
+                snapshot.Warnings.Add("节点预览按真实原路退接；确认后将改造虚线范围内的原路并保留外侧尾段。请检查原生错误、接回位置和桥墩后在面板确认，实际通行仍需游戏验证。");
+                if(grid)snapshot.Warnings.Add($"井字四层标高：{string.Join(" / ",gridSetup.Layers.Select(h=>$"{h:F1}"))} m；各原路端点高程由外部接路保留。");
+                if(roundabout)snapshot.Warnings.Add($"环岛两层标高：主线 {main:F1} m，环道 {cross:F1} m；核心按退接道路割线确定中心与方向，外围有界平滑接路保留原端点高程。预览检查要求12种非同臂流向，环道允许合法绕行掉头；实际车道连接与通行待游戏验证。");
+                if(roundabout)snapshot.Warnings.Add($"实际环道：{roundaboutSetup.Ring.Name}，{roundaboutSetup.Ring.LanesPerDirection}车道；实际匝道：{ramp.Name}，{ramp.LanesPerDirection}车道。");
+                if(grid)snapshot.Warnings.Add($"实际匝道：{ramp.Name}；"+string.Join("；",gridSetup.Roads.GroupBy(r=>(r.Through.Name,r.Collector.Name)).Select(g=>
+                    $"方向{string.Join("/",g.Select(r=>r.Arm+1))}直行：{g.Key.Item1}，集散：{g.Key.Item2}")));
+                if(stacked)snapshot.Warnings.Add(search.ReferenceFromCuts
+                    ?search.CoreFollowsCurve?"已按退接道路弯曲主线与相邻匝道，并优化外部接路。":"已按退接后的道路重新确定中心与方向，并优化接路曲率；本次保留直线核心。"
+                    :"本轮未找到更平滑的安全布局，保留原有预览方案。");
+                if(threeWay)snapshot.Warnings.Add(wye?"Y型三条臂无主次，已按各臂断面和交角重新求解；原有高差由外部接路过渡，各端保留原路高程。":"三向核心已按道路断面和交角重新求解；主支路原有高差由外部接路过渡，各端保留原路高程。");
+                snapshot.Warnings.Add(grid
+                    ?"井字车道分配（N=T+2R）："+string.Join("；",gridSetup.Roads.Select(r=>$"方向{r.Arm+1}直行{r.Through.LanesPerDirection}车道+集散{r.Collector.LanesPerDirection}车道，集散再分为左右各{ramp.LanesPerDirection}车道"))+"。实际车道连接待游戏验证。"
+                    :roundabout
+                    ?"环岛主线车道分配（N−R）："+string.Join("；",balances.Select(b=>$"方向{b.Arm+1}：{frozen.First(a=>a.Index==b.Arm).Endpoints.First(p=>!p.TravelOutward).Lanes}−{b.RampLanes}={b.Lanes}车道，驶出至汇入间使用{b.Prefab}"))+"；方向2/4直接连接环道。实际车道连接待游戏验证。"
+                    :wye
+                    ?$"Y型车道分配：每幅{ramp.LanesPerDirection*2}车道分为两条{ramp.LanesPerDirection}车道匝道；已匹配{ramp.Name}，不设贯通减车道段。实际车道连接待游戏验证。"
+                    :threeWay
+                    ?$"车道平衡匹配 {balances.Count}/3 幅；按该T型模板应用分合流和匝道外缘对齐，实际车道连接待游戏验证。"
+                    :stacked
+                    ?$"车道平衡匹配 {balances.Count}/4 幅：{(type==InterchangeType.Stack&&nodeSetting.StackLeftExit?"左转驶出至汇入间减车道，外侧直行边缘保持":"右转驶出至汇入间减车道")}；分合流及实际车道连接待游戏验证。"
+                    :$"车道平衡已启用 {balances.Count}/4 幅：分流至汇入间减车道，中央交织段保持全宽；匝道外缘对齐。");
+                if(shared!=null)snapshot.Warnings.Add($"贴环道：右转与环道共用双向 {shared.Name}，每方向 {shared.LanesPerDirection} 车道；共享弧线和分合流仍需游戏验证。");
+                FinishNodePreview(search,sources,ramp.Name,prepared,type);
+                if(grid)nodeMessage+=search.CoreFollowsCurve?" 已随原路曲线匹配。":" 采用平直布局，外围接回原路。";
+                if(roundabout)nodeMessage+=$" 环岛两层{(nodeSetting.RoundaboutRacetrack?"跑道形":"圆形")}预览，按原路割线确定核心方向，外围有界接回原路。";
+                nodeMessage+=GradeFallbackNote(ladder[0],usedGrade);
+            });
         }
         private void BuildMixedNodePreview(EndpointTypeRequest request,ref TerrainHeightData terrain,float ground)
         {
@@ -346,17 +460,17 @@ namespace InterchangeMod.Systems
             // owner-thread path, including those with mutable static template caches.
             var catalog=request.Type==InterchangeType.Stack?FreezeNodeSolveCatalog(m_RoadCatalog):m_RoadCatalog;
             var setup=EndpointMixedRoadSetup.Create(frozen,catalog,request.Type,request.RightHandTraffic,
-                setting.BaseElevation,setting.LevelGap,ground,setting.RampPrefab,setting.CloverleafCrossOnTop,
-                setting.CloverleafHugLoop,setting.StackLeftExit,setting.TrumpetLoopForExit,setting.DirectionalTwoLevel,
-                setting.RoundaboutRacetrack);
+                nodeSetting.BaseElevation,nodeSetting.LevelGap,ground,nodeSetting.RampPrefab,nodeSetting.CloverleafCrossOnTop,
+                nodeSetting.CloverleafHugLoop,nodeSetting.StackLeftExit,nodeSetting.TrumpetLoopForExit,nodeSetting.DirectionalTwoLevel,
+                nodeSetting.RoundaboutRacetrack);
             if(!setup.Success){nodeMessage=setup.Diagnostic;return;}
             var traces=new List<RoadApproachTrace>();var boundaries=new List<string>();
             foreach(var arm in frozen)
                 foreach(var port in arm.Endpoints)
                 {
                     // The mathematical divided-road proxies must never be sent to the game reader.
-                    var trace=RoadApproachReader.Read(EntityManager,m_PrefabSystem,m_RoadsByName,port,nodeRetreatLimit,out var reason);
-                    traces.Add(trace);boundaries.Add($"方向{arm.Index+1} #{port.NodeIndex} 可退接{Math.Max(0,Math.Min(nodeRetreatLimit,trace.Length-10)):F0}m ({reason})");
+                    var trace=RoadApproachReader.Read(EntityManager,m_PrefabSystem,m_RoadsByName,port,nodeRetreat,out var reason);
+                    traces.Add(trace);boundaries.Add($"方向{arm.Index+1} #{port.NodeIndex} 可退接{Math.Max(0,Math.Min(nodeRetreat,trace.Length-10)):F0}m ({reason})");
                 }
             Mod.log.Info("[autochange] mixed actual corridors: "+string.Join("; ",boundaries));
             Mod.log.Info($"[autochange] mixed setup: type={request.Type}, ramp={setup.Ramp.Name}, main={setup.MainHeight:F3}, cross={setup.CrossHeight:F3}, requiredClearance={setup.RequiredClearance:F3}");
@@ -365,8 +479,15 @@ namespace InterchangeMod.Systems
                 QueueMixedNodeSolve(request,setup,traces,catalog,ground);
                 return;
             }
-            var search=EndpointMixedRoadSearch.Search(frozen,traces,setup,request.MaxGrade,nodeRetreatLimit);
-            CompleteMixedNodePreview(request,setup,traces,search,ref terrain);
+            int retreat=nodeRetreat;
+            var ladder=GradeLadder(request.Type,request.MaxGrade);float usedGrade=ladder[0];
+            StartNodeJob("正在求解立交布局和退接位置（混合道路）",report=>SolveOnGradeLadder(ladder,
+                g=>EndpointMixedRoadSearch.Search(frozen,traces,setup,g,retreat),report,"正在求解立交布局和退接位置（混合道路）",g=>usedGrade=g),search=>
+            {
+                var completionTerrain=m_TerrainSystem.GetHeightData();
+                CompleteMixedNodePreview(request,setup,traces,search,ref completionTerrain);
+                if(m_HasPreview)nodeMessage+=GradeFallbackNote(ladder[0],usedGrade);
+            });
         }
         private void CompleteMixedNodePreview(EndpointTypeRequest request,EndpointMixedRoadSetup setup,
             IReadOnlyList<RoadApproachTrace> traces,RetreatSearchResult search,ref TerrainHeightData terrain)
@@ -386,7 +507,7 @@ namespace InterchangeMod.Systems
                     }
                 }
                 catch(ArgumentException ex){Mod.log.Info("[autochange] real-road trace dump rejected: "+ex.Message);}
-                nodeMessage=EndpointPreviewMessages.StackFailure(search,nodeRetreatLimit);
+                nodeMessage=EndpointPreviewMessages.StackFailure(search,nodeRetreat);
                 return;
             }
             var errors=PrepareNodePreview(search,traces,setup.Ramp.Name,ref terrain,out var sources,out var prepared);
@@ -434,8 +555,8 @@ namespace InterchangeMod.Systems
             m_NodeSpatialPreview=candidate;
             m_HasPreview=true;
             StageNodeConfirmation(sources,search.Arms,rampName,prepared);
-            nodeMessage=$"已生成 {candidate.Segments.Count} 段临时道路；各方向退接 {string.Join(" / ",search.Distances.Select(d=>$"{d:F0}"))} m，改造 {search.Cuts.Sum(c=>c.Consumed.Count)} 段原路，保留 {search.Cuts.Count(c=>c.Remainder.HasValue)} 段尾段，避开 {search.ClearanceRejected} 个空间冲突候选。虚线标出改造范围，白点为新接点。坡度上限仍为{nodeGradePercent}%；等待游戏检查通过后，在面板确认放置。";
-            Mod.log.Info($"[autochange] node preview: {candidate.Segments.Count} segments; grade={nodeGradePercent}%; type={type}");
+            nodeMessage=$"已生成 {candidate.Segments.Count} 段临时道路；各方向退接 {string.Join(" / ",search.Distances.Select(d=>$"{d:F0}"))} m，改造 {search.Cuts.Sum(c=>c.Consumed.Count)} 段原路，保留 {search.Cuts.Count(c=>c.Remainder.HasValue)} 段尾段，避开 {search.ClearanceRejected} 个空间冲突候选。虚线标出改造范围，白点为新接点。坡度上限仍为{nodeGrade}%；等待游戏检查通过后，在面板确认放置。";
+            Mod.log.Info($"[autochange] node preview: {candidate.Segments.Count} segments; grade={nodeGrade}%; type={type}");
         }
         private static string NodeProblem(EndpointProblemCode code) => code switch
         {

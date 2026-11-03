@@ -70,7 +70,8 @@ namespace InterchangeMod.Generation.Endpoints
                 var proxies = new List<RoadApproachTrace>(); int pieceId = 200000; bool enough = true;
                 foreach (var arm in ordered)
                 {
-                    float realLimit = Math.Min(maxRetreat, arm.Endpoints.Min(p => lookup[(p.NodeIndex, p.NodeVersion)].Length) - 10);
+                    // 原路切断后至少留 max(10 m, 路宽)（HasRetainedRoom）：宽的双向路按自己的宽度留，否则数学搜索选到上限时实际切不下
+                    float realLimit = Math.Min(maxRetreat, arm.Endpoints.Min(p => lookup[(p.NodeIndex, p.NodeVersion)].Length - Math.Max(10, p.Width)));
                     float proxyLimit = realLimit - reserves[arm.Index];
                     if (proxyLimit < 0) { detail = $"Arm {arm.Index + 1} needs {reserves[arm.Index]:F0}m native conversion within its {Math.Max(0, realLimit):F0}m real retreat limit."; enough = false; break; }
                     foreach (var proxy in setup.ProxyArms[arm.Index].Endpoints)
@@ -98,6 +99,9 @@ namespace InterchangeMod.Generation.Endpoints
                 int coreBudget = Math.Max(1, (budget - attempts) / (trials - trial) - 1);
                 if(setup.Type==InterchangeType.Cloverleaf)
                     coreBudget=Math.Max(1,budget-attempts-12); // native seed plus its bounded appearance pass
+                // 井字：汇入段平顺化（加长退接）要多试几组距离，给后面的尝试各留 16 次
+                if(setup.Type==InterchangeType.CompactGrid)
+                    coreBudget=Math.Max(1,budget-attempts-16*(trials-trial));
                 var result = Dispatch(setup.ProxyArms, proxies, setup, grade, maxRetreat, coreBudget,cancellation);
                 cancellation.ThrowIfCancellationRequested();
                 diagnostic?.Invoke($"Mixed trial {trial}, reserves [{string.Join(",",reserves)}], core {result.Failure}/{result.Attempts}: {result.ClearanceDetail}; {result.SupportDetail}");

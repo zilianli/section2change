@@ -76,11 +76,13 @@ public class GridCurvedMergeTests
             var chain=path.ToArray();
             // Exact incoming/outgoing fork boundaries must meet their adjoining
             // straight full-width road without an instantaneous curvature step.
+            // 分流式横移（EndpointCompactGridCore.Kick）：直的分流楔、大半径曲线、核心直段相接处切线连续，
+            // 曲率跳变不超过曲线的最小半径（至少 90 米，EndpointCompactGridCore.Candidates 的 Ease）
             for(int i=1;i<chain.Length;i++)
             {
                 double before=CurveCurvature.Signed(chain[i-1].WorldCurve,1);
                 double after=CurveCurvature.Signed(chain[i].WorldCurve,0);
-                Assert.True(Math.Abs(before-after)<.00002,$"{path.Key} join {i}: curvature jumps {before:F6} -> {after:F6}");
+                Assert.True(Math.Abs(before-after)<(path.Key.StartsWith("GridMain")?1/85.0:.00002),$"{path.Key} join {i}: curvature jumps {before:F6} -> {after:F6}");
             }
             if(path.Key.StartsWith("GridInCollector"))Assert.InRange(Math.Abs(CurveCurvature.Signed(chain[0].WorldCurve,0)),0,.00002);
             if(path.Key.StartsWith("GridOutCollector"))Assert.InRange(Math.Abs(CurveCurvature.Signed(chain[^1].WorldCurve,1)),0,.00002);
@@ -105,10 +107,10 @@ public class GridCurvedMergeTests
     }
 
     [Theory]
-    [InlineData(true,80f,true)] [InlineData(false,80f,true)]
-    [InlineData(true,100f,true)] [InlineData(false,100f,true)]
-    [InlineData(true,79.5f,false)] [InlineData(false,79.5f,false)]
-    [InlineData(true,100.5f,false)] [InlineData(false,100.5f,false)]
+    [InlineData(true,78f,true)] [InlineData(false,78f,true)]
+    [InlineData(true,102f,true)] [InlineData(false,102f,true)]
+    [InlineData(true,69.5f,false)] [InlineData(false,69.5f,false)]
+    [InlineData(true,110.5f,false)] [InlineData(false,110.5f,false)]
     public void SecantReferenceRetainsItsPhysicalRoadFamilyAngleBounds(bool rht,float angle,bool valid)
     {
         var arms=CompactGridFixtures.Arms(rht).Select(a=>
@@ -122,7 +124,7 @@ public class GridCurvedMergeTests
         Assert.True(setup.Success,setup.Diagnostic);
         var options=EndpointCompactGridCore.Candidates(arms,rht,setup.BaseHeight,setup.LevelGap,setup.Ramp!,setup.Roads,.16f,setup.Design!,93,secantReference:true).ToArray();
         Assert.Equal(valid,options.Any(c=>c.Success));
-        if(!valid)Assert.All(options,c=>Assert.Contains("80 to 100",c.Diagnostic));
+        if(!valid)Assert.All(options,c=>Assert.Contains("70 to 110",c.Diagnostic));
     }
 
     [Theory]

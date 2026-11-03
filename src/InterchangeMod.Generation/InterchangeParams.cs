@@ -135,6 +135,12 @@ namespace InterchangeMod.Generation
         /// <summary>true 为右侧通行（中国大陆、美国等）。</summary>
         public bool RightHandTraffic { get; set; } = true;
 
+        /// <summary>
+        /// 游戏道路目录（名称、车道、宽度、桥墩数据）：井字（紧凑定向）要从目录里精确挑直行道、集散道和匝道。
+        /// 其他模板不用；为 null 时井字报缺少道路数据。
+        /// </summary>
+        public IReadOnlyList<Roads.RoadInfo>? RoadCatalog { get; set; }
+
         public float ElevationOf(LegSpec leg) => Levels[leg.Level].Elevation;
 
         /// <summary>

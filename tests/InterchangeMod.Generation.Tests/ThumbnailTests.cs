@@ -71,12 +71,33 @@ namespace InterchangeMod.Generation.Tests
             var p = Params(type);
             Assert.Empty(template.ValidateParams(p));
             // 匝道沿路并行很长的类型固定取景范围（米），其余按匝道离开两条路的范围自动取景
-            float half = type switch { InterchangeType.Stack => 300f, InterchangeType.SinglePoint => 170f, InterchangeType.Roundabout => 170f, _ => 0f };
+            float half = type switch { InterchangeType.Stack => 240f, InterchangeType.SinglePoint => 170f, InterchangeType.Roundabout => 170f, _ => 0f };
             string svg = SvgPreview.Thumbnail(template.Generate(p), 90f, half);
             Assert.StartsWith("<svg", svg);
             Assert.DoesNotContain("NaN", svg);
             if (System.Environment.GetEnvironmentVariable("THUMBNAIL_DIR") is string dir)
                 File.WriteAllText(Path.Combine(dir, $"interchange-{type}.svg"), svg);
+        }
+
+        /// <summary>井字（紧凑定向）不在模板表里（替换模式用井字求解器）：按四条双幅 4 车道道路、被交道路高 10 米生成。</summary>
+        [Fact]
+        public void Thumbnail_IsDrawnForCompactGrid()
+        {
+            var p = new InterchangeParams
+            {
+                Legs = InterchangeParams.CrossLegs(90f, 0, 1),
+                RampWidth = 8f, MaxGrade = 0.16f, RoadCatalog = CompactGridFixtures.Catalog(),
+            };
+            p.SetRoad(0, 2, RoadForm.Dual, 20f, 8f, "Road4");
+            p.SetRoad(1, 3, RoadForm.Dual, 20f, 8f, "Road4");
+            p.Levels[1].Elevation = 10f;
+            var template = new Templates.CompactGridTemplate();
+            Assert.Empty(template.ValidateParams(p));
+            string svg = SvgPreview.Thumbnail(template.Generate(p), 90f, 220f);
+            Assert.StartsWith("<svg", svg);
+            Assert.DoesNotContain("NaN", svg);
+            if (System.Environment.GetEnvironmentVariable("THUMBNAIL_DIR") is string dir)
+                File.WriteAllText(Path.Combine(dir, "interchange-CompactGrid.svg"), svg);
         }
     }
 }

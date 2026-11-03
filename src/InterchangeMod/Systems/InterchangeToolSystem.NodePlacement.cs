@@ -155,7 +155,7 @@ namespace InterchangeMod.Systems
                     if(!OpenEndpointReader.TryRead(EntityManager,m_PrefabSystem,m_RoadsByName,NodeEntity(origin),out var fresh,out _)
                         ||!OpenEndpointReader.SameNode(origin,fresh))
                         return RejectNodeConfirmation(deps,"已选开放端点或道路属性发生变化");
-                    var trace=RoadApproachReader.Read(EntityManager,m_PrefabSystem,m_RoadsByName,fresh,nodeRetreatLimit,out _);
+                    var trace=RoadApproachReader.Read(EntityManager,m_PrefabSystem,m_RoadsByName,fresh,nodeRetreat,out _);
                     freshSources.Add(trace);
                     freshCuts.Add(RoadRetreat.Cut(trace,m_NodeRetreatPreview[i].Distance));
                 }

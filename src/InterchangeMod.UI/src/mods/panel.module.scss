@@ -1,40 +1,324 @@
 // 游戏 UI 用 Coherent Gameface 渲染：只用 flex 布局和基本属性，避免 grid、gap 等不一定支持的特性。
 
-// 放在左上，宽度和高度都收紧：内容区最高 640rem，超出部分滚动，避免压住底部工具栏
-.container {
+// 停靠在屏幕底部、工具栏上方（工具开着时游戏的道路服务栏隐藏，面板占它的位置），水平居中。
+// 底边留出工具栏：新版工具栏上下两行各 var(--toolbarHeight)（50rem），再留间隙；游戏里 calc(var()) 不生效，直接写数值
+.dockWrap {
   position: absolute;
   left: 10rem;
-  top: 70rem;
-  width: 440rem;
+  right: 10rem;
+  bottom: 112rem;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  pointer-events: none;
+}
+
+// 面板和浮在它外面的按钮、道路下拉的定位框
+.dockFrame {
+  position: relative;
+  width: 1440rem;
+  max-width: 100%;
   pointer-events: auto;
 }
 
-.panel {
+.dock {
   width: 100%;
 }
 
-.content {
-  max-height: 520rem;
+.dockInner {
+  position: relative;
 }
 
-.nodeContent {
-  max-height: 400rem;
+// 分栏：左栏高级设置、中栏立交和道路（占剩下的宽度）、连接模式的节点选择、右栏放置与告警
+.columns {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  height: 310rem;
 }
 
-.nodeActions {
-  padding: 6rem;
-  border-top: 1rem solid rgba(255, 255, 255, 0.2);
-  background-color: rgba(0, 0, 0, 0.25);
+.columnLeft,
+.columnMiddle,
+.columnNodes,
+.columnRight,
+.guideToc,
+.guideBody,
+.methodBlock,
+.notesBlock {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  margin: 0 3rem;
+  padding: 6rem 8rem;
+  border-radius: 6rem;
+  background-color: rgba(255, 255, 255, 0.04);
 }
 
-.nodeStatus {
+.columnLeft {
+  width: 320rem;
+  flex-shrink: 0;
+}
+
+.columnMiddle,
+.guideBody,
+.notesBlock {
+  flex: 1;
+  min-width: 0;
+}
+
+.columnNodes {
+  width: 330rem;
+  flex-shrink: 0;
+}
+
+.columnRight {
+  width: 360rem;
+  flex-shrink: 0;
+}
+
+// 连接模式多一栏：两边收窄，给中栏留位置
+.columnsConnect .columnLeft {
+  width: 290rem;
+}
+
+.columnsConnect .columnRight {
+  width: 340rem;
+}
+
+.columnTitle {
+  flex-shrink: 0;
   font-size: 14rem;
-  color: rgba(220, 238, 255, 0.95);
-  max-height: 100rem;
+  font-weight: bold;
+  color: rgb(140, 205, 255);
+  padding-bottom: 3rem;
+  margin-bottom: 6rem;
+  border-bottom: 1rem solid rgba(140, 205, 255, 0.25);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+// 浮动按钮：使用指南、无视碰撞开关、关闭
+.floatBar {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 6rem;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 4rem 6rem;
+  border-radius: 6rem;
+  background-color: rgba(24, 34, 46, 0.92);
+}
+
+.floatButton,
+.floatButtonActive {
+  padding: 3rem 12rem;
+  height: 30rem;
+  font-size: 13rem;
+  color: rgb(140, 205, 255);
+  background-color: rgba(140, 205, 255, 0.12);
+  border-radius: 4rem;
+}
+
+.floatButtonActive {
+  color: white;
+  background-color: rgba(83, 165, 255, 0.6);
+}
+
+// 道路下拉：选择表在面板上方弹出（中栏上方）
+.pickerPopup {
+  position: absolute;
+  left: 320rem;
+  bottom: 100%;
+  margin-bottom: 6rem;
+  width: 680rem;
+  max-width: 100%;
+  padding: 6rem 8rem;
+  border-radius: 6rem;
+  border: 1rem solid rgba(83, 165, 255, 0.6);
+  background-color: rgba(24, 34, 46, 0.97);
+}
+
+.pickerPopupHead {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.pickerPopupTitle {
+  flex: 1;
+  font-size: 14rem;
+  font-weight: bold;
+  color: rgb(140, 205, 255);
+}
+
+// 游戏没暂停：蒙住整个面板，挡住操作
+.pauseMask {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6rem;
+  background-color: rgba(8, 12, 18, 0.78);
+  pointer-events: auto;
+}
+
+.pauseText {
+  margin: 4rem 0 12rem 0;
+  font-size: 14rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.pauseButton {
+  padding: 6rem 24rem;
+  font-size: 15rem;
+  font-weight: bold;
+  color: white;
+  background-color: rgba(60, 160, 90, 0.9);
+  border-radius: 4rem;
+}
+
+// 首页第一步：替换、连接各一块
+.methodBlock {
+  width: 330rem;
+  flex-shrink: 0;
+}
+
+.methodTitle {
+  flex-shrink: 0;
+  font-size: 22rem;
+  font-weight: bold;
+  color: white;
+}
+
+.methodHint {
+  flex-shrink: 0;
+  margin: 2rem 0 6rem 0;
+  font-size: 13rem;
+  color: rgb(140, 205, 255);
+}
+
+.methodButton {
+  flex-shrink: 0;
+  margin-top: 6rem;
+  padding: 6rem 10rem;
+  font-size: 15rem;
+  font-weight: bold;
+  color: white;
+  background-color: rgba(83, 165, 255, 0.6);
+  border-radius: 4rem;
+}
+
+// 道路行：标题、左边形式（自动 / 双向 / 双幅）、右边道路下拉
+.roadBlock {
+  margin-bottom: 6rem;
+}
+
+.roadRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.roadRowTitle {
+  width: 64rem;
+  flex-shrink: 0;
+  font-size: 12rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.roadRowLeft {
+  width: 200rem;
+  flex-shrink: 0;
+}
+
+.formButtons {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.choiceNarrow {
+  padding: 2rem 6rem;
+  margin: 1rem 3rem 1rem 0;
+  height: 24rem;
+  font-size: 12rem;
+}
+
+.dropdown,
+.dropdownOpen {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: 26rem;
+  padding: 2rem 8rem;
+  border-radius: 4rem;
+  border: 1rem solid rgba(255, 255, 255, 0.2);
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+.dropdownOpen {
+  border-color: rgba(83, 165, 255, 0.9);
+}
+
+.dropdownText {
+  flex: 1;
+  min-width: 0;
+  font-size: 12rem;
+  color: white;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+// 下拉箭头用边框画的三角（游戏字体没有箭头符号）
+.dropdownArrow,
+.dropdownArrowUp {
+  width: 0;
+  height: 0;
+  margin-left: 6rem;
+  border-left: 5rem solid rgba(0, 0, 0, 0);
+  border-right: 5rem solid rgba(0, 0, 0, 0);
+}
+
+.dropdownArrow {
+  border-top: 6rem solid rgba(255, 255, 255, 0.8);
+}
+
+.dropdownArrowUp {
+  border-bottom: 6rem solid rgba(140, 205, 255, 1);
+}
+
+.columnScroll {
+  flex: 1;
+  min-height: 0;
+}
+
+// 栏底固定区：确认放置、操作提示
+.columnFooter {
+  flex-shrink: 0;
+  margin-top: 4rem;
+  padding-top: 2rem;
+  border-top: 1rem solid rgba(255, 255, 255, 0.15);
 }
 
 .nodeFeedback {
   margin-top: 5rem;
+}
+
+.nodeStatus {
+  font-size: 13rem;
+  color: rgba(220, 238, 255, 0.95);
 }
 
 .nodeFailure {
@@ -65,17 +349,6 @@
   color: white;
   background-color: rgba(255, 255, 255, 0.16);
   border-radius: 4rem;
-}
-
-// 错误区固定在设置区下面，分隔线隔开；错误很多时自己滚动
-.status,
-.nodeOtherStatus {
-  max-height: 200rem;
-  border-top: 1rem solid rgba(255, 255, 255, 0.15);
-}
-
-.nodeOtherStatus {
-  max-height: 120rem;
 }
 
 .section {
@@ -276,16 +549,7 @@
   margin-bottom: 3rem;
 }
 
-// 没暂停时挡住整个面板的提示
-.pauseBlock {
-  margin: 8rem 0;
-  padding: 10rem 12rem;
-  font-size: 13rem;
-  color: rgb(255, 215, 140);
-  background-color: rgba(200, 140, 30, 0.2);
-  border-radius: 4rem;
-}
-
+// 暂停蒙版的标题
 .pauseTitle {
   font-size: 16rem;
   font-weight: bold;
@@ -359,14 +623,15 @@
   display: flex;
   flex-direction: row;
   align-items: center;
-  margin: -2rem -2rem 8rem -2rem;
+  margin: -2rem -2rem 6rem -2rem;
   padding: 6rem 6rem 6rem 10rem;
   background-color: rgba(0, 0, 0, 0.3);
   border-radius: 4rem;
 }
 
 .titleText {
-  flex: 1;
+  flex-shrink: 0;
+  margin-right: 16rem;
   font-size: 18rem;
   font-weight: bold;
   color: rgb(126, 211, 255);
@@ -379,6 +644,26 @@
   font-size: 16rem;
   font-weight: bold;
   border-radius: 4rem;
+}
+
+.topMiddle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+}
+
+.topHint {
+  flex: 1;
+  min-width: 0;
+  font-size: 12rem;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.topMiddle .modeGroupActive {
+  flex: 0 0 auto;
+  margin: 0 10rem 0 0;
 }
 
 .closeButton {
@@ -394,14 +679,42 @@
   height: 18rem;
 }
 
-// 首页：各类立交的缩略图卡片，每行三个，铺满面板宽度
-.homeContent {
-  max-height: 640rem;
-}
-
+// 首页：四向 / 三向分页，缩略图卡片横排、放不下时换行
 .homeHint {
+  flex-shrink: 0;
   font-size: 12rem;
   color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 6rem;
+}
+
+.tabRow {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 6rem;
+}
+
+.tab,
+.tabSelected {
+  margin-right: 4rem;
+  padding: 3rem 18rem;
+  height: 28rem;
+  font-size: 14rem;
+  font-weight: bold;
+  border-radius: 4rem;
+}
+
+.tabSelected {
+  background-color: rgba(83, 165, 255, 0.6);
+  color: white;
+}
+
+.tabHint {
+  flex: 1;
+  margin-left: 10rem;
+  font-size: 12rem;
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .typeGrid {
@@ -412,8 +725,8 @@
 
 .typeCard,
 .typeCardSelected {
-  width: 31.3%;
-  margin: 1%;
+  width: 124rem;
+  margin: 0 6rem 6rem 0;
   padding: 6rem 4rem;
   display: flex;
   flex-direction: column;
@@ -432,8 +745,8 @@
 }
 
 .typeThumb {
-  width: 100rem;
-  height: 100rem;
+  width: 96rem;
+  height: 96rem;
 }
 
 .typeName {
@@ -466,6 +779,113 @@
   color: white;
 }
 
+// 两大类：替换、连接，左右并排，每块一行（标题 + 自动 / 手动）；当前所在的一类加亮边框
+.modeGroups {
+  display: flex;
+  flex-direction: row;
+}
+
+.modeGroups .modeGroup,
+.modeGroups .modeGroupActive {
+  flex: 0 0 auto;
+  margin: 0 8rem 0 0;
+}
+
+.modeGroup,
+.modeGroupActive {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin: 0 3rem;
+  padding: 3rem;
+  border-radius: 4rem;
+  border: 1rem solid rgba(255, 255, 255, 0.12);
+  background-color: rgba(255, 255, 255, 0.03);
+
+  .modeButton,
+  .modeButtonSelected {
+    height: 26rem;
+    padding: 3rem 6rem;
+    font-size: 13rem;
+  }
+}
+
+.modeGroupActive {
+  border-color: rgba(83, 165, 255, 0.8);
+  background-color: rgba(83, 165, 255, 0.08);
+}
+
+.modeGroupTitle {
+  margin: 0 4rem;
+  font-size: 14rem;
+  font-weight: bold;
+  color: white;
+}
+
+.modeGroupHint {
+  margin: 0 0 6rem 0;
+  font-size: 12rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+// 连接：三步说明、每个方向一行（色块 + 端点数，右侧清空）
+.stepList {
+  margin-bottom: 4rem;
+}
+
+.stepItem {
+  font-size: 12rem;
+  color: rgba(255, 255, 255, 0.75);
+  margin-top: 2rem;
+}
+
+.armRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-top: 3rem;
+}
+
+.armButton,
+.armButtonActive {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  min-height: 26rem;
+  padding: 3rem 8rem;
+  font-size: 13rem;
+  border-radius: 4rem;
+}
+
+.armButtonActive {
+  background-color: rgba(83, 165, 255, 0.6);
+  color: white;
+  font-weight: bold;
+}
+
+.armSwatch {
+  width: 12rem;
+  height: 12rem;
+  border-radius: 6rem;
+  margin-right: 6rem;
+}
+
+.armClear {
+  margin-left: 4rem;
+  height: 26rem;
+  padding: 2rem 10rem;
+  font-size: 12rem;
+  border-radius: 4rem;
+}
+
+.armPort {
+  margin: 2rem 0 0 24rem;
+  font-size: 11rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
 // 设置页：返回、缩略图 + 简介、注意事项
 .hero {
   display: flex;
@@ -477,8 +897,8 @@
 }
 
 .heroThumb {
-  width: 120rem;
-  height: 120rem;
+  width: 84rem;
+  height: 84rem;
   flex-shrink: 0;
   margin-right: 10rem;
 }
@@ -517,23 +937,79 @@
   height: 24rem;
 }
 
-/* 使用指南：首页右上的按钮和指南里的条目 */
-.homeHintRow {
+/* 使用指南：顶栏右边的按钮，指南的目录和条目 */
+.guideToc {
+  width: 300rem;
+  flex-shrink: 0;
+}
+
+.tocItem,
+.tocItemActive {
   display: flex;
   flex-direction: row;
   align-items: center;
+  margin-bottom: 3rem;
+  padding: 5rem 6rem;
+  border-radius: 4rem;
+  font-size: 13rem;
+  color: rgba(255, 255, 255, 0.8);
+
+  &:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
 }
 
-.homeHintRow .homeHint {
+.tocItemActive {
+  color: white;
+  font-weight: bold;
+  background-color: rgba(83, 165, 255, 0.35);
+}
+
+// 目录前的色条：默认说明蓝，重要红、注意橙、其他灰
+.tocMark {
+  width: 4rem;
+  height: 16rem;
+  flex-shrink: 0;
+  margin-right: 8rem;
+  border-radius: 2rem;
+  background-color: rgb(140, 205, 255);
+}
+
+.tocMarkCritical {
+  background-color: rgb(255, 120, 110);
+}
+
+.tocMarkWarning {
+  background-color: rgb(255, 190, 90);
+}
+
+.tocMarkTip {
+  background-color: rgb(180, 185, 195);
+}
+
+.tocText {
   flex: 1;
 }
 
-.guideButton {
-  margin-left: 8rem;
-  padding: 3rem 10rem;
-  font-size: 12rem;
-  color: rgb(140, 205, 255);
-  background-color: rgba(140, 205, 255, 0.12);
+.navButton {
+  width: 30rem;
+  height: 28rem;
+  font-size: 14rem;
+  font-weight: bold;
+  border-radius: 4rem;
+}
+
+.navText {
+  margin: 0 8rem;
+  font-size: 13rem;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.guideDoneButton {
+  padding: 5rem 16rem;
+  font-weight: bold;
+  color: white;
+  background-color: rgba(60, 160, 90, 0.85);
   border-radius: 4rem;
 }
 
@@ -554,9 +1030,38 @@
 }
 
 .guideItem {
-  font-size: 12rem;
+  font-size: 13rem;
   color: rgba(255, 255, 255, 0.8);
   margin-bottom: 4rem;
   padding-left: 8rem;
   border-left: 2rem solid rgba(140, 205, 255, 0.35);
+}
+
+// 连接模式后台求解：阶段、已用时间、进度条
+.solveBox {
+  margin-top: 4rem;
+  padding: 6rem 8rem;
+  font-size: 12rem;
+  color: white;
+  border-radius: 4rem;
+  background-color: rgba(83, 165, 255, 0.3);
+}
+
+.solveBar {
+  margin-top: 4rem;
+  height: 6rem;
+  border-radius: 3rem;
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.solveFill {
+  height: 6rem;
+  border-radius: 3rem;
+  background-color: rgba(83, 165, 255, 0.9);
+}
+
+.solveNote {
+  margin-top: 4rem;
+  font-size: 11rem;
+  color: rgba(255, 255, 255, 0.7);
 }

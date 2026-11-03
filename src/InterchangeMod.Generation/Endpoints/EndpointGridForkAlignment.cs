@@ -16,7 +16,10 @@ namespace InterchangeMod.Generation.Endpoints
             if(forks.Length!=8){detail="Curved grid needs eight unambiguous full-road forks.";return null;}
             foreach(var fork in forks)
             {
-                var fullEnd=fork.OrderByDescending(e=>source[e.Index].RoadWidth).First();
+                // 原路是方向与另外两段相反的那一段（驶入分叉：原路在此结束、两条窄路在此开始；驶出相反）。
+                // 不能按最宽来认：双向拆成的双幅一幅可能和直行道、集散道一样宽（游戏内 16 米 Large Road Divided）。
+                var odd=fork.GroupBy(e=>e.Start).FirstOrDefault(g=>g.Count()==1);
+                var fullEnd=odd!=null?odd.First():fork.OrderByDescending(e=>source[e.Index].RoadWidth).First();
                 var full=source[fullEnd.Index];var c=full.WorldCurve;
                 var position=fullEnd.Start?c.P0:c.P3;
                 if(full.Kind!=CloverEdgeKind.Main||position!=fork.Key)

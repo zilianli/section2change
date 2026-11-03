@@ -70,7 +70,7 @@ namespace InterchangeMod.Systems
         private readonly IInterchangeTemplate m_Turbine = new StackTemplate(turbine: true);
         private readonly IInterchangeTemplate m_SemiDirectionalT = new DirectionalTTemplate(directional: false);
         private readonly IInterchangeTemplate m_Wye = new WyeTemplate();
-        private readonly IInterchangeTemplate m_NodeOnlyTemplate = new NodeOnlyInterchangeTemplate();
+        private readonly CompactGridTemplate m_CompactGrid = new CompactGridTemplate();
 
         /// <summary>面板选的立交类型。</summary>
         /// <summary>中式快速路节点（十字或 T 型）：有地面辅路。</summary>
@@ -92,17 +92,19 @@ namespace InterchangeMod.Systems
 
         /// <summary>Y 型分向：三条路约 120° 汇于一处，三条臂互不相对（不是“主线 + 支路”）。</summary>
         private bool IsWye => setting?.InterchangeType == "Wye";
+        /// <summary>井字（紧凑定向）：两层内侧转向集散、两层外侧直行，替换和连接都用井字求解器。</summary>
+        private bool IsCompactGrid => setting?.InterchangeType == "CompactGrid";
         private bool NodeOnlyType => System.Enum.TryParse(setting?.InterchangeType,out InterchangeType type)&&EndpointTypeCatalog.Find(type)?.NodeOnly==true;
         /// <summary>有环道的类型（喇叭形、苜蓿叶）：环道半径可自动；双向被交道路在立交内拆成双幅。</summary>
         private bool HasLoops => IsTrumpet || IsCloverleaf || IsParclo || IsRoundabout;
-        private IInterchangeTemplate CurrentTemplate => NodeOnlyType ? m_NodeOnlyTemplate : IsWye ? m_Wye : IsTurbine ? m_Turbine : IsStack ? m_Stack : setting?.InterchangeType == "DirectionalT" ? m_DirectionalT
+        private IInterchangeTemplate CurrentTemplate => IsCompactGrid ? m_CompactGrid : IsWye ? m_Wye : IsTurbine ? m_Turbine : IsStack ? m_Stack : setting?.InterchangeType == "DirectionalT" ? m_DirectionalT
             : setting?.InterchangeType == "SemiDirectionalT" ? m_SemiDirectionalT : IsRoundabout ? m_Roundabout : IsParclo ? m_Parclo : IsCloverleaf ? m_Cloverleaf : IsTrumpet ? m_Trumpet : IsExpresswayT ? m_ExpresswayT : IsExpressway ? m_Expressway : IsSinglePoint ? m_SinglePoint : m_Diamond;
 
         /// <summary>主线是否在上层：中式快速路节点和单点立交的主线总是高架。</summary>
         private bool MainOnTop => IsCloverleaf || IsParclo || IsRoundabout ? !effective.CloverleafCrossOnTop : !IsTrumpet && !IsDirectionalT && !IsStack && (IsExpressway || IsSinglePoint || effective.MainOnTop);
 
         /// <summary>主线在上层、下层都能做的类型（上下层由面板选）：对准立体交叉时高度照原有道路，主线按道路等级选。</summary>
-        private bool LevelOrderFree => IsDiamond || IsCloverleaf || IsParclo || IsRoundabout;
+        private bool LevelOrderFree => IsDiamond || IsCloverleaf || IsParclo || IsRoundabout || IsCompactGrid;
 
         private RoadPrefab m_SelectedRoad;
         private ProxyAction m_RotateLeftAction;
@@ -419,6 +421,8 @@ namespace InterchangeMod.Systems
                 return Clear(inputDeps);
             }
             if (nodeMode) return UpdateNodeMode(inputDeps);
+            // 连接模式的后台求解还在收尾（刚切回替换）：几个模板有静态缓存，不能和它同时使用，等它结束再刷新预览
+            if (NodeWorkerBusy) return inputDeps;
 
             // 右键：固定时取消固定（预览重新跟随鼠标），否则退出工具
             if (cancelAction.WasPressedThisFrame())
@@ -532,7 +536,20 @@ namespace InterchangeMod.Systems
             m_LastOrigin = origin;
             m_LastYaw = yaw;
             m_HasOrigin = true;
-            return UpdatePreview(inputDeps, origin, yaw);
+            try
+            {
+                return UpdatePreview(inputDeps, origin, yaw);
+            }
+            catch (System.Exception e)
+            {
+                // 预览求解出意外异常时只记日志、在面板报错，不让异常传到游戏的系统更新里（游戏会中断）
+                Mod.log.Error(e);
+                m_HasPreview = false;
+                var failed = new PanelSnapshot();
+                failed.Errors.Add($"预览出错（{e.GetType().Name}）：已记录到日志，请换个位置或参数重试，并把日志反馈给作者");
+                snapshot = failed;
+                return Clear(inputDeps);
+            }
         }
 
         /// <summary>
@@ -1019,6 +1036,9 @@ namespace InterchangeMod.Systems
             {
                 if (warp.IsIdentity)
                     segments = CurrentTemplate.Generate(p);
+                else if (IsCompactGrid)
+                    // 井字只弯曲一次，不收紧坡度反复求解（每次都要重新求解，太慢）；坡度超限照常由下面的检查报出
+                    segments = warp.Apply(CurrentTemplate.Generate(p));
                 else
                 {
                     // 弯道：按直线生成后整体弯曲，内侧坡度超限时收紧坡度重新求解（较慢）
@@ -1050,7 +1070,8 @@ namespace InterchangeMod.Systems
             }
 
             m_RemovalFootprint = null;
-            if (errors.Count == 0)
+            // 井字正在后台求解时还没有路段（segments 为 null），不写预览定义
+            if (errors.Count == 0 && segments != null)
             {
                 TerrainHeightData terrain = m_TerrainSystem.GetHeightData();
                 EntityCommandBuffer commandBuffer = m_ToolOutputBarrier.CreateCommandBuffer();
@@ -1295,6 +1316,7 @@ namespace InterchangeMod.Systems
                 RampLength = effective.RampLength,
                 RampDivergeAngle = effective.RampDivergeAngle,
                 RightHandTraffic = !m_CityConfigurationSystem.leftHandTraffic,
+                RoadCatalog = IsCompactGrid ? m_RoadCatalog : null,
                 Legs = CurrentTemplate.LegCount == 3
                     // 定向 / 半定向 T 型的支路与主线同层（基层），层 1 是第一层跨线桥
                     ? InterchangeParams.TLegs(BranchAngle(matched), mainLevel: 0, branchLevel: IsDirectionalT ? 0 : 1)
@@ -1344,10 +1366,10 @@ namespace InterchangeMod.Systems
             // 菱形的双向主线在地面上也拆开：匝道从双向道路的中心线节点相切分出，前面一大段压在路面上
             //（游戏内 XL 双向、24 米的 Medium Road 都报叠放、形状无效）
             bool splitMain = IsDiamond && mainForm == RoadForm.TwoWay;
-            if (mainForm == RoadForm.TwoWay && (IsCloverleaf || IsParclo || IsRoundabout || IsDirectionalT || IsStack || splitMain || (matched && LevelPlanner.BandOf(p.Levels[0].Elevation) != ElevationBand.Ground))
+            if (mainForm == RoadForm.TwoWay && (IsCloverleaf || IsParclo || IsRoundabout || IsDirectionalT || IsStack || IsCompactGrid || splitMain || (matched && LevelPlanner.BandOf(p.Levels[0].Elevation) != ElevationBand.Ground))
                 && m_RoadsByName.TryGetValue(mainName, out RoadInfo external))
             {
-                bool aligned = IsCloverleaf || IsDirectionalT || IsStack || IsRoundabout || splitMain;
+                bool aligned = IsCloverleaf || IsDirectionalT || IsStack || IsCompactGrid || IsRoundabout || splitMain;
                 RoadInfo oneWay = (aligned ? RampMatcher.PickSplitOneWay(m_RoadCatalog, external) : null)
                     ?? RampMatcher.PickClosest(m_RoadCatalog, external.IsHighway, external.LanesPerDirection, oneWay: true);
                 if (oneWay != null)
@@ -1388,7 +1410,7 @@ namespace InterchangeMod.Systems
                 // 喇叭形、定向 / 半定向 T 型的支路、苜蓿叶和定向式的被交道路两幅分开接匝道，是双向道路时立交内部改用双幅，外端过渡回双向
                 // 部分苜蓿叶的被交道路保持双向（匝道在它上面接平交路口）
                 // 环岛式的被交道路也保持双向（直接接环岛）
-                if ((HasLoops || IsDirectionalT || IsStack) && !IsParclo && !IsRoundabout && crossForm == RoadForm.TwoWay && m_RoadsByName.TryGetValue(crossName, out RoadInfo branch))
+                if ((HasLoops || IsDirectionalT || IsStack || IsCompactGrid) && !IsParclo && !IsRoundabout && crossForm == RoadForm.TwoWay && m_RoadsByName.TryGetValue(crossName, out RoadInfo branch))
                 {
                     // 优先选两幅并排正好放得进双向道路宽度的单行道路（街道单行道带人行道较宽，放不下时用同车道数的公路单行道）
                     RoadInfo oneWay = RampMatcher.PickSplitOneWay(m_RoadCatalog, branch)
@@ -1432,6 +1454,36 @@ namespace InterchangeMod.Systems
                         crossForm = RoadForm.TwoWay;
                         PlanLevels(p, snapshot);
                     }
+                }
+
+                // 井字（紧凑定向）：四个方向都用双幅、相对两条同款，每幅至少 kGridMinLanes 车道。
+                // 空地摆放时主线（道路菜单里选的）不够车道就换成同类的 kGridMinLanes 车道单行道路；
+                // 被交道路没有原路时（空地摆放、只对齐一条道路）自动模式下用主线的道路；
+                // 没有原路要接回的臂不用过渡回双向
+                if (IsCompactGrid)
+                {
+                    if (!matched && mainForm == RoadForm.Dual && LanesOf(mainName) < kGridMinLanes
+                        && m_RoadsByName.TryGetValue(mainName, out RoadInfo narrow)
+                        && RampMatcher.PickClosest(m_RoadCatalog, narrow.IsHighway, kGridMinLanes, oneWay: true) is RoadInfo wider
+                        && wider.LanesPerDirection >= kGridMinLanes)
+                    {
+                        SetRoad(p, 0, 2, RoadForm.Dual, wider.Name, p.Legs[0].MedianWidth, errors);
+                        mainName = wider.Name;
+                    }
+                    if ((!matched || m_Match.RoadOnly) && !effective.ManualMode && mainForm == RoadForm.Dual)
+                    {
+                        SetRoad(p, 1, crossOther, RoadForm.Dual, mainName, p.Legs[0].MedianWidth, errors);
+                        crossName = mainName;
+                        crossForm = RoadForm.Dual;
+                    }
+                    for (int index = 0; index < p.Legs.Count; index++)
+                        if (!matched || (m_Match.RoadOnly && index % 2 == 1))
+                        {
+                            p.Legs[index].ExternalForm = null;
+                            p.Legs[index].ExternalPrefab = null;
+                            p.Legs[index].ExternalWidth = 0f;
+                        }
+                    PlanLevels(p, snapshot);
                 }
             }
 
@@ -1724,6 +1776,9 @@ namespace InterchangeMod.Systems
             RoadInfo road = RampMatcher.PickClosest(m_RoadCatalog, highway, lanes, oneWay: true);
             return road != null && road.LanesPerDirection == lanes ? road : null;
         }
+
+        /// <summary>井字每幅至少的车道数（直行、左转、右转各至少一条）。</summary>
+        private const int kGridMinLanes = 3;
 
         private int LanesOf(string roadName) => m_RoadsByName.TryGetValue(roadName, out RoadInfo info) ? info.LanesPerDirection : 0;
 

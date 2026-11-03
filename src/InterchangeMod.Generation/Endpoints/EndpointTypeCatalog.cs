@@ -50,7 +50,7 @@ namespace InterchangeMod.Generation.Endpoints
             new EndpointTypeContract(InterchangeType.SemiDirectionalT, EndpointLayout.Tee),
             new EndpointTypeContract(InterchangeType.DirectionalT, EndpointLayout.Tee),
             new EndpointTypeContract(InterchangeType.Wye, EndpointLayout.Wye),
-            new EndpointTypeContract(InterchangeType.CompactGrid, EndpointLayout.Crossroads,true),
+            new EndpointTypeContract(InterchangeType.CompactGrid, EndpointLayout.Crossroads),
         });
         public static IReadOnlyList<EndpointTypeContract> All => contracts;
         public static EndpointTypeContract? Find(InterchangeType type) => contracts.FirstOrDefault(c => c.Type == type);

@@ -12,11 +12,10 @@
 - **Replace**: pick a type, aim at an existing junction, crossing or road (or empty ground), check the preview, confirm
 - **Connect**: select open road endpoints and the whole interchange is solved and connected to them
 
-**14 interchange types**
-- Four-way: diamond, single-point, Chinese expressway node, cloverleaf, partial cloverleaf, roundabout, stack, turbine
+**13 interchange types**
+- Four-way: diamond, single-point, Chinese expressway node, cloverleaf, partial cloverleaf, roundabout, stack (standard or compact grid), turbine
 - Three-way: expressway T, trumpet, semi-directional T, directional T
 - Wye (three roads at about 120°)
-- Compact grid (connect mode only)
 
 **Features**
 - Upgrade existing junctions: matches roads, levels and angle, removes the old junction and reconnects every leg; roads under bridges with enough clearance are kept
@@ -28,11 +27,12 @@
 
 **How to use**
 1. Open the tool with the button at the top left or Shift + I
-2. Pick a type and hover a junction, a road or empty ground
-3. Left-click to pin the preview, check the panel, then Confirm
+2. Pick a type, then Replace or Connect (each Auto or Manual): Replace aims at a junction, a road or empty ground; Connect selects open road endpoints
+3. Check the preview and the panel docked at the bottom (Replace: left-click to pin it), then Confirm
 
 **Please note**
 - Placement cannot be undone (the game does not support undo) - save first if in doubt
+- Vanilla roads only: roads made with RoadBuilder or other mods and DIY asset roads are not supported (lanes, widths and heights may be read wrongly and broken road pieces may be left in your save)
 - Works best on flat ground with straight, uniform-grade roads
 - Trumpet, directional types, stack, turbine and wye support right-hand traffic only
 - Beta: report problems on GitHub with a screenshot and the mod log (turn on debug logging in the settings first)
@@ -45,26 +45,26 @@
 - **替换**：选立交类型，对准已有路口、立体交叉或道路（也可以在空地上），确认预览后放置；拆掉原路口并接回各臂
 - **连接**：点选道路的开放端点，按实际端点求解整座立交并连接起来
 
-**14 种立交**
-- 四向：菱形、单点、中式快速路节点、苜蓿叶、部分苜蓿叶、环岛、定向、涡轮
+**13 种立交**
+- 四向：菱形、单点、中式快速路节点、苜蓿叶、部分苜蓿叶、环岛、定向（标准或紧凑井字）、涡轮
 - 三向：快速路 T 型、喇叭形、半定向 T、定向 T
 - Y 型分向（三条路约 120° 汇合）
-- 井字紧凑立交（仅连接模式）
 
 **功能**
 - 平改立：对准已有路口，自动匹配道路、层高和交角，拆掉原路口并接回各臂；桥下净空够的道路保留
 - 弯道（半径 150 米以上）上整体顺着道路弯曲，坡道上按原有道路的坡度整体放置
 - 车道平衡（边缘对齐的减车道）、立柱避开下层道路、放置前检查坡度和净空
-- 连接模式：苜蓿叶、定向、涡轮、喇叭、定向 T、半定向 T、Y 型、井字和环岛，支持双向、双幅和混合道路的有界退接、端点颜色反馈和车道匹配
+- 连接模式：苜蓿叶、定向、涡轮、喇叭、定向 T、半定向 T、Y 型和环岛（定向含紧凑井字形式），支持双向、双幅和混合道路的有界退接、端点颜色反馈和车道匹配
 - 替换和连接都分自动（一指即放）和手动（可调所有参数）；中英文界面
 
 **使用方法**
 1. 点左上角按钮或按 Shift + I 打开工具
-2. 选立交类型，鼠标对准路口、道路或空地
-3. 左键固定预览，查看面板里的结果和报错，点“确认放置”；右键退出
+2. 选立交类型，再选替换或连接（各分自动 / 手动）：替换对准路口、道路或空地，连接点选道路的开放端点
+3. 查看预览和底部面板里的结果、报错（替换时左键固定预览），点“确认放置”；右键退出
 
 **注意事项**
 - 放置后不能撤销（游戏不支持撤销），必要时先存档
+- 只支持原版道路：RoadBuilder 等自制道路、资产 DIY 道路不受支持（车道、宽度、高程可能识别错误，可能在存档里留下异常路段）
 - 最好在平地、平直且坡度均匀的道路上使用；地形起伏大时请先整平
 - 立交范围内的道路类型、曲率不要突变，不支持短距离内的 S 形弯
 - 喇叭形、定向类、涡轮和 Y 型目前只支持右侧通行

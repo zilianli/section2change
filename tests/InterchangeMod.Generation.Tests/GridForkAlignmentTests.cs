@@ -41,7 +41,8 @@ public class GridForkAlignmentTests
             Assert.True(Vec3.Distance(through.Point,collector.Point)>1,"Two reduced roads must not occupy the same centreline at their common node.");
             // Endpoint course rotations remain tangent to the original full road;
             // lane alignment is encoded by curve positions, not by moving the node.
-            Assert.True(Directions.Dot(Vec3.Normalize(full.Tangent),Vec3.Normalize(through.Tangent))>.9999f);
+            // 直行道按分流式横移离开原路：起始角不超过分流楔的最大斜率 0.35（约 19°）；集散道仍与原路相切
+            Assert.True(Directions.Dot(Vec3.Normalize(full.Tangent),Vec3.Normalize(through.Tangent))>.94f);
             Assert.True(Directions.Dot(Vec3.Normalize(full.Tangent),Vec3.Normalize(collector.Tangent))>.9999f);
         }
     }
