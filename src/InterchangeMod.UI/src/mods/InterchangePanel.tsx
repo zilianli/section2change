@@ -7,6 +7,7 @@ import { RoadPicker } from "./RoadPicker";
 import { Choice, SpacingStepper, Stepper } from "./Stepper";
 import { thumbnails } from "./thumbs";
 import closeIcon from "./icons/interchange-close.svg";
+import anarchyMissingIcon from "./icons/interchange-anarchy.svg";
 import styles from "./panel.module.scss";
 import { nodeMode, nodeArm, nodeClear, nodeGrade, nodePreview, nodeRetreat, confirmNodePlacement } from "./bindings";
 
@@ -91,6 +92,8 @@ export const InterchangePanel = () => {
   const [typeTab, setTypeTab] = useState<"four" | "three" | null>(null);
   // 首页选的用法；null = 还没选（显示替换 / 连接两块）
   const [method, setMethod] = useState<Method | null>(null);
+  // 没装 Anarchy 时点灰色的无碰撞图标：显示安装提示
+  const [showAnarchyNote, setShowAnarchyNote] = useState(false);
   const anarchyOn = useValue(anarchyEnabled$);
 
   if (!state.active || !state.settings) {
@@ -102,15 +105,23 @@ export const InterchangePanel = () => {
   const t = getStrings(state.locale);
 
   // 全局按钮：浮在面板右上角外面
+  // 全局按钮：无碰撞开关（开启时标红；没装 Anarchy 时为灰色，点开显示安装说明）、使用指南、关闭
   const floatBar = (
     <div className={styles.floatBar}>
-      <Button variant="flat" selected={showGuide} className={showGuide ? styles.floatButtonActive : styles.floatButton}
-        onSelect={() => setShowGuide(!showGuide)}>{t.guide}</Button>
-      {state.anarchy && (
+      {showAnarchyNote && !state.anarchy && <div className={styles.floatNote}>{t.anarchyMissing}</div>}
+      {state.anarchy ? (
         <Button variant="flat" selected={anarchyOn} className={anarchyOn ? styles.anarchyOn : styles.anarchyOff} onSelect={toggleAnarchy}>
           <img className={styles.anarchyIcon} src="coui://uil/Colored/Anarchy.svg" />
+          <div className={styles.anarchyLabel}>{anarchyOn ? t.anarchyOnLabel : t.anarchyOffLabel}</div>
+        </Button>
+      ) : (
+        <Button variant="flat" selected={showAnarchyNote} className={styles.anarchyMissing} onSelect={() => setShowAnarchyNote(!showAnarchyNote)}>
+          <img className={styles.anarchyIconMissing} src={anarchyMissingIcon} />
+          <div className={styles.anarchyLabel}>{t.anarchyMissingLabel}</div>
         </Button>
       )}
+      <Button variant="flat" selected={showGuide} className={showGuide ? styles.floatButtonActive : styles.floatButton}
+        onSelect={() => setShowGuide(!showGuide)}>{t.guide}</Button>
       <Button variant="flat" className={styles.closeButton} onSelect={closeTool}>
         <img className={styles.closeIcon} src={closeIcon} />
       </Button>
@@ -143,14 +154,19 @@ export const InterchangePanel = () => {
     </div>
   );
 
-  // 一栏：标题 + 可滚动内容，footer 固定在栏底（确认放置、操作提示）
-  const column = (title: string, className: string, children: React.ReactNode, footer?: React.ReactNode) => (
+  // 一栏：标题 + 可滚动内容；header 固定在标题下（生成预览），footer 固定在栏底（确认放置、展开说明），按钮位置不随内容移动
+  const column = (title: string, className: string, children: React.ReactNode, footer?: React.ReactNode, header?: React.ReactNode) => (
     <div className={className}>
       <div className={styles.columnTitle}>{title}</div>
+      {header && <div className={styles.columnHeader}>{header}</div>}
       <Scrollable className={styles.columnScroll} vertical trackVisibility="scrollable">{children}</Scrollable>
-      {footer}
+      {footer && <div className={styles.columnFooter}>{footer}</div>}
     </div>
   );
+  // 用法的着重色：替换蓝、连接青
+  const methodTitleClass = (m: Method) => (m === "connect" ? styles.methodTitleConnect : styles.methodTitleReplace);
+  const methodButtonClass = (m: Method) => (m === "connect" ? styles.methodButtonConnect : styles.methodButtonReplace);
+  const guideButton = <Button variant="flat" className={styles.secondaryButton} onSelect={() => setShowGuide(true)}>{t.fullGuide}</Button>;
 
   const modeButton = (label: string, selected: boolean, disabled: boolean, onSelect: () => void) => (
     <Button variant="flat" disabled={disabled} selected={selected} className={selected ? styles.modeButtonSelected : styles.modeButton}
@@ -170,11 +186,12 @@ export const InterchangePanel = () => {
     </>
   );
 
+  // 使用前须知：要点在上，自制道路的警告单独一块，无碰撞状态在最后
   const notesList = (
     <>
-      {t.quickNotes.map((item, i) => (
-        <div key={item} className={i === t.quickNotes.length - 1 ? styles.warnings : styles.guideItem}>{item}</div>
-      ))}
+      {t.quickNotes.slice(0, -1).map((item) => <div key={item} className={styles.guideItem}>{item}</div>)}
+      <div className={styles.guideItem}>{state.anarchy ? t.anarchyTip : t.anarchyTipMissing}</div>
+      <div className={styles.warnings}>{t.quickNotes[t.quickNotes.length - 1]}</div>
       {state.anarchy && anarchyOn && <div className={styles.errors}>{t.anarchyWarning}</div>}
     </>
   );
@@ -224,25 +241,20 @@ export const InterchangePanel = () => {
     const supported = (m: Method) => typesFor(m, [...fourWayTypes, ...threeWayTypes]).map((type) => typeNameOf(t, type)).join("、");
     const methodBlock = (m: Method, details: string[]) => (
       <div className={styles.methodBlock}>
-        <div className={styles.methodTitle}>{methodName(m)}</div>
+        <div className={methodTitleClass(m)}>{methodName(m)}</div>
         <div className={styles.methodHint}>{m === "connect" ? t.modeConnectHint : t.modeReplaceHint}</div>
         <Scrollable className={styles.columnScroll} vertical trackVisibility="scrollable">
           {details.map((item) => <div key={item} className={styles.guideItem}>{item}</div>)}
           <div className={styles.note}>{`${t.supportsTypes}：${supported(m)}`}</div>
         </Scrollable>
-        <Button variant="flat" className={styles.methodButton} onSelect={() => choose(m)}>{`${t.enterMethod}${methodName(m)}`}</Button>
+        <Button variant="flat" className={methodButtonClass(m)} onSelect={() => choose(m)}>{`${t.enterMethod}${methodName(m)}`}</Button>
       </div>
     );
     return dock(topBar(t.title, null, <div className={styles.topHint}>{t.chooseMethod}</div>), (
       <>
         {methodBlock("replace", t.replaceDetails)}
         {methodBlock("connect", t.connectDetails)}
-        {column(t.quickNotesTitle, styles.notesBlock, (
-          <>
-            {notesList}
-            <Button variant="flat" className={styles.choice} onSelect={() => setShowGuide(true)}>{t.fullGuide}</Button>
-          </>
-        ))}
+        {column(t.quickNotesTitle, styles.notesBlock, notesList, guideButton)}
       </>
     ));
   }
@@ -263,12 +275,14 @@ export const InterchangePanel = () => {
     );
     return dock(topBar(`${t.title} · ${methodName(method)}`, () => setMethod(null), modeSwitch(method)), (
       <>
-        {column(methodName(method), styles.columnLeft, (
-          <>
-            <div className={styles.methodHint}>{method === "connect" ? t.modeConnectHint : t.modeReplaceHint}</div>
+        <div className={styles.columnLeft}>
+          <div className={methodTitleClass(method)}>{methodName(method)}</div>
+          <div className={styles.methodHint}>{method === "connect" ? t.modeConnectHint : t.modeReplaceHint}</div>
+          <Scrollable className={styles.columnScroll} vertical trackVisibility="scrollable">
             {(method === "connect" ? t.connectDetails : t.replaceDetails).map((item) => <div key={item} className={styles.guideItem}>{item}</div>)}
-          </>
-        ))}
+          </Scrollable>
+          <div className={styles.columnFooter}><div className={styles.infoBox}>{manualOf(method) ? t.manualHint : t.autoHint}</div></div>
+        </div>
         <div className={styles.columnMiddle}>
           <div className={styles.tabRow}>
             {tabButton("four", t.fourWay)}
@@ -287,7 +301,7 @@ export const InterchangePanel = () => {
             <div className={styles.note}>{t.thumbLegend}</div>
           </Scrollable>
         </div>
-        {column(t.quickNotesTitle, styles.columnRight, notesList)}
+        {column(t.quickNotesTitle, styles.columnRight, notesList, guideButton)}
       </>
     ));
   }
@@ -440,11 +454,15 @@ export const InterchangePanel = () => {
         <Stepper label="基层高程偏移" value={s.BaseElevation} min={-30} max={30} step={.5} unit=" m" onChange={v => setValue("BaseElevation",v)} />
         <Stepper label={compactGrid ? "相邻层高差" : "两层高差"} value={s.LevelGap} min={0} max={30} step={.5} unit=" m" onChange={v => setValue("LevelGap",v)} />
         <div className={styles.note}>层高差 0 = 自动</div>
-      </>) : <div className={styles.note}>{t.connectAutoNote}</div>}
-      <div className={styles.note}>空间不足时沿真实同路型道路向外退接，遇路口或尽头停止。白点显示新接点，虚线显示改造范围。{compactGrid ? "井字采用两层转向集散、两层外侧直行；相邻层差自动至少10米，并按实际净空增大。原路端高程由接路保留。" : roundabout ? t.roundaboutHeightNote : s.InterchangeType === "Wye" ? "Y型基层采用六端点平均高程加偏移；自动层差至少10米，并按道路结构净空增大。原路端部高差由接路过渡。" : "自动层高优先保留已有高差，不足时使用10米。"}原生检查通过后可在面板确认放置；确认前会重新检查原路是否变化。</div>
+      </>) : <div className={styles.infoBox}>{t.connectAutoNote}</div>}
+      <div className={styles.subTitle}>{t.connectHow}</div>
+      <div className={styles.guideItem}>空间不足时沿真实同路型道路向外退接，遇路口或尽头停止</div>
+      <div className={styles.guideItem}>白点显示新接点，虚线显示改造范围</div>
+      <div className={styles.guideItem}>{compactGrid ? "井字采用两层转向集散、两层外侧直行；相邻层差自动至少10米，并按实际净空增大；原路端高程由接路保留" : roundabout ? t.roundaboutHeightNote : s.InterchangeType === "Wye" ? "Y型基层采用六端点平均高程加偏移；自动层差至少10米，并按道路结构净空增大；原路端部高差由接路过渡" : "自动层高优先保留已有高差，不足时使用10米"}</div>
+      <div className={styles.guideItem}>原生检查通过后可在面板确认放置；确认前会重新检查原路是否变化</div>
     </>
   ) : !manual ? (
-    <div className={styles.note}>{t.autoNote}</div>
+    <div className={styles.infoBox}>{t.autoNote}</div>
   ) : (
     <>
       <Section title={t.match}>
@@ -755,8 +773,6 @@ export const InterchangePanel = () => {
           </div>
         );
       })}
-      <Button variant="flat" selected={showNodeDetails} className={showNodeDetails ? styles.choiceSelected : styles.choice}
-        onSelect={() => setShowNodeDetails(!showNodeDetails)}>{`${t.details} · ${showNodeDetails ? t.collapse : t.show}`}</Button>
       {showNodeDetails && (
         <div className={styles.notesBox}>
           {compactGrid && <div className={styles.note}>井字支持四方向双向、双幅或混合输入，每方向至少3车道；需精确匹配直行和两倍匝道车道数的内侧集散道。4车道通常分为直行2、左转1、右转1。</div>}
@@ -815,7 +831,6 @@ export const InterchangePanel = () => {
 
   const placementColumn = connecting && state.nodes ? (
     <>
-      <Button variant="flat" className={styles.modeButton} onSelect={nodePreview}>{state.nodes.solveStage ? t.solveRestart : t.solveStart}</Button>
       {/* 后台求解中：阶段、已用时间和进度条（按坡度逐档尝试时是真实进度；只算一次时没有可数的步数，按时间趋近满格） */}
       {state.nodes.solveStage && (
         <div className={styles.solveBox}>
@@ -860,7 +875,7 @@ export const InterchangePanel = () => {
 
   // 确认放置固定在右栏底部：连接模式等原生检查通过；替换模式左键固定预览后确认（绿）或取消固定（红）
   const placementFooter = (
-    <div className={styles.columnFooter}>
+    <>
       {connecting && state.nodes?.hasPreview && (
         <div className={styles.confirmRow}>
           <Button variant="flat" className={styles.confirmButton}
@@ -881,15 +896,18 @@ export const InterchangePanel = () => {
         </div>
       )}
       <div className={styles.hint}>{hint}</div>
-    </div>
+    </>
   );
 
   return dock(topBar(`${t.title} · ${typeName}`, back, modeSwitch(current)), (
     <>
       {column(t.colAdvanced, styles.columnLeft, leftColumn)}
       {column(typeName, styles.columnMiddle, middleColumn)}
-      {connecting && column(t.colNodes, styles.columnNodes, nodeColumn)}
-      {column(t.colPlacement, styles.columnRight, placementColumn, placementFooter)}
+      {connecting && column(t.colNodes, styles.columnNodes, nodeColumn,
+        <Button variant="flat" selected={showNodeDetails} className={showNodeDetails ? styles.secondaryButtonActive : styles.secondaryButton}
+          onSelect={() => setShowNodeDetails(!showNodeDetails)}>{`${t.details} · ${showNodeDetails ? t.collapse : t.show}`}</Button>)}
+      {column(t.colPlacement, styles.columnRight, placementColumn, placementFooter,
+        connecting && state.nodes ? <Button variant="flat" className={styles.primaryButton} onSelect={nodePreview}>{state.nodes.solveStage ? t.solveRestart : t.solveStart}</Button> : null)}
     </>
   ), connecting ? `${styles.columns} ${styles.columnsConnect}` : styles.columns, popup, pauseMask);
 };

@@ -191,11 +191,21 @@
   flex-shrink: 0;
 }
 
-.methodTitle {
+.methodTitle,
+.methodTitleReplace,
+.methodTitleConnect {
   flex-shrink: 0;
   font-size: 22rem;
   font-weight: bold;
   color: white;
+}
+
+.methodTitleReplace {
+  color: rgb(126, 196, 255);
+}
+
+.methodTitleConnect {
+  color: rgb(96, 222, 200);
 }
 
 .methodHint {
@@ -205,15 +215,70 @@
   color: rgb(140, 205, 255);
 }
 
-.methodButton {
+// 按钮分级：主要（蓝）、用法（替换蓝 / 连接青）、次要（描边）；同一行的按钮等高
+.methodButton,
+.methodButtonReplace,
+.methodButtonConnect,
+.primaryButton,
+.secondaryButton,
+.secondaryButtonActive {
   flex-shrink: 0;
-  margin-top: 6rem;
-  padding: 6rem 10rem;
+  height: 34rem;
+  padding: 0 10rem;
   font-size: 15rem;
   font-weight: bold;
   color: white;
-  background-color: rgba(83, 165, 255, 0.6);
   border-radius: 4rem;
+}
+
+.methodButton,
+.methodButtonReplace,
+.methodButtonConnect {
+  margin-top: 6rem;
+}
+
+.methodButton,
+.methodButtonReplace,
+.primaryButton {
+  background-color: rgba(64, 150, 245, 0.85);
+}
+
+.methodButtonConnect {
+  background-color: rgba(30, 160, 140, 0.9);
+}
+
+.secondaryButton,
+.secondaryButtonActive {
+  width: 100%;
+  height: 30rem;
+  font-size: 13rem;
+  font-weight: normal;
+  color: rgb(170, 215, 255);
+  border: 1rem solid rgba(140, 205, 255, 0.5);
+  background-color: rgba(140, 205, 255, 0.08);
+}
+
+.secondaryButtonActive {
+  color: white;
+  background-color: rgba(83, 165, 255, 0.45);
+}
+
+.primaryButton {
+  width: 100%;
+}
+
+// 栏内固定在标题下的一块（生成预览）
+.columnHeader {
+  flex-shrink: 0;
+  margin-bottom: 6rem;
+}
+
+// 栏内的小标题
+.subTitle {
+  margin: 8rem 0 4rem 0;
+  font-size: 13rem;
+  font-weight: bold;
+  color: rgb(140, 205, 255);
 }
 
 // 道路行：标题、左边形式（自动 / 双向 / 双幅）、右边道路下拉
@@ -307,8 +372,8 @@
 // 栏底固定区：确认放置、操作提示
 .columnFooter {
   flex-shrink: 0;
-  margin-top: 4rem;
-  padding-top: 2rem;
+  margin-top: 6rem;
+  padding-top: 6rem;
   border-top: 1rem solid rgba(255, 255, 255, 0.15);
 }
 
@@ -608,10 +673,45 @@
 
 // Anarchy（无视碰撞）开关在顶栏右边：开启时按钮标红，提醒正在无视碰撞
 .anarchyOn,
-.anarchyOff {
-  padding: 2rem 4rem;
-  margin-left: 6rem;
+.anarchyOff,
+.anarchyMissing {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: 30rem;
+  padding: 2rem 8rem 2rem 4rem;
+  margin-right: 6rem;
   border-radius: 4rem;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.anarchyMissing {
+  opacity: 0.6;
+}
+
+.anarchyLabel {
+  margin-left: 4rem;
+  font-size: 12rem;
+  color: white;
+}
+
+.anarchyIconMissing {
+  width: 20rem;
+  height: 20rem;
+}
+
+.floatNote {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 6rem;
+  width: 360rem;
+  padding: 6rem 8rem;
+  font-size: 12rem;
+  color: rgb(255, 215, 140);
+  border-radius: 4rem;
+  background-color: rgba(40, 32, 18, 0.95);
+  border: 1rem solid rgba(255, 190, 90, 0.5);
 }
 
 .anarchyOn {
@@ -721,13 +821,14 @@
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
+  justify-content: center;
 }
 
 .typeCard,
 .typeCardSelected {
-  width: 124rem;
-  margin: 0 6rem 6rem 0;
-  padding: 6rem 4rem;
+  width: 150rem;
+  margin: 0 5rem 8rem 5rem;
+  padding: 8rem 4rem;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -745,13 +846,14 @@
 }
 
 .typeThumb {
-  width: 96rem;
-  height: 96rem;
+  width: 116rem;
+  height: 116rem;
 }
 
 .typeName {
-  margin-top: 4rem;
-  font-size: 13rem;
+  margin-top: 6rem;
+  font-size: 14rem;
+  font-weight: bold;
   color: white;
   text-align: center;
 }
@@ -878,6 +980,9 @@
   padding: 2rem 10rem;
   font-size: 12rem;
   border-radius: 4rem;
+  color: rgb(255, 170, 160);
+  border: 1rem solid rgba(255, 120, 110, 0.5);
+  background-color: rgba(200, 60, 50, 0.15);
 }
 
 .armPort {
